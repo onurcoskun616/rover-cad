@@ -1,0 +1,20 @@
+node_modules/
+.env
+output/*
+!output/.gitkeep
+
+# Local Netlify folder
+.netlify
+
+# Persistent Python venv for freecad-mcp (see .env.example)
+.venv/
+
+# Local logs
+*.log
+
+# Local-only Claude Code settings (machine-specific permissions)
+.claude/settings.local.json
+
+# OS junk files
+.DS_Store
+Thumbs.db

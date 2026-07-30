@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="tr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Topkapı Okulları · Yapay Zeka Destekli CAD Yazılımı</title>
+    <link rel="stylesheet" href="style.css" />
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+          "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <header class="site-header">
+      <img src="logo.png" alt="Topkapı Okulları logosu" class="logo" />
+      <h1 class="brand-title">Topkapı Okulları</h1>
+      <p class="brand-subtitle">Yapay Zeka Destekli CAD Yazılımı</p>
+      <p class="subtitle">
+        Doğal dilde bir CAD isteği yazın, otomatik olarak oluşturulsun.
+      </p>
+    </header>
+
+    <main>
+      <section class="prompt-section">
+        <textarea
+          id="prompt-input"
+          rows="4"
+          placeholder="Örn: Çapı 30mm, yüksekliği 50mm olan bir silindir oluştur"
+        ></textarea>
+        <button id="generate-btn" type="button">Oluştur</button>
+      </section>
+
+      <section id="status-section" class="status-section" hidden>
+        <div id="spinner" class="spinner" hidden></div>
+        <p id="status-text"></p>
+      </section>
+
+      <section id="error-section" class="error-section" hidden>
+        <p id="error-text"></p>
+      </section>
+
+      <section id="result-section" class="result-section" hidden>
+        <h2>Sonuç</h2>
+        <div class="file-links">
+          <a
+            id="step-link"
+            class="file-link"
+            href="#"
+            target="_blank"
+            rel="noopener"
+            hidden
+            >STEP dosyasını indir</a
+          >
+          <a
+            id="stl-link"
+            class="file-link"
+            href="#"
+            target="_blank"
+            rel="noopener"
+            hidden
+            >STL dosyasını indir</a
+          >
+        </div>
+        <div id="viewer-container" class="viewer-container"></div>
+        <details class="code-details">
+          <summary>Oluşturulan FreeCAD kodu</summary>
+          <pre id="generated-code"></pre>
+        </details>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <p>Topkapı Okulları Yapay Zeka</p>
+    </footer>
+
+    <script type="module" src="app.js"></script>
+  </body>
+</html>
