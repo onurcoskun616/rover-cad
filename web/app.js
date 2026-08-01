@@ -127,60 +127,133 @@ async function readJson(response) {
   }
 }
 
+const POLL_INTERVAL_MS = 2500;
+const POLL_TIMEOUT_MS = 8 * 60 * 1000; // give long builds plenty of room
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * POST to an async route that returns { jobId }, then poll GET /jobs/:id with
+ * short requests until it finishes. Each request stays well under Cloudflare's
+ * 100s limit. Resolves to { ok, body } on success, or { error, body? } on any
+ * HTTP/job failure.
+ * @param {string} url
+ * @param {RequestInit} options fetch options for the POST
+ * @param {(seconds:number)=>void} [onTick] progress callback (elapsed seconds)
+ */
+async function runAsyncJob(url, options, onTick) {
+  const startResp = await fetch(url, options);
+  const startData = await readJson(startResp);
+  if (!startResp.ok) {
+    return {
+      error: startData?.error ?? `Sunucu hatası (HTTP ${startResp.status})`,
+      body: startData,
+    };
+  }
+  const jobId = startData?.jobId;
+  if (!jobId) {
+    // Not an async route (or older backend): treat the response as the result.
+    return { ok: true, body: startData };
+  }
+
+  const deadline = Date.now() + POLL_TIMEOUT_MS;
+  const startedAt = Date.now();
+  while (Date.now() < deadline) {
+    await sleep(POLL_INTERVAL_MS);
+    if (onTick) onTick(Math.round((Date.now() - startedAt) / 1000));
+
+    let statusResp;
+    let statusData;
+    try {
+      statusResp = await fetch(`${API_BASE}/jobs/${jobId}`, {
+        headers: { "x-api-key": API_KEY },
+      });
+      statusData = await readJson(statusResp);
+    } catch {
+      continue; // transient network blip; keep polling
+    }
+
+    if (statusResp.status === 404) {
+      return { error: "İş bulunamadı veya zaman aşımına uğradı." };
+    }
+    if (!statusResp.ok || !statusData) {
+      continue;
+    }
+    if (statusData.status === "pending") {
+      continue;
+    }
+    if (statusData.status === "error") {
+      return { error: statusData.error ?? "İşlem başarısız oldu." };
+    }
+    if (statusData.status === "done") {
+      const { status, ok, ...body } = statusData;
+      return { ok, body };
+    }
+  }
+  return { error: "İşlem zaman aşımına uğradı." };
+}
+
 async function handleGenerate() {
   clearError();
   resetResult();
 
-  let response;
+  let url;
+  let options;
+  let baseMessage;
+  if (mode === "text") {
+    const prompt = promptInput.value.trim();
+    if (!prompt) {
+      showError("Lütfen bir istek yazın.");
+      return;
+    }
+    baseMessage = "FreeCAD'de model oluşturuluyor";
+    url = `${API_BASE}/generate`;
+    options = {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
+      body: JSON.stringify({ prompt }),
+    };
+  } else {
+    const file = imageInput.files?.[0];
+    if (!file) {
+      showError("Lütfen bir teknik resim seçin.");
+      return;
+    }
+    baseMessage = "Teknik resim yorumlanıp model oluşturuluyor";
+    const form = new FormData();
+    form.append("image", file);
+    if (imagePromptInput.value.trim()) {
+      form.append("prompt", imagePromptInput.value.trim());
+    }
+    url = `${API_BASE}/generate-from-image`;
+    options = { method: "POST", headers: { "x-api-key": API_KEY }, body: form };
+  }
+
+  setLoading(true, `${baseMessage}, bu biraz zaman alabilir…`);
   try {
-    if (mode === "text") {
-      const prompt = promptInput.value.trim();
-      if (!prompt) {
-        showError("Lütfen bir istek yazın.");
-        return;
-      }
-      setLoading(true, "FreeCAD'de model oluşturuluyor, bu biraz zaman alabilir…");
-      response = await fetch(`${API_BASE}/generate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
-        body: JSON.stringify({ prompt }),
-      });
-    } else {
-      const file = imageInput.files?.[0];
-      if (!file) {
-        showError("Lütfen bir teknik resim seçin.");
-        return;
-      }
-      setLoading(true, "Teknik resim yorumlanıp model oluşturuluyor, bu biraz zaman alabilir…");
-      const form = new FormData();
-      form.append("image", file);
-      if (imagePromptInput.value.trim()) {
-        form.append("prompt", imagePromptInput.value.trim());
-      }
-      response = await fetch(`${API_BASE}/generate-from-image`, {
-        method: "POST",
-        headers: { "x-api-key": API_KEY },
-        body: form,
-      });
-    }
+    const result = await runAsyncJob(url, options, (seconds) => {
+      setLoading(true, `${baseMessage}… (${seconds} sn)`);
+    });
 
-    const data = await readJson(response);
-
-    if (!response.ok) {
-      showError(data?.error ?? `Sunucu hatası (HTTP ${response.status})`);
-      if (data?.generatedCode) {
+    if (result.error) {
+      showError(result.error);
+      if (result.body?.generatedCode) {
         resultSection.hidden = false;
-        generatedCodeEl.textContent = data.generatedCode;
+        generatedCodeEl.textContent = result.body.generatedCode;
       }
       return;
     }
-
-    if (!data) {
-      showError("Sunucudan beklenmeyen bir yanıt alındı.");
+    if (!result.ok) {
+      showError(result.body?.error ?? "Model oluşturulamadı.");
+      if (result.body?.generatedCode) {
+        resultSection.hidden = false;
+        generatedCodeEl.textContent = result.body.generatedCode;
+      }
       return;
     }
-
-    showResult(data);
+    showResult(result.body);
   } catch (err) {
     showError(`Sunucuya bağlanılamadı: ${err.message}`);
   } finally {
@@ -227,30 +300,36 @@ async function handlePdf() {
   const original = pdfBtn.textContent;
   pdfBtn.textContent = "PDF oluşturuluyor…";
   try {
-    const response = await fetch(`${API_BASE}/generate-pdf`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
-      body: JSON.stringify({
-        stepPath: lastStepPath,
-        code: lastGeneratedCode,
-        bbox: lastBbox,
-      }),
-    });
-    const data = await readJson(response);
-    if (!response.ok || !data?.pdfUrl) {
-      pdfBtn.textContent = data?.error ?? "PDF oluşturulamadı";
+    const result = await runAsyncJob(
+      `${API_BASE}/generate-pdf`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
+        body: JSON.stringify({
+          stepPath: lastStepPath,
+          code: lastGeneratedCode,
+          bbox: lastBbox,
+        }),
+      },
+      (seconds) => {
+        pdfBtn.textContent = `PDF oluşturuluyor… (${seconds} sn)`;
+      },
+    );
+
+    if (result.error || !result.ok || !result.body?.pdfUrl) {
+      pdfBtn.textContent = result.error ?? result.body?.error ?? "PDF oluşturulamadı";
       return;
     }
-    pdfLink.href = data.pdfUrl;
+    pdfLink.href = result.body.pdfUrl;
     pdfLink.hidden = false;
     pdfBtn.hidden = true;
   } catch (err) {
     pdfBtn.textContent = `Hata: ${err.message}`;
   } finally {
     pdfBtn.disabled = false;
-    if (!pdfLink.hidden) return;
-    // Restore the label if we didn't succeed (unless we set an error message).
-    if (pdfBtn.textContent === "PDF oluşturuluyor…") pdfBtn.textContent = original;
+    if (pdfLink.hidden && pdfBtn.textContent.startsWith("PDF oluşturuluyor…")) {
+      pdfBtn.textContent = original;
+    }
   }
 }
 
@@ -268,25 +347,28 @@ async function handleCam() {
   setCamStatus("CNC G-code üretiliyor…", true);
 
   try {
-    const response = await fetch(`${API_BASE}/generate-cam`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
-      body: JSON.stringify({ stepPath: lastStepPath }),
-    });
-    const data = await readJson(response);
+    const result = await runAsyncJob(
+      `${API_BASE}/generate-cam`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
+        body: JSON.stringify({ stepPath: lastStepPath }),
+      },
+      (seconds) => setCamStatus(`CNC G-code üretiliyor… (${seconds} sn)`, true),
+    );
 
-    if (!response.ok) {
-      setCamStatus(data?.error ?? `Sunucu hatası (HTTP ${response.status})`, false);
+    if (result.error || !result.ok) {
+      setCamStatus(result.error ?? result.body?.error ?? "İşlem başarısız.", false);
       return;
     }
-    if (data?.complex) {
+    if (result.body?.complex) {
       // Complex part → start the assistant question flow.
       await startCamAssistant();
       return;
     }
     setCamStatus("G-code hazır.", false);
-    if (data?.gcodeUrl) {
-      gcodeLink.href = data.gcodeUrl;
+    if (result.body?.gcodeUrl) {
+      gcodeLink.href = result.body.gcodeUrl;
       gcodeLink.hidden = false;
     }
   } catch (err) {
@@ -419,18 +501,22 @@ async function handleCamConfirm() {
   camReviseBtn.disabled = true;
   setCamStatus("Plan onaylandı, G-code üretiliyor…", true);
   try {
-    const response = await fetch(`${API_BASE}/cam-confirm`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
-      body: JSON.stringify({ stepPath: lastStepPath, answers: camAnswers, plan: camPlan }),
-    });
-    const data = await readJson(response);
-    if (!response.ok || !data?.gcodeUrl) {
-      setCamStatus(data?.error ?? "G-code üretilemedi.", false);
+    const result = await runAsyncJob(
+      `${API_BASE}/cam-confirm`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
+        body: JSON.stringify({ stepPath: lastStepPath, answers: camAnswers, plan: camPlan }),
+      },
+      (seconds) => setCamStatus(`Plan onaylandı, G-code üretiliyor… (${seconds} sn)`, true),
+    );
+
+    if (result.error || !result.ok || !result.body?.gcodeUrl) {
+      setCamStatus(result.error ?? result.body?.error ?? "G-code üretilemedi.", false);
       return;
     }
     setCamStatus("G-code hazır.", false);
-    gcodeLink.href = data.gcodeUrl;
+    gcodeLink.href = result.body.gcodeUrl;
     gcodeLink.hidden = false;
   } catch (err) {
     setCamStatus(`Sunucuya bağlanılamadı: ${err.message}`, false);

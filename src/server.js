@@ -7,6 +7,7 @@ import generateRouter from "./routes/generate.js";
 import generateFromImageRouter from "./routes/generateFromImage.js";
 import generateCamRouter from "./routes/generateCam.js";
 import generatePdfRouter from "./routes/generatePdf.js";
+import jobsRouter from "./routes/jobs.js";
 import camAssistantRouter from "./routes/camAssistant.js";
 import { callFreecadTool, disconnectFreecad } from "./services/freecadMcpClient.js";
 
@@ -28,6 +29,8 @@ app.use("/generate", generateRouter);
 app.use("/generate-from-image", generateFromImageRouter);
 app.use("/generate-cam", generateCamRouter);
 app.use("/generate-pdf", generatePdfRouter);
+// Poll async job status started by the routes above.
+app.use("/jobs", jobsRouter);
 // Serves generated STEP/STL/PDF/G-code files so the frontend can link to and
 // preview them. Registered before the "/"-mounted CAM assistant router so these
 // public downloads are never intercepted.
