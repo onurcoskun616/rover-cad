@@ -16,4 +16,5 @@ Rules:
 - Base the plan on the given material, axis count and workholding. For curved/complex surfaces include appropriate roughing and finishing passes (e.g. 3D surface/adaptive roughing then a ball-endmill finishing pass). Order operations sensibly (roughing before finishing, drilling/holes, then contour last, etc.).
 - Choose realistic tools and reference them by diameter and type. Keep the step count reasonable (typically 2-6 steps).
 - All text must be in Turkish and ASCII-only (no accented characters).
+- If a [DIS_ISLEME] block is present, the part has metric threads. Include the drilling step(s) at EXACTLY the pilot diameters listed there, and add the stated threading operation (tapping = drill only, the thread is tapped afterwards; thread milling = drill the pilot then a helical thread-milling pass). State the pilot diameter in the relevant step description.
 - If a previous plan and a change request are provided, return a REVISED full plan that incorporates the requested change; keep everything else consistent.

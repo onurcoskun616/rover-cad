@@ -28,6 +28,7 @@ Rules:
     except Exception:
         from PathScripts.post import grbl_post
   Collect the job's operations (job.Operations.Group) and call grbl_post.export(postlist, OUTPUT_PATH, '--no-show-editor').
+- If a [DIS_ISLEME] block is present, the part has metric threads: create Drilling operations whose tool/hole diameter EXACTLY matches each listed pilot diameter, then honour the stated method — tapping means drill the pilot only (the thread is cut by a tap afterwards; GRBL cannot rigid-tap), thread milling means drill the pilot then add a helical thread-milling operation for each hole. Use the exact pilot diameters given; do not round or guess.
 - NEVER pass '--help' (or any argparse help flag) to a post-processor: it calls sys.exit and kills FreeCAD.
 - Use EXACTLY the STEP path and OUTPUT path given to you; do not invent other paths.
 - End the script by printing: print("GCODE_PATH=" + <the output path>)

@@ -49,6 +49,7 @@ let mode = "text"; // "text" | "image"
 let lastStepPath = null;
 let lastGeneratedCode = null;
 let lastBbox = null;
+let lastPrompt = "";
 let camAnswers = null;
 let camPlan = null;
 
@@ -98,6 +99,7 @@ function resetResult() {
   pdfBtn.hidden = true;
   lastGeneratedCode = null;
   lastBbox = null;
+  lastPrompt = "";
   generatedCodeEl.textContent = "";
   camSection.hidden = true;
   camStatus.hidden = true;
@@ -209,6 +211,7 @@ async function handleGenerate() {
       return;
     }
     baseMessage = "FreeCAD'de model oluşturuluyor";
+    lastPrompt = prompt;
     url = `${API_BASE}/generate`;
     options = {
       method: "POST",
@@ -222,10 +225,11 @@ async function handleGenerate() {
       return;
     }
     baseMessage = "Teknik resim yorumlanıp model oluşturuluyor";
+    lastPrompt = imagePromptInput.value.trim();
     const form = new FormData();
     form.append("image", file);
-    if (imagePromptInput.value.trim()) {
-      form.append("prompt", imagePromptInput.value.trim());
+    if (lastPrompt) {
+      form.append("prompt", lastPrompt);
     }
     url = `${API_BASE}/generate-from-image`;
     options = { method: "POST", headers: { "x-api-key": API_KEY }, body: form };
@@ -352,7 +356,7 @@ async function handleCam() {
       {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
-        body: JSON.stringify({ stepPath: lastStepPath }),
+        body: JSON.stringify({ stepPath: lastStepPath, prompt: lastPrompt }),
       },
       (seconds) => setCamStatus(`CNC G-code üretiliyor… (${seconds} sn)`, true),
     );
@@ -384,7 +388,7 @@ async function startCamAssistant() {
     const response = await fetch(`${API_BASE}/cam-questions`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
-      body: JSON.stringify({ stepPath: lastStepPath }),
+      body: JSON.stringify({ stepPath: lastStepPath, prompt: lastPrompt }),
     });
     const data = await readJson(response);
     if (!response.ok || !Array.isArray(data?.questions) || data.questions.length === 0) {
@@ -458,7 +462,7 @@ function collectCamAnswers() {
 }
 
 async function requestCamPlan(changeRequest) {
-  const body = { stepPath: lastStepPath, answers: camAnswers };
+  const body = { stepPath: lastStepPath, answers: camAnswers, prompt: lastPrompt };
   if (changeRequest && camPlan) {
     body.previousPlan = camPlan;
     body.changeRequest = changeRequest;
@@ -506,7 +510,12 @@ async function handleCamConfirm() {
       {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
-        body: JSON.stringify({ stepPath: lastStepPath, answers: camAnswers, plan: camPlan }),
+        body: JSON.stringify({
+          stepPath: lastStepPath,
+          answers: camAnswers,
+          plan: camPlan,
+          prompt: lastPrompt,
+        }),
       },
       (seconds) => setCamStatus(`Plan onaylandı, G-code üretiliyor… (${seconds} sn)`, true),
     );

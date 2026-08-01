@@ -33,7 +33,11 @@ router.post("/cam-questions", apiKeyAuth, async (req, res, next) => {
   try {
     const stepPath = requireStepPath(req, res);
     if (!stepPath) return;
-    const questions = await generateCamQuestions(stepPath);
+    const { prompt } = req.body ?? {};
+    const questions = await generateCamQuestions(
+      stepPath,
+      typeof prompt === "string" ? prompt : "",
+    );
     res.json({ questions });
   } catch (err) {
     next(err);
@@ -45,10 +49,11 @@ router.post("/cam-plan", apiKeyAuth, async (req, res, next) => {
   try {
     const stepPath = requireStepPath(req, res);
     if (!stepPath) return;
-    const { answers, previousPlan, changeRequest } = req.body ?? {};
+    const { answers, previousPlan, changeRequest, prompt } = req.body ?? {};
     const plan = await generateCamPlan(stepPath, answers ?? {}, {
       previousPlan,
       changeRequest,
+      context: typeof prompt === "string" ? prompt : "",
     });
     res.json({ plan });
   } catch (err) {
@@ -62,11 +67,12 @@ router.post("/cam-plan", apiKeyAuth, async (req, res, next) => {
 router.post("/cam-confirm", apiKeyAuth, (req, res) => {
   const stepPath = requireStepPath(req, res);
   if (!stepPath) return;
-  const { answers, plan } = req.body ?? {};
+  const { answers, plan, prompt } = req.body ?? {};
   if (!plan || typeof plan !== "object") {
     return res.status(400).json({ error: "plan is required" });
   }
 
+  const context = typeof prompt === "string" ? prompt : "";
   const proto = req.protocol;
   const host = req.get("host");
   const jobId = createJob();
@@ -74,7 +80,12 @@ router.post("/cam-confirm", apiKeyAuth, (req, res) => {
   runJob(
     jobId,
     async () => {
-      const result = await generateCamGcodeFromPlan(stepPath, answers ?? {}, plan);
+      const result = await generateCamGcodeFromPlan(
+        stepPath,
+        answers ?? {},
+        plan,
+        context,
+      );
       return {
         ok: true,
         body: {

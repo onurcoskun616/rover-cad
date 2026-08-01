@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { callFreecadTool, extractResultText } from "./freecadMcpClient.js";
 import { config } from "../config.js";
+import { detectThreads } from "./threadSpec.js";
 
 // Fixed machining parameters. These are conservative aluminium settings for a
 // 6mm flat endmill; exposing them to the user is a future step (HANDOFF #10).
@@ -247,22 +248,40 @@ function gcodeGenPy(stepPath, gcodePath) {
 }
 
 /**
- * Generate GRBL G-code for a simple part. Analyses first; complex parts are
- * refused with a friendly message instead of producing bad toolpaths.
+ * Generate GRBL G-code for a simple part. Threaded/fastener features (from the
+ * prompt) and non-simple geometry route to the CAM assistant instead of getting
+ * naive toolpaths.
  * @param {string} stepPath basename or path of a STEP file in the output dir
+ * @param {string} [context] the original prompt / description, scanned for
+ *   metric-thread and fastener keywords (M6, somun, civata, vida, ...)
  * @returns {Promise<{complex: boolean, message?: string, gcodePath?: string}>}
  */
-export async function generateGcode(stepPath) {
+export async function generateGcode(stepPath, context = "") {
   const abs = resolveStepPath(stepPath);
   if (!fs.existsSync(abs)) {
     throw new Error("STEP dosyasi bulunamadi: " + path.basename(abs));
+  }
+
+  // Threads/fasteners are never a simple drill+profile job: they need a pilot
+  // hole sized from the metric table plus tapping or thread milling. Force the
+  // assistant flow so those decisions are made explicitly.
+  const threads = detectThreads(context);
+  if (threads.hasThread) {
+    const sizeList = threads.sizes.map((s) => `M${s}`).join(", ");
+    return {
+      complex: true,
+      message:
+        "Disli/baglanti elemani ozelligi tespit edildi" +
+        (sizeList ? ` (${sizeList})` : "") +
+        "; CAM asistani ile pilot delik capi ve dis yontemi belirlenecek.",
+    };
   }
 
   const analysis = await analyzeStepGeometry(abs);
   if (!analysis.simple) {
     return {
       complex: true,
-      message: "Bu parca karmasik, CAM asistani yakinda eklenecek.",
+      message: "Bu parca karmasik; CAM asistani ile devam edin.",
     };
   }
 

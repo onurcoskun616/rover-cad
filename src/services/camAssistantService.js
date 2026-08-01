@@ -5,6 +5,12 @@ import { runClaudeCli, stripCodeFence } from "./claudeCli.js";
 import { callFreecadTool, extractResultText } from "./freecadMcpClient.js";
 import { config } from "../config.js";
 import { resolveStepPath, describeStepGeometry } from "./camService.js";
+import {
+  detectThreads,
+  detectThreadMethod,
+  threadGuidanceBlock,
+  THREAD_METHOD_QUESTION,
+} from "./threadSpec.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const promptFile = (name) => path.join(__dirname, "..", "prompts", name);
@@ -72,28 +78,50 @@ function geomBlock(geometry) {
 }
 
 /**
- * Produce the (max 5) questions needed before planning machining of a part.
+ * Produce the (max 5) questions needed before planning machining of a part. When
+ * threads/fasteners are detected in the prompt, the tap-vs-thread-milling
+ * question is added deterministically so it is always offered.
  * @param {string} stepPath basename/path of a STEP file in the output dir
+ * @param {string} [context] original prompt/description, scanned for threads
  * @returns {Promise<Array<{question: string, options: string[]}>>}
  */
-export async function generateCamQuestions(stepPath) {
+export async function generateCamQuestions(stepPath, context = "") {
   const geometry = await describeStepGeometry(stepPath);
-  const input =
-    geomBlock(geometry) +
-    "\n[GOREV]: Bu parcanin islenmesi icin gereken sorulari uret.";
+  const threads = detectThreads(context);
 
-  return runClaudeJson(input, QUESTIONS_PROMPT, (parsed) => {
+  let input = geomBlock(geometry);
+  if (threads.hasThread) {
+    // We add the threading-method question ourselves, so tell the model not to.
+    input +=
+      "\n[NOT]: Bu parcada metrik dis tespit edildi; dis yontemi (tap/frezeleme) sorusunu SEN SORMA.";
+  }
+  input += "\n[GOREV]: Bu parcanin islenmesi icin gereken sorulari uret.";
+
+  const questions = await runClaudeJson(input, QUESTIONS_PROMPT, (parsed) => {
     if (!Array.isArray(parsed)) throw new Error("Sorular bir dizi olmali");
-    const questions = parsed
+    const list = parsed
       .filter((q) => q && typeof q.question === "string")
       .slice(0, 5)
       .map((q) => ({
         question: q.question,
         options: Array.isArray(q.options) ? q.options.map(String) : [],
       }));
-    if (questions.length === 0) throw new Error("Gecerli soru uretilemedi");
-    return questions;
+    if (list.length === 0) throw new Error("Gecerli soru uretilemedi");
+    return list;
   });
+
+  if (threads.hasThread) {
+    const already = questions.some((q) =>
+      /tap|kılavuz|klavuz|frez|thread/i.test(q.question),
+    );
+    if (!already) {
+      // Keep the total at <= 5 while guaranteeing the threading question.
+      if (questions.length >= 5) questions.length = 4;
+      questions.push({ ...THREAD_METHOD_QUESTION });
+    }
+  }
+
+  return questions;
 }
 
 /**
@@ -108,6 +136,13 @@ export async function generateCamPlan(stepPath, answers, opts = {}) {
   let input =
     geomBlock(geometry) +
     `\n[CEVAPLAR]: ${JSON.stringify(answers ?? {})}`;
+
+  // Inject computed pilot-hole diameters so the plan mentions the correct sizes.
+  const threads = detectThreads(opts.context ?? "");
+  if (threads.hasThread) {
+    input += threadGuidanceBlock(threads.sizes, detectThreadMethod(answers));
+  }
+
   if (opts.previousPlan && opts.changeRequest) {
     input +=
       `\n[ONCEKI_PLAN]: ${JSON.stringify(opts.previousPlan)}` +
@@ -161,7 +196,7 @@ const GCODE_ATTEMPTS = 3;
  * @param {object} plan approved plan object
  * @returns {Promise<{gcodePath: string}>}
  */
-export async function generateCamGcodeFromPlan(stepPath, answers, plan) {
+export async function generateCamGcodeFromPlan(stepPath, answers, plan, context = "") {
   const abs = resolveStepPath(stepPath);
   if (!fs.existsSync(abs)) {
     throw new Error("STEP dosyasi bulunamadi: " + path.basename(abs));
@@ -175,12 +210,20 @@ export async function generateCamGcodeFromPlan(stepPath, answers, plan) {
     // not present; fine
   }
 
+  // Compute pilot diameters from the metric thread table and tell the code
+  // generator exactly what to drill and which threading operation to add.
+  const threads = detectThreads(context);
+  const threadGuidance = threads.hasThread
+    ? threadGuidanceBlock(threads.sizes, detectThreadMethod(answers))
+    : "";
+
   const baseInput =
     `[STEP_PATH]: ${abs}` +
     `\n[GCODE_OUTPUT_PATH]: ${gcodePath}` +
     `\n${geomBlock(geometry)}` +
     `\n[CEVAPLAR]: ${JSON.stringify(answers ?? {})}` +
     `\n[ONAYLANAN_PLAN]: ${JSON.stringify(plan)}` +
+    threadGuidance +
     "\n[GOREV]: Bu plani FreeCAD Path (CAM) koduna cevir ve GRBL G-code olarak yukaridaki cikti yoluna yaz.";
 
   let lastError = "Bilinmeyen hata";
