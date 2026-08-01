@@ -117,6 +117,18 @@
         </div>
         <div id="viewer-container" class="viewer-container"></div>
 
+        <div id="revise-section" class="revise-section" hidden>
+          <label for="revise-input" class="revise-label"
+            >Tasarımda değişiklik iste</label
+          >
+          <textarea
+            id="revise-input"
+            rows="2"
+            placeholder="örn: yüksekliği 100mm yap · ortasına 12mm delik ekle · kenarları yuvarla"
+          ></textarea>
+          <button id="revise-btn" type="button">Değişikliği Uygula</button>
+        </div>
+
         <div id="cam-section" class="cam-section" hidden>
           <button id="cam-btn" type="button">CNC G-code Üret</button>
           <div id="cam-status" class="status-section" hidden>

@@ -63,6 +63,30 @@ export async function promptToFreecadCode(prompt, correction) {
 }
 
 /**
+ * Revise an existing design. Feeds the current FreeCAD Python plus a change
+ * request back to the model and asks for the full updated code, preserving the
+ * parts the user didn't ask to change. Used for iterative editing after a model
+ * has been created.
+ * @param {string} previousCode the current design's FreeCAD Python
+ * @param {string} instruction the user's change request
+ * @param {string} [basePrompt] the original request, for context
+ */
+export async function promptToFreecadCodeRevision(previousCode, instruction, basePrompt) {
+  const input =
+    (basePrompt ? `[ORIJINAL_ISTEK]: ${basePrompt}\n\n` : "") +
+    `[MEVCUT_KOD]:\n${previousCode}\n\n` +
+    `[DEGISIKLIK_ISTEGI]: ${instruction}\n\n` +
+    "[GOREV]: Yukaridaki mevcut tasarimi degisiklik istegine gore GUNCELLE. " +
+    "Degistirilmeyen kisimlari oldugu gibi koru. Hicbir soru sorma, hicbir aciklama yazma. " +
+    "SADECE guncellenmis tam Python kodunu dondur.";
+  const raw = await runClaudeCli(input, {
+    systemPromptFile: TEXT_PROMPT_FILE,
+    allowRead: false,
+  });
+  return validatePython(raw);
+}
+
+/**
  * Technical-drawing image -> FreeCAD Python. Makes a single CLI call with the
  * Read tool enabled so the model can open the drawing.
  * @param {string} imagePath absolute path to the uploaded image

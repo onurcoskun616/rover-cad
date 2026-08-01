@@ -6,6 +6,7 @@ import healthRouter from "./routes/health.js";
 import generateRouter from "./routes/generate.js";
 import generateFromImageRouter from "./routes/generateFromImage.js";
 import generateCamRouter from "./routes/generateCam.js";
+import reviseRouter from "./routes/revise.js";
 import generatePdfRouter from "./routes/generatePdf.js";
 import jobsRouter from "./routes/jobs.js";
 import camAssistantRouter from "./routes/camAssistant.js";
@@ -28,6 +29,7 @@ app.use("/health", healthRouter);
 app.use("/generate", generateRouter);
 app.use("/generate-from-image", generateFromImageRouter);
 app.use("/generate-cam", generateCamRouter);
+app.use("/revise", reviseRouter);
 app.use("/generate-pdf", generatePdfRouter);
 // Poll async job status started by the routes above.
 app.use("/jobs", jobsRouter);

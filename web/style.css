@@ -249,6 +249,35 @@ button:disabled {
   align-self: flex-start;
 }
 
+.revise-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 1rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) - 4px);
+}
+
+.revise-label {
+  font-weight: 600;
+}
+
+.revise-section textarea {
+  width: 100%;
+  font: inherit;
+  padding: 0.5rem 0.6rem;
+  border-radius: calc(var(--radius) - 6px);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  resize: vertical;
+}
+
+.revise-section button {
+  align-self: flex-start;
+}
+
 .cam-assistant {
   display: flex;
   flex-direction: column;

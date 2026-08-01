@@ -25,6 +25,9 @@ const stepLink = document.getElementById("step-link");
 const stlLink = document.getElementById("stl-link");
 const pdfLink = document.getElementById("pdf-link");
 const pdfBtn = document.getElementById("pdf-btn");
+const reviseSection = document.getElementById("revise-section");
+const reviseInput = document.getElementById("revise-input");
+const reviseBtn = document.getElementById("revise-btn");
 const viewerContainer = document.getElementById("viewer-container");
 const generatedCodeEl = document.getElementById("generated-code");
 const camSection = document.getElementById("cam-section");
@@ -97,6 +100,8 @@ function resetResult() {
   stlLink.hidden = true;
   pdfLink.hidden = true;
   pdfBtn.hidden = true;
+  reviseSection.hidden = true;
+  reviseInput.value = "";
   lastGeneratedCode = null;
   lastBbox = null;
   lastPrompt = "";
@@ -289,12 +294,58 @@ function showResult(data) {
   lastBbox = data.bbox ?? null;
   // The PDF is generated on demand to keep /generate fast.
   pdfBtn.hidden = false;
+  // Allow iterative editing once we have code to revise.
+  reviseSection.hidden = !lastGeneratedCode;
 
   lastStepPath = data.stepPath ?? null;
   // Offer CAM for any part with an exported STEP: simple parts get automatic
   // G-code, complex parts fall through to the assistant flow.
   if (lastStepPath) {
     camSection.hidden = false;
+  }
+}
+
+async function handleRevise() {
+  const instruction = reviseInput.value.trim();
+  if (!instruction) return;
+  if (!lastGeneratedCode) {
+    showError("Önce bir model oluşturun.");
+    return;
+  }
+  clearError();
+  const previousCode = lastGeneratedCode;
+  const base = lastPrompt;
+  reviseBtn.disabled = true;
+  setLoading(true, "Tasarım güncelleniyor, bu biraz zaman alabilir…");
+  try {
+    const result = await runAsyncJob(
+      `${API_BASE}/revise`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
+        body: JSON.stringify({ prompt: instruction, previousCode, basePrompt: base }),
+      },
+      (seconds) => setLoading(true, `Tasarım güncelleniyor… (${seconds} sn)`),
+    );
+
+    if (result.error || !result.ok) {
+      showError(result.error ?? result.body?.error ?? "Tasarım güncellenemedi.");
+      if (result.body?.generatedCode) {
+        resultSection.hidden = false;
+        generatedCodeEl.textContent = result.body.generatedCode;
+      }
+      return;
+    }
+    showResult(result.body);
+    // Fold the change into the prompt context so later CAM thread detection and
+    // further revisions keep the full intent.
+    lastPrompt = base ? `${base} ; ${instruction}` : instruction;
+    reviseInput.value = "";
+  } catch (err) {
+    showError(`Sunucuya bağlanılamadı: ${err.message}`);
+  } finally {
+    setLoading(false);
+    reviseBtn.disabled = false;
   }
 }
 
@@ -548,6 +599,7 @@ async function loadStlPreview(stlUrl) {
 }
 
 generateBtn.addEventListener("click", handleGenerate);
+reviseBtn.addEventListener("click", handleRevise);
 pdfBtn.addEventListener("click", handlePdf);
 camBtn.addEventListener("click", handleCam);
 camPlanBtn.addEventListener("click", handleCamPlan);
