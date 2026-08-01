@@ -7,7 +7,6 @@ import multer from "multer";
 import { apiKeyAuth } from "./apiKeyAuth.js";
 import { promptToFreecadCodeFromImage } from "../services/promptToCodeService.js";
 import { runBuildPipeline } from "../services/buildPipeline.js";
-import { analyzeStepGeometry } from "../services/camService.js";
 
 function fileUrl(req, filePath) {
   if (!filePath) return null;
@@ -62,22 +61,14 @@ router.post("/", upload.single("image"), async (req, res, next) => {
       });
     }
 
-    let camSimple = false;
-    try {
-      const analysis = await analyzeStepGeometry(result.stepPath);
-      camSimple = analysis.simple;
-    } catch {
-      camSimple = false;
-    }
-
+    // CAM eligibility and the technical-drawing PDF are both produced on demand
+    // (/generate-cam, /generate-pdf), so no extra FreeCAD round-trip here.
     res.json({
       stepPath: result.stepPath,
       stlPath: result.stlPath,
-      pdfPath: result.pdfPath,
       stepUrl: fileUrl(req, result.stepPath),
       stlUrl: fileUrl(req, result.stlPath),
-      pdfUrl: fileUrl(req, result.pdfPath),
-      camSimple,
+      bbox: result.bbox,
       warning: result.warning,
       generatedCode: result.generatedCode,
     });

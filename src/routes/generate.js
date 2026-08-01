@@ -3,7 +3,6 @@ import { Router } from "express";
 import { apiKeyAuth } from "./apiKeyAuth.js";
 import { promptToFreecadCode } from "../services/promptToCodeService.js";
 import { runBuildPipeline } from "../services/buildPipeline.js";
-import { analyzeStepGeometry } from "../services/camService.js";
 
 function fileUrl(req, filePath) {
   if (!filePath) return null;
@@ -37,23 +36,16 @@ router.post("/", async (req, res, next) => {
       });
     }
 
-    // Decide whether the CAM button should be offered for this part.
-    let camSimple = false;
-    try {
-      const analysis = await analyzeStepGeometry(result.stepPath);
-      camSimple = analysis.simple;
-    } catch {
-      camSimple = false;
-    }
-
+    // The CAM button is offered for any exported part; whether it's simple or
+    // complex is decided on demand by /generate-cam, so we no longer spend a
+    // FreeCAD round-trip analysing geometry here. The technical drawing PDF is
+    // likewise produced on demand via /generate-pdf.
     res.json({
       stepPath: result.stepPath,
       stlPath: result.stlPath,
-      pdfPath: result.pdfPath,
       stepUrl: fileUrl(req, result.stepPath),
       stlUrl: fileUrl(req, result.stlPath),
-      pdfUrl: fileUrl(req, result.pdfPath),
-      camSimple,
+      bbox: result.bbox,
       warning: result.warning,
       generatedCode: result.generatedCode,
     });

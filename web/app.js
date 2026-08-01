@@ -24,6 +24,7 @@ const warningText = document.getElementById("warning-text");
 const stepLink = document.getElementById("step-link");
 const stlLink = document.getElementById("stl-link");
 const pdfLink = document.getElementById("pdf-link");
+const pdfBtn = document.getElementById("pdf-btn");
 const viewerContainer = document.getElementById("viewer-container");
 const generatedCodeEl = document.getElementById("generated-code");
 const camSection = document.getElementById("cam-section");
@@ -46,6 +47,8 @@ const camReviseSubmit = document.getElementById("cam-revise-submit");
 let viewer = null;
 let mode = "text"; // "text" | "image"
 let lastStepPath = null;
+let lastGeneratedCode = null;
+let lastBbox = null;
 let camAnswers = null;
 let camPlan = null;
 
@@ -92,6 +95,9 @@ function resetResult() {
   stepLink.hidden = true;
   stlLink.hidden = true;
   pdfLink.hidden = true;
+  pdfBtn.hidden = true;
+  lastGeneratedCode = null;
+  lastBbox = null;
   generatedCodeEl.textContent = "";
   camSection.hidden = true;
   camStatus.hidden = true;
@@ -198,19 +204,53 @@ function showResult(data) {
     stlLink.hidden = false;
     loadStlPreview(data.stlUrl);
   }
-  if (data.pdfUrl) {
-    pdfLink.href = data.pdfUrl;
-    pdfLink.hidden = false;
-  }
   if (data.generatedCode) {
     generatedCodeEl.textContent = data.generatedCode;
   }
+
+  lastGeneratedCode = data.generatedCode ?? null;
+  lastBbox = data.bbox ?? null;
+  // The PDF is generated on demand to keep /generate fast.
+  pdfBtn.hidden = false;
 
   lastStepPath = data.stepPath ?? null;
   // Offer CAM for any part with an exported STEP: simple parts get automatic
   // G-code, complex parts fall through to the assistant flow.
   if (lastStepPath) {
     camSection.hidden = false;
+  }
+}
+
+async function handlePdf() {
+  if (!lastStepPath) return;
+  pdfBtn.disabled = true;
+  const original = pdfBtn.textContent;
+  pdfBtn.textContent = "PDF oluşturuluyor…";
+  try {
+    const response = await fetch(`${API_BASE}/generate-pdf`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
+      body: JSON.stringify({
+        stepPath: lastStepPath,
+        code: lastGeneratedCode,
+        bbox: lastBbox,
+      }),
+    });
+    const data = await readJson(response);
+    if (!response.ok || !data?.pdfUrl) {
+      pdfBtn.textContent = data?.error ?? "PDF oluşturulamadı";
+      return;
+    }
+    pdfLink.href = data.pdfUrl;
+    pdfLink.hidden = false;
+    pdfBtn.hidden = true;
+  } catch (err) {
+    pdfBtn.textContent = `Hata: ${err.message}`;
+  } finally {
+    pdfBtn.disabled = false;
+    if (!pdfLink.hidden) return;
+    // Restore the label if we didn't succeed (unless we set an error message).
+    if (pdfBtn.textContent === "PDF oluşturuluyor…") pdfBtn.textContent = original;
   }
 }
 
@@ -413,6 +453,7 @@ async function loadStlPreview(stlUrl) {
 }
 
 generateBtn.addEventListener("click", handleGenerate);
+pdfBtn.addEventListener("click", handlePdf);
 camBtn.addEventListener("click", handleCam);
 camPlanBtn.addEventListener("click", handleCamPlan);
 camConfirmBtn.addEventListener("click", handleCamConfirm);

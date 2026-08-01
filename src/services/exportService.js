@@ -1,7 +1,9 @@
+import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { callFreecadTool, extractResultText } from "./freecadMcpClient.js";
 import { config } from "../config.js";
+import { resolveStepPath } from "./camService.js";
 
 // Only top-level solids matter for export/measure. A parametric Part::Cut keeps
 // its Base/Tool operands in the document with a non-null .Shape (HANDOFF #8);
@@ -22,101 +24,101 @@ const SHAPE_OBJS_PY = [
   "    shape_objs = [o for o in doc.Objects if _has_shape(o)]",
 ].join("\n");
 
-function buildExportCode(outputDir, baseName) {
+// Fast path: reset the document, run the generated model code, export STEP+STL
+// and read the bounding box — all in ONE FreeCAD round-trip instead of four. The
+// generated Python is injected inline; it runs against the fresh document, then
+// the export/measure epilogue picks up whatever solids it left behind. Collapsing
+// the calls avoids re-parsing the document and re-deriving shape_objs three times
+// and removes three MCP round-trips per attempt.
+function buildRunExportCode(outputDir, baseName, generatedCode) {
   const stepPath = path.join(outputDir, `${baseName}.step`);
   const stlPath = path.join(outputDir, `${baseName}.stl`);
 
   return [
-    "import FreeCAD, Part, Mesh, os",
+    "import FreeCAD",
+    "if FreeCAD.ActiveDocument is not None:",
+    "    try:",
+    "        FreeCAD.closeDocument(FreeCAD.ActiveDocument.Name)",
+    "    except Exception:",
+    "        pass",
+    'FreeCAD.newDocument("RoverCAD")',
     "",
+    "# --- generated model code ---",
+    generatedCode,
+    "",
+    "# --- export + measure epilogue (single round-trip) ---",
+    "import Part, Mesh, os",
     "doc = FreeCAD.ActiveDocument",
     "if doc is None:",
     '    raise RuntimeError("No active FreeCAD document found")',
-    "",
     `os.makedirs(${JSON.stringify(outputDir)}, exist_ok=True)`,
-    "",
     SHAPE_OBJS_PY,
     "if not shape_objs:",
-    '    raise RuntimeError("No shapes found in active document to export")',
-    "",
+    '    raise RuntimeError("No exportable solid produced")',
     `Part.export(shape_objs, ${JSON.stringify(stepPath)})`,
-    `Mesh.export(shape_objs, ${JSON.stringify(stlPath)})`,
-    "",
+    "# Coarse, preview-quality tessellation: much faster to mesh and smaller to",
+    "# download than FreeCAD's default. Falls back to Mesh.export if MeshPart is",
+    "# unavailable.",
+    "try:",
+    "    import MeshPart",
+    "    _mesh = Mesh.Mesh()",
+    "    for _o in shape_objs:",
+    "        _mesh.addMesh(MeshPart.meshFromShape(Shape=_o.Shape, LinearDeflection=0.5, AngularDeflection=0.6))",
+    `    _mesh.write(${JSON.stringify(stlPath)})`,
+    "except Exception:",
+    `    Mesh.export(shape_objs, ${JSON.stringify(stlPath)})`,
+    "bb = None",
+    "for o in shape_objs:",
+    "    b = o.Shape.BoundBox",
+    "    if bb is None:",
+    "        bb = FreeCAD.BoundBox(b)",
+    "    else:",
+    "        bb.add(b)",
     `print("STEP_PATH=" + ${JSON.stringify(stepPath)})`,
     `print("STL_PATH=" + ${JSON.stringify(stlPath)})`,
+    'print("BBOX_X=" + str(bb.XLength))',
+    'print("BBOX_Y=" + str(bb.YLength))',
+    'print("BBOX_Z=" + str(bb.ZLength))',
   ].join("\n");
 }
 
-const RESET_DOCUMENT_CODE = [
-  "import FreeCAD",
-  "if FreeCAD.ActiveDocument is not None:",
-  "    FreeCAD.closeDocument(FreeCAD.ActiveDocument.Name)",
-  'FreeCAD.newDocument("RoverCAD")',
-].join("\n");
-
-export async function resetActiveDocument() {
-  return callFreecadTool(config.freecadMcp.toolName, {
-    [config.freecadMcp.toolParam]: RESET_DOCUMENT_CODE,
-  });
-}
-
-export async function exportActiveDocument() {
+/**
+ * Run the generated code and export/measure in a single FreeCAD call.
+ * @param {string} generatedCode FreeCAD Python for the model
+ * @returns {Promise<{ok: boolean, error?: string, stepPath?: string,
+ *   stlPath?: string, baseName?: string, bbox?: {x:number,y:number,z:number}}>}
+ */
+export async function runGeneratedCodeAndExport(generatedCode) {
   const baseName = `rover_${Date.now()}_${randomUUID().slice(0, 8)}`;
-  const code = buildExportCode(config.outputDir, baseName);
+  const code = buildRunExportCode(config.outputDir, baseName, generatedCode);
 
+  // callFreecadTool throws on transport/timeout faults; let those propagate so
+  // the pipeline can treat them as transient and retry.
   const result = await callFreecadTool(config.freecadMcp.toolName, {
     [config.freecadMcp.toolParam]: code,
   });
-
   const text = extractResultText(result);
+
   const stepMatch = text.match(/STEP_PATH=(.+)/);
+  if (result?.isError || text.startsWith("Failed to execute code") || !stepMatch) {
+    return { ok: false, error: text || "FreeCAD kodu calistiramadi" };
+  }
+
   const stlMatch = text.match(/STL_PATH=(.+)/);
-
-  return {
-    stepPath: stepMatch ? stepMatch[1].trim() : null,
-    stlPath: stlMatch ? stlMatch[1].trim() : null,
-    baseName,
-    raw: result,
-  };
-}
-
-const QUERY_BBOX_CODE = [
-  "import FreeCAD",
-  "doc = FreeCAD.ActiveDocument",
-  "if doc is None:",
-  '    raise RuntimeError("No active FreeCAD document found")',
-  SHAPE_OBJS_PY,
-  "if not shape_objs:",
-  '    raise RuntimeError("No shapes found in active document to measure")',
-  "bb = None",
-  "for o in shape_objs:",
-  "    b = o.Shape.BoundBox",
-  "    if bb is None:",
-  "        bb = FreeCAD.BoundBox(b)",
-  "    else:",
-  "        bb.add(b)",
-  'print("BBOX_X=" + str(bb.XLength))',
-  'print("BBOX_Y=" + str(bb.YLength))',
-  'print("BBOX_Z=" + str(bb.ZLength))',
-].join("\n");
-
-// Reads the real outer extents of whatever is currently in the document. Used by
-// the build pipeline to verify the model actually came out at the requested size.
-export async function queryBoundingBox() {
-  const result = await callFreecadTool(config.freecadMcp.toolName, {
-    [config.freecadMcp.toolParam]: QUERY_BBOX_CODE,
-  });
-
-  const text = extractResultText(result);
   const x = text.match(/BBOX_X=([-\d.eE+]+)/);
   const y = text.match(/BBOX_Y=([-\d.eE+]+)/);
   const z = text.match(/BBOX_Z=([-\d.eE+]+)/);
 
   return {
-    x: x ? Number(x[1]) : null,
-    y: y ? Number(y[1]) : null,
-    z: z ? Number(z[1]) : null,
-    raw: result,
+    ok: true,
+    stepPath: stepMatch[1].trim(),
+    stlPath: stlMatch ? stlMatch[1].trim() : null,
+    baseName,
+    bbox: {
+      x: x ? Number(x[1]) : null,
+      y: y ? Number(y[1]) : null,
+      z: z ? Number(z[1]) : null,
+    },
   };
 }
 
@@ -281,13 +283,32 @@ function buildTechDrawCode(pdfPath, bbox, dimensions) {
   return lines.join("\n");
 }
 
-// Build a 3-view (front/top/right) A4 landscape technical drawing PDF for the
-// current document and export it. `dimensions` is the parsed ROVER_DIMENSIONS
-// table (may be empty). Returns { pdfPath } or { pdfPath: null } on failure —
-// PDF generation is best-effort and never fails the whole request.
-export async function exportTechDrawPdf(baseName, bbox, dimensions = []) {
+// On-demand PDF: re-import a previously exported STEP into a fresh document and
+// render the 3-view drawing from it. This keeps the (slow) TechDraw work off the
+// /generate hot path — the model returns immediately and the PDF is produced only
+// when the user actually asks for it. `bbox` (from the /generate response) drives
+// the view scale; `dimensions` is the parsed ROVER_DIMENSIONS table.
+export async function exportTechDrawPdfFromStep(stepPath, bbox, dimensions = []) {
+  const abs = resolveStepPath(stepPath);
+  if (!fs.existsSync(abs)) {
+    return { pdfPath: null, error: "STEP dosyasi bulunamadi" };
+  }
+  const baseName = path.basename(abs).replace(/\.(step|stp)$/i, "");
   const pdfPath = path.join(config.outputDir, `${baseName}.pdf`);
-  const code = buildTechDrawCode(pdfPath, bbox, dimensions);
+
+  const importPy = [
+    "import FreeCAD, Part",
+    "if FreeCAD.ActiveDocument is not None:",
+    "    try:",
+    "        FreeCAD.closeDocument(FreeCAD.ActiveDocument.Name)",
+    "    except Exception:",
+    "        pass",
+    'doc = FreeCAD.newDocument("RoverPDF")',
+    `Part.insert(${JSON.stringify(abs)}, doc.Name)`,
+    "",
+  ].join("\n");
+
+  const code = importPy + buildTechDrawCode(pdfPath, bbox ?? {}, dimensions);
 
   try {
     const result = await callFreecadTool(config.freecadMcp.toolName, {

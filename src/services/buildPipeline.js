@@ -1,19 +1,15 @@
-import { callFreecadTool, extractResultText } from "./freecadMcpClient.js";
-import { config } from "../config.js";
-import {
-  resetActiveDocument,
-  exportActiveDocument,
-  queryBoundingBox,
-  exportTechDrawPdf,
-  parseRoverDimensions,
-} from "./exportService.js";
+import { runGeneratedCodeAndExport } from "./exportService.js";
 import { checkDimensions } from "./dimensionCheck.js";
 
 // The shared "make a model" loop used by both the text (/generate) and image
-// (/generate-from-image) routes. Each attempt: generate code -> reset the
-// document -> run the code -> export STEP/STL -> read the real bounding box ->
-// verify it matches the requested dimensions. On any failure it feeds the
-// problem back to the generator for a self-correcting retry (HANDOFF #11).
+// (/generate-from-image) routes. Each attempt runs a SINGLE FreeCAD round-trip
+// (reset -> run code -> export STEP/STL -> read bounding box) and then verifies
+// the box against the requested dimensions. On any failure it feeds the problem
+// back to the generator for a self-correcting retry (HANDOFF #11).
+//
+// The technical-drawing PDF is intentionally NOT produced here: it is the slowest
+// FreeCAD operation and is generated on demand via /generate-pdf so the model
+// returns as fast as possible.
 const MAX_ATTEMPTS = 3;
 
 /**
@@ -23,7 +19,7 @@ const MAX_ATTEMPTS = 3;
  * @param {string} [opts.verifyPrompt] Text used to extract expected dimensions.
  *        Empty (image flow) means the dimension check is a no-op.
  * @returns {Promise<{ok: boolean, generatedCode?: string, stepPath?: string,
- *   stlPath?: string, pdfPath?: string|null, bbox?: object, warning?: string,
+ *   stlPath?: string, bbox?: object, warning?: string,
  *   error?: string, lastError?: string}>}
  */
 export async function runBuildPipeline({ generate, verifyPrompt = "" }) {
@@ -49,58 +45,30 @@ export async function runBuildPipeline({ generate, verifyPrompt = "" }) {
     }
     lastCode = code;
 
-    // 2. Run it in a fresh document. resetActiveDocument()/callFreecadTool() can
-    // reject on a transient MCP fault (the 90s timeout, a transport disconnect);
-    // callFreecadTool() drops the connection on failure so the next attempt
-    // reconnects. Keep those rejections inside the loop so a transient FreeCAD
-    // hiccup burns one attempt and retries instead of escaping as a 500.
-    let runResult;
+    // 2. Run + export + measure in a single FreeCAD call. runGeneratedCodeAndExport
+    // throws only on a transient MCP fault (timeout/transport); it returns
+    // {ok:false} for a code/export error with the traceback text so we can feed it
+    // back to the generator. Keep both inside the loop so a hiccup burns one
+    // attempt and retries instead of escaping as a 500.
+    let out;
     try {
-      await resetActiveDocument();
-      runResult = await callFreecadTool(config.freecadMcp.toolName, {
-        [config.freecadMcp.toolParam]: code,
-      });
+      out = await runGeneratedCodeAndExport(code);
     } catch (err) {
       lastError = err.message;
       previousCode = code;
       problem = `FreeCAD ile iletisimde gecici bir hata olustu:\n${err.message}`;
       continue;
     }
-    const runText = extractResultText(runResult);
-    if (runResult?.isError || runText.startsWith("Failed to execute code")) {
-      lastError = runText || "FreeCAD kodu calistiramadi";
+    if (!out.ok) {
+      lastError = out.error;
       previousCode = code;
-      problem = `FreeCAD kodunu calistirirken hata olustu:\n${runText}`;
+      problem = `FreeCAD kodunu calistirirken/disari aktarirken hata olustu:\n${out.error}`;
       continue;
     }
 
-    // 3. Export STEP/STL. Also guard against a transient MCP fault here.
-    let exported;
-    try {
-      exported = await exportActiveDocument();
-    } catch (err) {
-      lastError = err.message;
-      previousCode = code;
-      problem = `Disari aktarma sirasinda gecici bir hata olustu:\n${err.message}`;
-      continue;
-    }
-    if (!exported.stepPath && !exported.stlPath) {
-      lastError = "FreeCAD disari aktarilabilir bir kati (solid) uretmedi";
-      previousCode = code;
-      problem =
-        "Kod calisti ama disari aktarilabilir bir kati (solid) olusmadi. " +
-        "Dokumana gecerli bir 3D kati ekle.";
-      continue;
-    }
-
-    // 4. Read the real bounding box and verify the requested dimensions.
-    let bbox = null;
-    try {
-      bbox = await queryBoundingBox();
-    } catch {
-      bbox = null;
-    }
-    const check = checkDimensions(verifyPrompt, bbox ?? {});
+    // 3. Verify the real bounding box against the requested dimensions.
+    const bbox = out.bbox ?? {};
+    const check = checkDimensions(verifyPrompt, bbox);
 
     if (!check.ok && !isLastAttempt) {
       lastError = check.reason;
@@ -109,16 +77,12 @@ export async function runBuildPipeline({ generate, verifyPrompt = "" }) {
       continue;
     }
 
-    // 5. Success — enrich with a TechDraw PDF (best-effort, never fatal).
-    const dimensions = parseRoverDimensions(code);
-    const pdf = await exportTechDrawPdf(exported.baseName, bbox ?? {}, dimensions);
-
+    // 4. Success. PDF is deferred to /generate-pdf.
     return {
       ok: true,
       generatedCode: code,
-      stepPath: exported.stepPath,
-      stlPath: exported.stlPath,
-      pdfPath: pdf.pdfPath,
+      stepPath: out.stepPath,
+      stlPath: out.stlPath,
       bbox,
       // If we're shipping on the final attempt despite a dimension mismatch,
       // surface it rather than silently returning a wrong-sized part.
