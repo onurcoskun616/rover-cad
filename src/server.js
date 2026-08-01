@@ -4,7 +4,13 @@ import cors from "cors";
 import { config } from "./config.js";
 import healthRouter from "./routes/health.js";
 import generateRouter from "./routes/generate.js";
-import { disconnectFreecad } from "./services/freecadMcpClient.js";
+import generateFromImageRouter from "./routes/generateFromImage.js";
+import generateCamRouter from "./routes/generateCam.js";
+import reviseRouter from "./routes/revise.js";
+import generatePdfRouter from "./routes/generatePdf.js";
+import jobsRouter from "./routes/jobs.js";
+import camAssistantRouter from "./routes/camAssistant.js";
+import { callFreecadTool, disconnectFreecad } from "./services/freecadMcpClient.js";
 
 fs.mkdirSync(config.outputDir, { recursive: true });
 
@@ -21,8 +27,19 @@ app.use(express.json());
 
 app.use("/health", healthRouter);
 app.use("/generate", generateRouter);
-// Serves generated STEP/STL files so the frontend can link to and preview them.
+app.use("/generate-from-image", generateFromImageRouter);
+app.use("/generate-cam", generateCamRouter);
+app.use("/revise", reviseRouter);
+app.use("/generate-pdf", generatePdfRouter);
+// Poll async job status started by the routes above.
+app.use("/jobs", jobsRouter);
+// Serves generated STEP/STL/PDF/G-code files so the frontend can link to and
+// preview them. Registered before the "/"-mounted CAM assistant router so these
+// public downloads are never intercepted.
 app.use("/files", express.static(config.outputDir));
+// CAM assistant for complex parts: /cam-questions, /cam-plan, /cam-confirm.
+// Mounted at "/" (its routes carry their own auth), so keep it last.
+app.use("/", camAssistantRouter);
 
 // eslint-disable-next-line no-unused-vars
 app.use((err, req, res, next) => {
@@ -32,6 +49,13 @@ app.use((err, req, res, next) => {
 
 const server = app.listen(config.port, () => {
   console.log(`Rover CAD backend listening on http://localhost:${config.port}`);
+  // Pre-warm FreeCAD: open the MCP connection and launch FreeCAD now so the first
+  // real request doesn't pay the cold-start (uvx resolve + FreeCAD boot) cost.
+  callFreecadTool(config.freecadMcp.toolName, {
+    [config.freecadMcp.toolParam]: "print('warm')",
+  })
+    .then(() => console.log("FreeCAD pre-warmed"))
+    .catch((err) => console.warn("FreeCAD pre-warm skipped:", err.message));
 });
 
 async function shutdown() {

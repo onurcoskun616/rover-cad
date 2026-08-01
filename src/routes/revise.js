@@ -1,7 +1,10 @@
 import path from "node:path";
 import { Router } from "express";
 import { apiKeyAuth } from "./apiKeyAuth.js";
-import { promptToFreecadCode } from "../services/promptToCodeService.js";
+import {
+  promptToFreecadCode,
+  promptToFreecadCodeRevision,
+} from "../services/promptToCodeService.js";
 import { runBuildPipeline } from "../services/buildPipeline.js";
 import { createJob, runJob } from "../services/jobStore.js";
 
@@ -14,18 +17,23 @@ const router = Router();
 
 router.use(apiKeyAuth);
 
-// Starts the model build as an async job and returns a jobId immediately. The
-// build can exceed Cloudflare's 100s edge timeout, so we never hold the HTTP
-// request open for it — the frontend polls GET /jobs/:id instead.
+// Iterative editing: takes the current design's code plus a change request and
+// rebuilds an updated model. Async (polled via /jobs/:id) like /generate.
 router.post("/", (req, res) => {
-  const { prompt } = req.body ?? {};
+  const { prompt, previousCode, basePrompt } = req.body ?? {};
 
   if (typeof prompt !== "string" || prompt.trim().length === 0) {
     return res
       .status(400)
-      .json({ error: "prompt is required and must be a non-empty string" });
+      .json({ error: "prompt (change request) is required and must be a non-empty string" });
+  }
+  if (typeof previousCode !== "string" || previousCode.trim().length === 0) {
+    return res
+      .status(400)
+      .json({ error: "previousCode is required and must be a non-empty string" });
   }
 
+  const base = typeof basePrompt === "string" ? basePrompt : "";
   const proto = req.protocol;
   const host = req.get("host");
   const jobId = createJob();
@@ -34,7 +42,17 @@ router.post("/", (req, res) => {
     jobId,
     async () => {
       const result = await runBuildPipeline({
-        generate: (correction) => promptToFreecadCode(prompt, correction),
+        // First attempt: revise the existing design. On a self-correcting retry,
+        // fix the failed revised code via the standard correction path.
+        generate: (correction) =>
+          correction
+            ? promptToFreecadCode(
+                `${base ? base + " ; " : ""}Degisiklik: ${prompt}`,
+                correction,
+              )
+            : promptToFreecadCodeRevision(previousCode, prompt, base),
+        // Verify against the change request so a "yüksekliği 100mm yap" is checked;
+        // a request with no dimensions makes the check a no-op.
         verifyPrompt: prompt,
       });
 
@@ -49,8 +67,6 @@ router.post("/", (req, res) => {
         };
       }
 
-      // CAM eligibility (/generate-cam) and the technical drawing (/generate-pdf)
-      // are produced on demand, so no extra FreeCAD round-trip here.
       return {
         ok: true,
         body: {
