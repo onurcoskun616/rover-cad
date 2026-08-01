@@ -39,19 +39,29 @@ function stepInsertPy(stepPath, docName) {
   ].join("\n");
 }
 
-// Analyse the geometry of a STEP file. A part is "simple" (2.5D millable) only
-// if every face is either planar or a cylinder whose axis is vertical (parallel
-// to Z) — i.e. drillable holes / vertical walls. Spheres, cones, tilted
-// cylinders, tori and free-form (B-spline) faces make it "complex".
+// Analyse the geometry of a STEP file. A part is "simple" (2.5D millable by the
+// outer-profile + drilling operations we emit) only if:
+//   - every face is planar, or a cylinder whose axis is vertical (parallel to Z)
+//     — i.e. drillable holes / vertical walls; and
+//   - it has at most two distinct horizontal (Z-normal) plane levels: the top
+//     and the bottom. A third level means a pocket, step or counterbore floor,
+//     which profile+drill would silently leave unmachined, so we reject it as
+//     complex rather than ship G-code that doesn't match the model.
+// Spheres, cones, tilted cylinders, tori and free-form (B-spline) faces are
+// always complex.
 const ANALYZE_CODE_TMPL = (stepPath) =>
   [
     stepInsertPy(stepPath, "RoverCAM_analyze"),
     "simple = True",
     'reason = ""',
+    "levels = set()",
     "for o in shape_objs:",
     "    for f in o.Shape.Faces:",
     "        t = f.Surface.__class__.__name__",
     "        if t == 'Plane':",
+    "            n = f.Surface.Axis",
+    "            if abs(abs(n.z) - 1.0) < 1e-3:",
+    "                levels.add(round(f.Surface.Position.z, 3))",
     "            continue",
     "        elif t == 'Cylinder':",
     "            ax = f.Surface.Axis",
@@ -61,6 +71,8 @@ const ANALYZE_CODE_TMPL = (stepPath) =>
     "            simple = False; reason = t; break",
     "    if not simple:",
     "        break",
+    "if simple and len(levels) > 2:",
+    "    simple = False; reason = 'cep/kademe (pocket veya step)'",
     "print('CAM_SIMPLE=' + ('1' if simple else '0'))",
     "print('CAM_REASON=' + reason)",
     "try:",

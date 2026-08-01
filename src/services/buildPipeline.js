@@ -49,11 +49,23 @@ export async function runBuildPipeline({ generate, verifyPrompt = "" }) {
     }
     lastCode = code;
 
-    // 2. Run it in a fresh document.
-    await resetActiveDocument();
-    const runResult = await callFreecadTool(config.freecadMcp.toolName, {
-      [config.freecadMcp.toolParam]: code,
-    });
+    // 2. Run it in a fresh document. resetActiveDocument()/callFreecadTool() can
+    // reject on a transient MCP fault (the 90s timeout, a transport disconnect);
+    // callFreecadTool() drops the connection on failure so the next attempt
+    // reconnects. Keep those rejections inside the loop so a transient FreeCAD
+    // hiccup burns one attempt and retries instead of escaping as a 500.
+    let runResult;
+    try {
+      await resetActiveDocument();
+      runResult = await callFreecadTool(config.freecadMcp.toolName, {
+        [config.freecadMcp.toolParam]: code,
+      });
+    } catch (err) {
+      lastError = err.message;
+      previousCode = code;
+      problem = `FreeCAD ile iletisimde gecici bir hata olustu:\n${err.message}`;
+      continue;
+    }
     const runText = extractResultText(runResult);
     if (runResult?.isError || runText.startsWith("Failed to execute code")) {
       lastError = runText || "FreeCAD kodu calistiramadi";
@@ -62,8 +74,16 @@ export async function runBuildPipeline({ generate, verifyPrompt = "" }) {
       continue;
     }
 
-    // 3. Export STEP/STL.
-    const exported = await exportActiveDocument();
+    // 3. Export STEP/STL. Also guard against a transient MCP fault here.
+    let exported;
+    try {
+      exported = await exportActiveDocument();
+    } catch (err) {
+      lastError = err.message;
+      previousCode = code;
+      problem = `Disari aktarma sirasinda gecici bir hata olustu:\n${err.message}`;
+      continue;
+    }
     if (!exported.stepPath && !exported.stlPath) {
       lastError = "FreeCAD disari aktarilabilir bir kati (solid) uretmedi";
       previousCode = code;

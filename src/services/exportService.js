@@ -4,11 +4,23 @@ import { callFreecadTool, extractResultText } from "./freecadMcpClient.js";
 import { config } from "../config.js";
 
 // Only top-level solids matter for export/measure. A parametric Part::Cut keeps
-// its Base/Tool children in the document with a non-null .Shape (HANDOFF #8), so
-// this same filter is reused everywhere to at least stay consistent about what
-// "the model" is.
-const SHAPE_OBJS_PY =
-  'shape_objs = [o for o in doc.Objects if hasattr(o, "Shape") and o.Shape and not o.Shape.isNull()]';
+// its Base/Tool operands in the document with a non-null .Shape (HANDOFF #8);
+// including them would overlay the uncut base + cutter on the drawing and
+// inflate the bounding box. An operand is always referenced by its parent
+// feature's OutList, so we drop any object that appears as another object's
+// child and keep only the results. This same filter is reused everywhere so
+// export, bbox and TechDraw all agree on what "the model" is. Falls back to the
+// unfiltered list if filtering would leave nothing (defensive).
+const SHAPE_OBJS_PY = [
+  "_children = set()",
+  "for _o in doc.Objects:",
+  "    for _c in _o.OutList:",
+  "        _children.add(_c.Name)",
+  'def _has_shape(o): return hasattr(o, "Shape") and o.Shape and not o.Shape.isNull()',
+  "shape_objs = [o for o in doc.Objects if _has_shape(o) and o.Name not in _children]",
+  "if not shape_objs:",
+  "    shape_objs = [o for o in doc.Objects if _has_shape(o)]",
+].join("\n");
 
 function buildExportCode(outputDir, baseName) {
   const stepPath = path.join(outputDir, `${baseName}.step`);
