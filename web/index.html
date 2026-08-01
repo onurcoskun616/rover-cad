@@ -120,6 +120,42 @@
             <div id="cam-spinner" class="spinner" hidden></div>
             <p id="cam-status-text"></p>
           </div>
+
+          <!-- Complex-part assistant: questions -> plan -> confirm -->
+          <div id="cam-assistant" class="cam-assistant" hidden>
+            <h3 class="cam-assistant-title">Karmaşık parça · CAM Asistanı</h3>
+            <p class="cam-assistant-intro">
+              Bu parça otomatik CAM için karmaşık. İşleme planı için birkaç soruyu
+              yanıtlayın.
+            </p>
+
+            <form id="cam-questions-form" class="cam-questions"></form>
+            <button id="cam-plan-btn" type="button" hidden>Plan Oluştur</button>
+
+            <div id="cam-plan-view" class="cam-plan" hidden>
+              <h4>Önerilen İşleme Planı</h4>
+              <pre id="cam-plan-text"></pre>
+              <div class="cam-plan-actions">
+                <button id="cam-confirm-btn" type="button">
+                  Onayla ve G-code Üret
+                </button>
+                <button id="cam-revise-btn" type="button" class="secondary">
+                  Planı Değiştir
+                </button>
+              </div>
+              <div id="cam-revise-box" class="cam-revise-box" hidden>
+                <textarea
+                  id="cam-revise-input"
+                  rows="2"
+                  placeholder="Planda neyi değiştirmek istersiniz? (örn: dış konturu son adıma al)"
+                ></textarea>
+                <button id="cam-revise-submit" type="button">
+                  Yeni Plan Oluştur
+                </button>
+              </div>
+            </div>
+          </div>
+
           <a
             id="gcode-link"
             class="file-link"

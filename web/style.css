@@ -249,6 +249,117 @@ button:disabled {
   align-self: flex-start;
 }
 
+.cam-assistant {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 1rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) - 4px);
+}
+
+.cam-assistant-title {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.cam-assistant-intro {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+.cam-questions {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.cam-question {
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) - 4px);
+  padding: 0.75rem 1rem;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.cam-question legend {
+  font-weight: 600;
+  padding: 0 0.35rem;
+}
+
+.cam-option {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+}
+
+.cam-other {
+  margin-top: 0.35rem;
+  width: 100%;
+  font: inherit;
+  padding: 0.4rem 0.5rem;
+  border-radius: calc(var(--radius) - 6px);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.cam-plan {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.cam-plan h4 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.cam-plan pre {
+  margin: 0;
+  padding: 1rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) - 4px);
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.cam-plan-actions {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.cam-plan-actions button,
+.cam-revise-box button {
+  align-self: auto;
+}
+
+button.secondary {
+  background: transparent;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+}
+
+button.secondary:hover:not(:disabled) {
+  background: var(--accent);
+  color: white;
+}
+
+.cam-revise-box {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
 .file-links {
   display: flex;
   gap: 0.75rem;

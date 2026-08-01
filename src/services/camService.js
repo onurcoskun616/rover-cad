@@ -105,6 +105,64 @@ export async function analyzeStepGeometry(stepPath) {
   };
 }
 
+// Produce a compact geometry summary of a STEP file for the CAM assistant to
+// reason about (it never sees the CAD itself). Includes the bounding box, per
+// surface-type face counts, distinct cylinder radii, volume and area.
+const DESCRIBE_CODE_TMPL = (stepPath) =>
+  [
+    stepInsertPy(stepPath, "RoverCAM_describe"),
+    "import json",
+    "bb = None",
+    "faces = {}",
+    "radii = []",
+    "for o in shape_objs:",
+    "    for f in o.Shape.Faces:",
+    "        t = f.Surface.__class__.__name__",
+    "        faces[t] = faces.get(t, 0) + 1",
+    "        if t == 'Cylinder':",
+    "            radii.append(round(f.Surface.Radius, 2))",
+    "    b = o.Shape.BoundBox",
+    "    if bb is None:",
+    "        bb = FreeCAD.BoundBox(b)",
+    "    else:",
+    "        bb.add(b)",
+    "vol = sum(o.Shape.Volume for o in shape_objs)",
+    "area = sum(o.Shape.Area for o in shape_objs)",
+    "summary = {",
+    "    'boundingBoxMm': {'x': round(bb.XLength, 2), 'y': round(bb.YLength, 2), 'z': round(bb.ZLength, 2)},",
+    "    'volumeMm3': round(vol, 2),",
+    "    'surfaceAreaMm2': round(area, 2),",
+    "    'faceCountsByType': faces,",
+    "    'cylinderRadiiMm': sorted(set(radii)),",
+    "    'solidCount': len(shape_objs),",
+    "}",
+    "print('GEOM_JSON=' + json.dumps(summary))",
+    "try:",
+    "    FreeCAD.closeDocument(doc.Name)",
+    "except Exception:",
+    "    pass",
+  ].join("\n");
+
+/**
+ * @param {string} stepPath basename or path of a STEP file in the output dir
+ * @returns {Promise<object>} geometry summary object (throws on failure)
+ */
+export async function describeStepGeometry(stepPath) {
+  const abs = resolveStepPath(stepPath);
+  if (!fs.existsSync(abs)) {
+    throw new Error("STEP dosyasi bulunamadi: " + path.basename(abs));
+  }
+  const result = await callFreecadTool(config.freecadMcp.toolName, {
+    [config.freecadMcp.toolParam]: DESCRIBE_CODE_TMPL(abs),
+  });
+  const text = extractResultText(result);
+  const match = text.match(/GEOM_JSON=(.+)/);
+  if (!match) {
+    throw new Error("Geometri ozeti alinamadi: " + text);
+  }
+  return JSON.parse(match[1]);
+}
+
 function gcodeGenPy(stepPath, gcodePath) {
   return [
     stepInsertPy(stepPath, "RoverCAM"),
