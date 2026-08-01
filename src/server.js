@@ -4,6 +4,8 @@ import cors from "cors";
 import { config } from "./config.js";
 import healthRouter from "./routes/health.js";
 import generateRouter from "./routes/generate.js";
+import generateFromImageRouter from "./routes/generateFromImage.js";
+import generateCamRouter from "./routes/generateCam.js";
 import { disconnectFreecad } from "./services/freecadMcpClient.js";
 
 fs.mkdirSync(config.outputDir, { recursive: true });
@@ -21,7 +23,10 @@ app.use(express.json());
 
 app.use("/health", healthRouter);
 app.use("/generate", generateRouter);
-// Serves generated STEP/STL files so the frontend can link to and preview them.
+app.use("/generate-from-image", generateFromImageRouter);
+app.use("/generate-cam", generateCamRouter);
+// Serves generated STEP/STL/PDF/G-code files so the frontend can link to and
+// preview them.
 app.use("/files", express.static(config.outputDir));
 
 // eslint-disable-next-line no-unused-vars

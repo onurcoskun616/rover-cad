@@ -20,17 +20,54 @@
       <h1 class="brand-title">Topkapı Okulları</h1>
       <p class="brand-subtitle">Yapay Zeka Destekli CAD Yazılımı</p>
       <p class="subtitle">
-        Doğal dilde bir CAD isteği yazın, otomatik olarak oluşturulsun.
+        Doğal dilde bir CAD isteği yazın ya da bir teknik resim yükleyin,
+        otomatik olarak 3D model, teknik çizim ve CNC kodu oluşturulsun.
       </p>
     </header>
 
     <main>
       <section class="prompt-section">
-        <textarea
-          id="prompt-input"
-          rows="4"
-          placeholder="Örn: Çapı 30mm, yüksekliği 50mm olan bir silindir oluştur"
-        ></textarea>
+        <div class="tabs" role="tablist">
+          <button
+            id="tab-text"
+            class="tab active"
+            type="button"
+            role="tab"
+            aria-selected="true"
+          >
+            Metin ile
+          </button>
+          <button
+            id="tab-image"
+            class="tab"
+            type="button"
+            role="tab"
+            aria-selected="false"
+          >
+            Teknik Resim ile
+          </button>
+        </div>
+
+        <div id="panel-text" class="tab-panel">
+          <textarea
+            id="prompt-input"
+            rows="4"
+            placeholder="Örn: Çapı 30mm, yüksekliği 50mm olan bir silindir oluştur"
+          ></textarea>
+        </div>
+
+        <div id="panel-image" class="tab-panel" hidden>
+          <label for="image-input" class="file-drop">
+            <span id="image-label">Bir teknik resim seçin (PNG, JPG…)</span>
+            <input id="image-input" type="file" accept="image/*" hidden />
+          </label>
+          <textarea
+            id="image-prompt-input"
+            rows="2"
+            placeholder="İsteğe bağlı ek talimat (örn: delik çapı 8mm)"
+          ></textarea>
+        </div>
+
         <button id="generate-btn" type="button">Oluştur</button>
       </section>
 
@@ -45,6 +82,7 @@
 
       <section id="result-section" class="result-section" hidden>
         <h2>Sonuç</h2>
+        <p id="warning-text" class="warning-text" hidden></p>
         <div class="file-links">
           <a
             id="step-link"
@@ -64,8 +102,35 @@
             hidden
             >STL dosyasını indir</a
           >
+          <a
+            id="pdf-link"
+            class="file-link"
+            href="#"
+            target="_blank"
+            rel="noopener"
+            hidden
+            >Teknik çizim (PDF)</a
+          >
         </div>
         <div id="viewer-container" class="viewer-container"></div>
+
+        <div id="cam-section" class="cam-section" hidden>
+          <button id="cam-btn" type="button">CNC G-code Üret</button>
+          <div id="cam-status" class="status-section" hidden>
+            <div id="cam-spinner" class="spinner" hidden></div>
+            <p id="cam-status-text"></p>
+          </div>
+          <a
+            id="gcode-link"
+            class="file-link"
+            href="#"
+            target="_blank"
+            rel="noopener"
+            hidden
+            >G-code dosyasını indir</a
+          >
+        </div>
+
         <details class="code-details">
           <summary>Oluşturulan FreeCAD kodu</summary>
           <pre id="generated-code"></pre>

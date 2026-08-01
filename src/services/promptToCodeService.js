@@ -5,9 +5,17 @@ import { fileURLToPath } from "node:url";
 import { config } from "../config.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const SYSTEM_PROMPT_FILE = path.join(__dirname, "..", "prompts", "freecad-system-prompt.txt");
+const TEXT_PROMPT_FILE = path.join(__dirname, "..", "prompts", "freecad-system-prompt.txt");
+const IMAGE_PROMPT_FILE = path.join(
+  __dirname,
+  "..",
+  "prompts",
+  "freecad-image-system-prompt.txt",
+);
 
-const DISALLOWED_TOOLS = [
+// Every tool the code-translation call has no business using. For the image
+// flow Read is removed from this list (the model must open the drawing).
+const BASE_DISALLOWED = [
   "Bash",
   "Read",
   "Write",
@@ -28,53 +36,74 @@ function stripCodeFence(text) {
   return fenceMatch ? fenceMatch[1].trim() : trimmed;
 }
 
-// Defense in depth: the model can still ignore the system prompt and reply
-// with prose (a clarifying question, an apology, etc.) instead of code.
-// Catch that here instead of letting it hit FreeCAD as a cryptic
-// SyntaxError inside the Report View.
+// Defense in depth: the model can still ignore the system prompt and reply with
+// prose (a clarifying question, an apology, an OpenSCAD snippet) instead of
+// FreeCAD Python. Catch that here so the build pipeline can retry instead of
+// letting it hit FreeCAD as a cryptic SyntaxError in the Report View.
 function looksLikePythonCode(text) {
   if (!text) return false;
-  if (text.includes("?")) return false;
   const hasAssignmentOrCall = /[=(]/.test(text);
-  const mentionsDoc = /\bdoc\b/.test(text);
-  return hasAssignmentOrCall && mentionsDoc;
+  const mentionsFreecad = /\b(doc|FreeCAD|Part|Draft|App)\b/.test(text);
+  // A leading standalone question mark line is a strong "it asked a question"
+  // tell; a "?" buried inside otherwise-valid code (a regex, a string) is fine.
+  const looksLikeQuestion = /^[^\n]*\?\s*$/.test(text.trim()) && !mentionsFreecad;
+  return hasAssignmentOrCall && mentionsFreecad && !looksLikeQuestion;
 }
 
-const MAX_ATTEMPTS = 3;
+function correctionSuffix(correction) {
+  if (!correction?.previousCode) return "";
+  return (
+    `\n\n[ONCEKI_KOD]:\n${correction.previousCode}` +
+    `\n\n[SORUN]: ${correction.problem}` +
+    "\n\n[GOREV]: Yukaridaki sorunu gider ve DUZELTILMIS tam Python kodunu bastan yaz. " +
+    "Hicbir soru sorma, hicbir aciklama yazma. SADECE ham Python kodu."
+  );
+}
 
-const RETRY_REMINDER =
-  "\n\n[HATIRLATMA]: Onceki cevabinda kod yerine soru/aciklama/onay istegi yazdin, bu gecersiz. " +
-  "Hicbir soru sorma, hicbir onay isteme, hicbir format sec-secenegi sunma. SADECE ham Python kodu yaz.";
+/**
+ * Text prompt -> FreeCAD Python. Makes a single CLI call.
+ * @param {string} prompt
+ * @param {{previousCode?: string, problem?: string}} [correction] self-correction context
+ */
+export async function promptToFreecadCode(prompt, correction) {
+  const input = `[MEVCUT_ISTEK]: ${prompt}` + correctionSuffix(correction);
+  return runClaudeCli(input, { systemPromptFile: TEXT_PROMPT_FILE, allowRead: false });
+}
 
-export async function promptToFreecadCode(prompt, previousPrompt) {
-  const baseCliInput = previousPrompt
-    ? `[ONCEKI_ISTEK]: ${previousPrompt}\n[MEVCUT_ISTEK]: ${prompt}`
-    : `[MEVCUT_ISTEK]: ${prompt}`;
-
-  let lastError;
-  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    const cliInput = attempt === 1 ? baseCliInput : baseCliInput + RETRY_REMINDER;
-    try {
-      return await runClaudeCli(cliInput);
-    } catch (err) {
-      lastError = err;
-    }
+/**
+ * Technical-drawing image -> FreeCAD Python. Makes a single CLI call with the
+ * Read tool enabled so the model can open the drawing.
+ * @param {string} imagePath absolute path to the uploaded image
+ * @param {string} [prompt] optional extra instruction from the user
+ * @param {{previousCode?: string, problem?: string}} [correction]
+ */
+export async function promptToFreecadCodeFromImage(imagePath, prompt, correction) {
+  let input = `[MEVCUT_ISTEK]: Ekteki teknik resmi (dosya yolu: ${imagePath}) oku ve icindeki parcayi 3D model olarak olustur.`;
+  if (prompt && prompt.trim()) {
+    input += ` Ek talimat: ${prompt.trim()}`;
   }
-  throw lastError;
+  input += correctionSuffix(correction);
+  return runClaudeCli(input, { systemPromptFile: IMAGE_PROMPT_FILE, allowRead: true });
 }
 
-function runClaudeCli(cliInput) {
+function runClaudeCli(cliInput, { systemPromptFile, allowRead }) {
   return new Promise((resolve, reject) => {
     const args = [
       "-p",
       cliInput,
       "--system-prompt-file",
-      SYSTEM_PROMPT_FILE,
+      systemPromptFile,
       "--output-format",
       "text",
-      "--disallowedTools",
-      ...DISALLOWED_TOOLS,
     ];
+
+    if (allowRead) {
+      // Whitelist Read only; everything else stays off.
+      args.push("--allowedTools", "Read");
+      args.push("--disallowedTools", ...BASE_DISALLOWED.filter((t) => t !== "Read"));
+    } else {
+      args.push("--disallowedTools", ...BASE_DISALLOWED);
+    }
 
     if (config.claudeCli.model) {
       args.push("--model", config.claudeCli.model);
@@ -83,10 +112,10 @@ function runClaudeCli(cliInput) {
     const child = spawn(config.claudeCli.command, args, {
       windowsHide: true,
       stdio: ["ignore", "pipe", "pipe"],
-      // Run outside the project directory so this one-shot code-translation
-      // call doesn't pick up this project's name, CLAUDE.md, or other
-      // ambient context and start reasoning about the backend's own side
-      // effects instead of just emitting code.
+      // Run outside the project directory so this one-shot code-translation call
+      // doesn't pick up this project's name, CLAUDE.md, or other ambient context
+      // and start reasoning about the backend's own side effects instead of just
+      // emitting code.
       cwd: os.tmpdir(),
     });
 

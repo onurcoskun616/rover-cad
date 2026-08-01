@@ -83,6 +83,60 @@ main {
   gap: 0.75rem;
 }
 
+.tabs {
+  display: flex;
+  gap: 0.5rem;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 0.25rem;
+}
+
+.tab {
+  align-self: auto;
+  background: transparent;
+  color: var(--text-muted);
+  font-weight: 600;
+  padding: 0.55rem 1rem;
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  cursor: pointer;
+}
+
+.tab:hover:not(:disabled) {
+  background: transparent;
+  color: var(--text);
+}
+
+.tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+.tab-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.file-drop {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 1.5rem 1rem;
+  border: 1px dashed var(--border);
+  border-radius: calc(var(--radius) - 4px);
+  background: var(--bg);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+
+.file-drop:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
 textarea {
   width: 100%;
   resize: vertical;
@@ -171,6 +225,28 @@ button:disabled {
 .result-section h2 {
   margin: 0;
   font-size: 1.15rem;
+}
+
+.warning-text {
+  margin: 0;
+  padding: 0.75rem 1rem;
+  background: #3a2f16;
+  border: 1px solid #6b5320;
+  color: #f5d98a;
+  border-radius: calc(var(--radius) - 4px);
+  font-size: 0.9rem;
+}
+
+.cam-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border);
+}
+
+.cam-section button {
+  align-self: flex-start;
 }
 
 .file-links {
