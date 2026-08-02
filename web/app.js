@@ -37,7 +37,13 @@ const camSpinner = document.getElementById("cam-spinner");
 const camStatusText = document.getElementById("cam-status-text");
 const gcodeLink = document.getElementById("gcode-link");
 const camAssistant = document.getElementById("cam-assistant");
-const camQuestionsForm = document.getElementById("cam-questions-form");
+const camWizard = document.getElementById("cam-wizard");
+const camStepProgress = document.getElementById("cam-step-progress");
+const camStepTitle = document.getElementById("cam-step-title");
+const camStepIntro = document.getElementById("cam-step-intro");
+const camStepFields = document.getElementById("cam-step-fields");
+const camBackBtn = document.getElementById("cam-back-btn");
+const camNextBtn = document.getElementById("cam-next-btn");
 const camPlanBtn = document.getElementById("cam-plan-btn");
 const camPlanView = document.getElementById("cam-plan-view");
 const camPlanText = document.getElementById("cam-plan-text");
@@ -53,7 +59,9 @@ let lastStepPath = null;
 let lastGeneratedCode = null;
 let lastBbox = null;
 let lastPrompt = "";
-let camAnswers = null;
+let camAnswers = {};
+let camStepIndex = 0;
+let camStepFieldNames = [];
 let camPlan = null;
 
 function setMode(next) {
@@ -115,14 +123,18 @@ function resetResult() {
 
 function resetCamAssistant() {
   camAssistant.hidden = true;
-  camQuestionsForm.hidden = true;
-  camQuestionsForm.innerHTML = "";
+  camWizard.hidden = true;
+  camStepFields.innerHTML = "";
+  camStepIntro.hidden = true;
+  camBackBtn.hidden = true;
   camPlanBtn.hidden = true;
   camPlanView.hidden = true;
   camPlanText.textContent = "";
   camReviseBox.hidden = true;
   camReviseInput.value = "";
-  camAnswers = null;
+  camAnswers = {};
+  camStepIndex = 0;
+  camStepFieldNames = [];
   camPlan = null;
 }
 
@@ -298,8 +310,8 @@ function showResult(data) {
   reviseSection.hidden = !lastGeneratedCode;
 
   lastStepPath = data.stepPath ?? null;
-  // Offer CAM for any part with an exported STEP: simple parts get automatic
-  // G-code, complex parts fall through to the assistant flow.
+  // Offer CAM for any part with an exported STEP; every part goes through the
+  // CAM assistant (questions -> plan -> confirm).
   if (lastStepPath) {
     camSection.hidden = false;
   }
@@ -399,117 +411,126 @@ async function handleCam() {
   camBtn.disabled = true;
   gcodeLink.hidden = true;
   resetCamAssistant();
-  setCamStatus("CNC G-code üretiliyor…", true);
+  camAssistant.hidden = false;
 
+  // Every part goes through the sequential CAM wizard. Nothing is planned or
+  // machined until every step is answered.
   try {
-    const result = await runAsyncJob(
-      `${API_BASE}/generate-cam`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
-        body: JSON.stringify({ stepPath: lastStepPath, prompt: lastPrompt }),
-      },
-      (seconds) => setCamStatus(`CNC G-code üretiliyor… (${seconds} sn)`, true),
-    );
-
-    if (result.error || !result.ok) {
-      setCamStatus(result.error ?? result.body?.error ?? "İşlem başarısız.", false);
-      return;
-    }
-    if (result.body?.complex) {
-      // Complex part → start the assistant question flow.
-      await startCamAssistant();
-      return;
-    }
-    setCamStatus("G-code hazır.", false);
-    if (result.body?.gcodeUrl) {
-      gcodeLink.href = result.body.gcodeUrl;
-      gcodeLink.hidden = false;
-    }
-  } catch (err) {
-    setCamStatus(`Sunucuya bağlanılamadı: ${err.message}`, false);
+    camStepIndex = 0;
+    await loadCamStep(0);
   } finally {
     camBtn.disabled = false;
   }
 }
 
-async function startCamAssistant() {
-  setCamStatus("Parça inceleniyor, sorular hazırlanıyor…", true);
+// Fetch and render one wizard step. `targetIndex` selects the step; the backend
+// shapes its recommendations from the answers gathered so far.
+async function loadCamStep(targetIndex) {
+  setCamStatus("Adım hazırlanıyor…", true);
   try {
-    const response = await fetch(`${API_BASE}/cam-questions`, {
+    const response = await fetch(`${API_BASE}/cam-step`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
-      body: JSON.stringify({ stepPath: lastStepPath, prompt: lastPrompt }),
+      body: JSON.stringify({
+        stepPath: lastStepPath,
+        prompt: lastPrompt,
+        answers: camAnswers,
+        targetIndex,
+      }),
     });
     const data = await readJson(response);
-    if (!response.ok || !Array.isArray(data?.questions) || data.questions.length === 0) {
-      setCamStatus(data?.error ?? "Sorular alınamadı.", false);
+    if (!response.ok || !data) {
+      setCamStatus(data?.error ?? "Adım alınamadı.", false);
       return;
     }
     setCamStatus("", false);
-    renderCamQuestions(data.questions);
-    camAssistant.hidden = false;
-    camQuestionsForm.hidden = false;
-    camPlanBtn.hidden = false;
+    if (data.done) {
+      // All information collected → allow the plan to be generated.
+      camWizard.hidden = true;
+      camPlanBtn.hidden = false;
+      return;
+    }
+    renderCamStep(data);
+    camWizard.hidden = false;
+    camPlanBtn.hidden = true;
   } catch (err) {
     setCamStatus(`Sunucuya bağlanılamadı: ${err.message}`, false);
   }
 }
 
-function renderCamQuestions(questions) {
-  camQuestionsForm.innerHTML = "";
-  questions.forEach((q, qi) => {
-    const fieldset = document.createElement("fieldset");
-    fieldset.className = "cam-question";
-    fieldset.dataset.question = q.question;
+function renderCamStep(data) {
+  const step = data.step;
+  camStepIndex = data.index;
+  camStepFieldNames = step.fields.map((f) => f.name);
 
-    const legend = document.createElement("legend");
-    legend.textContent = q.question;
-    fieldset.appendChild(legend);
+  camStepProgress.textContent = `Adım ${data.index + 1} / ${data.total}`;
+  camStepTitle.textContent = step.title;
+  if (step.intro) {
+    camStepIntro.textContent = step.intro;
+    camStepIntro.hidden = false;
+  } else {
+    camStepIntro.hidden = true;
+  }
 
-    const options = q.options && q.options.length ? q.options : ["Evet", "Hayır"];
-    options.forEach((opt, oi) => {
-      const id = `camq-${qi}-${oi}`;
-      const label = document.createElement("label");
-      label.className = "cam-option";
-      const input = document.createElement("input");
-      input.type = "radio";
-      input.name = `camq-${qi}`;
-      input.value = opt;
-      input.id = id;
-      if (oi === 0) input.checked = true;
-      const span = document.createElement("span");
-      span.textContent = opt;
-      label.appendChild(input);
-      label.appendChild(span);
-      fieldset.appendChild(label);
-    });
+  camStepFields.innerHTML = "";
+  step.fields.forEach((f) => {
+    const wrap = document.createElement("div");
+    wrap.className = "cam-field";
+    const inputId = `camf-${f.name}`;
 
-    // Free-text field, used when a "Diğer/Diger" option is selected.
-    const other = document.createElement("input");
-    other.type = "text";
-    other.className = "cam-other";
-    other.placeholder = "Diğer (yazın)";
-    other.dataset.for = `camq-${qi}`;
-    fieldset.appendChild(other);
+    const label = document.createElement("label");
+    label.setAttribute("for", inputId);
+    label.textContent = f.unit ? `${f.label} (${f.unit})` : f.label;
+    wrap.appendChild(label);
 
-    camQuestionsForm.appendChild(fieldset);
+    let input;
+    if (f.type === "select") {
+      input = document.createElement("select");
+      (f.options || []).forEach((opt) => {
+        const o = document.createElement("option");
+        o.value = opt;
+        o.textContent = opt;
+        if (String(opt) === String(f.value)) o.selected = true;
+        input.appendChild(o);
+      });
+    } else {
+      input = document.createElement("input");
+      input.type = f.type === "number" ? "number" : "text";
+      if (f.type === "number") input.step = "any";
+      input.value = f.value ?? "";
+    }
+    input.id = inputId;
+    input.name = f.name;
+    input.dataset.type = f.type;
+    wrap.appendChild(input);
+    camStepFields.appendChild(wrap);
+  });
+
+  camBackBtn.hidden = camStepIndex === 0;
+  camNextBtn.textContent = data.index + 1 >= data.total ? "Tamam" : "İleri";
+}
+
+// Read the current step's inputs into camAnswers (numbers coerced to Number).
+function collectCurrentStep() {
+  camStepFields.querySelectorAll("input, select").forEach((el) => {
+    let value = el.value;
+    if (el.dataset.type === "number") {
+      const n = Number(value);
+      if (Number.isFinite(n)) value = n;
+    }
+    camAnswers[el.name] = value;
   });
 }
 
-function collectCamAnswers() {
-  const answers = {};
-  camQuestionsForm.querySelectorAll("fieldset.cam-question").forEach((fs) => {
-    const question = fs.dataset.question;
-    const checked = fs.querySelector("input[type=radio]:checked");
-    let value = checked ? checked.value : "";
-    if (/^diğer|^diger/i.test(value)) {
-      const other = fs.querySelector("input.cam-other");
-      if (other && other.value.trim()) value = other.value.trim();
-    }
-    answers[question] = value;
-  });
-  return answers;
+async function handleCamNext() {
+  collectCurrentStep();
+  await loadCamStep(camStepIndex + 1);
+}
+
+async function handleCamBack() {
+  collectCurrentStep();
+  if (camStepIndex === 0) return;
+  await loadCamStep(camStepIndex - 1);
 }
 
 async function requestCamPlan(changeRequest) {
@@ -546,7 +567,7 @@ async function requestCamPlan(changeRequest) {
 }
 
 async function handleCamPlan() {
-  camAnswers = collectCamAnswers();
+  // camAnswers is already fully populated by the wizard.
   await requestCamPlan(null);
 }
 
@@ -602,6 +623,8 @@ generateBtn.addEventListener("click", handleGenerate);
 reviseBtn.addEventListener("click", handleRevise);
 pdfBtn.addEventListener("click", handlePdf);
 camBtn.addEventListener("click", handleCam);
+camNextBtn.addEventListener("click", handleCamNext);
+camBackBtn.addEventListener("click", handleCamBack);
 camPlanBtn.addEventListener("click", handleCamPlan);
 camConfirmBtn.addEventListener("click", handleCamConfirm);
 camReviseBtn.addEventListener("click", () => {

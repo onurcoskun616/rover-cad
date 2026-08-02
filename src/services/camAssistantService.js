@@ -5,16 +5,15 @@ import { runClaudeCli, stripCodeFence } from "./claudeCli.js";
 import { callFreecadTool, extractResultText } from "./freecadMcpClient.js";
 import { config } from "../config.js";
 import { resolveStepPath, describeStepGeometry } from "./camService.js";
+import { camParamsBlock } from "./camWizardService.js";
 import {
   detectThreads,
   detectThreadMethod,
   threadGuidanceBlock,
-  THREAD_METHOD_QUESTION,
 } from "./threadSpec.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const promptFile = (name) => path.join(__dirname, "..", "prompts", name);
-const QUESTIONS_PROMPT = promptFile("cam-questions-system-prompt.txt");
 const PLAN_PROMPT = promptFile("cam-plan-system-prompt.txt");
 const CODE_PROMPT = promptFile("cam-code-system-prompt.txt");
 
@@ -78,53 +77,6 @@ function geomBlock(geometry) {
 }
 
 /**
- * Produce the (max 5) questions needed before planning machining of a part. When
- * threads/fasteners are detected in the prompt, the tap-vs-thread-milling
- * question is added deterministically so it is always offered.
- * @param {string} stepPath basename/path of a STEP file in the output dir
- * @param {string} [context] original prompt/description, scanned for threads
- * @returns {Promise<Array<{question: string, options: string[]}>>}
- */
-export async function generateCamQuestions(stepPath, context = "") {
-  const geometry = await describeStepGeometry(stepPath);
-  const threads = detectThreads(context);
-
-  let input = geomBlock(geometry);
-  if (threads.hasThread) {
-    // We add the threading-method question ourselves, so tell the model not to.
-    input +=
-      "\n[NOT]: Bu parcada metrik dis tespit edildi; dis yontemi (tap/frezeleme) sorusunu SEN SORMA.";
-  }
-  input += "\n[GOREV]: Bu parcanin islenmesi icin gereken sorulari uret.";
-
-  const questions = await runClaudeJson(input, QUESTIONS_PROMPT, (parsed) => {
-    if (!Array.isArray(parsed)) throw new Error("Sorular bir dizi olmali");
-    const list = parsed
-      .filter((q) => q && typeof q.question === "string")
-      .slice(0, 5)
-      .map((q) => ({
-        question: q.question,
-        options: Array.isArray(q.options) ? q.options.map(String) : [],
-      }));
-    if (list.length === 0) throw new Error("Gecerli soru uretilemedi");
-    return list;
-  });
-
-  if (threads.hasThread) {
-    const already = questions.some((q) =>
-      /tap|kılavuz|klavuz|frez|thread/i.test(q.question),
-    );
-    if (!already) {
-      // Keep the total at <= 5 while guaranteeing the threading question.
-      if (questions.length >= 5) questions.length = 4;
-      questions.push({ ...THREAD_METHOD_QUESTION });
-    }
-  }
-
-  return questions;
-}
-
-/**
  * Draft (or revise) a human-readable CAM operation plan.
  * @param {string} stepPath
  * @param {object} answers machinist's answers (arbitrary key/value)
@@ -133,9 +85,7 @@ export async function generateCamQuestions(stepPath, context = "") {
  */
 export async function generateCamPlan(stepPath, answers, opts = {}) {
   const geometry = await describeStepGeometry(stepPath);
-  let input =
-    geomBlock(geometry) +
-    `\n[CEVAPLAR]: ${JSON.stringify(answers ?? {})}`;
+  let input = geomBlock(geometry) + camParamsBlock(answers);
 
   // Inject computed pilot-hole diameters so the plan mentions the correct sizes.
   const threads = detectThreads(opts.context ?? "");
@@ -189,6 +139,36 @@ export function planToText(plan) {
 
 const GCODE_ATTEMPTS = 3;
 
+// Common G-code / M-code command tokens; if any appears as a literal inside the
+// generated Python, the model is hand-writing G-code instead of letting FreeCAD
+// compute it.
+const GCODE_LITERAL_RE =
+  /["'][^"'\n]*\b(G0?[0-3]|G1[789]|G2[01]|G9[01]|M0?[3-9]|M30)\b/;
+
+/**
+ * Static guardrail on the generated FreeCAD script: G-code must be produced ONLY
+ * by real FreeCAD Path operations + the post-processor, never hand-written by
+ * the LLM. The model translates the plan into Path API calls; FreeCAD computes
+ * the toolpaths and grbl_post emits the G-code.
+ * @param {string} code the generated Python (code fences already stripped)
+ * @returns {string|null} a Turkish violation message, or null if the code is OK
+ */
+export function validateCamCode(code) {
+  if (!/\.export\s*\(/.test(code)) {
+    return "Kod bir post-processor export cagrisi (orn. grbl_post.export(...)) icermiyor; G-code yalnizca FreeCAD post-processor tarafindan uretilmeli.";
+  }
+  if (/\bopen\s*\(/.test(code)) {
+    return "Kod bir dosya acip yaziyor; cikti G-code dosyasini KENDIN yazma. Dosyayi yalnizca grbl_post.export(...) olusturmali.";
+  }
+  if (GCODE_LITERAL_RE.test(code)) {
+    return "Kod ham G-code/M-code komutlari iceriyor; toolpath hesabini ve G-code'u FreeCAD Path operasyonlari + post-processor uretmeli, sen G-code yazmamalisin.";
+  }
+  if (!/\bJob\b/.test(code)) {
+    return "Kod bir FreeCAD Path Job olusturmuyor; gercek CAM operasyonlari (Path Workbench API) kullanilmali.";
+  }
+  return null;
+}
+
 /**
  * Turn an approved plan into real FreeCAD Path operations and GRBL G-code.
  * @param {string} stepPath
@@ -221,10 +201,10 @@ export async function generateCamGcodeFromPlan(stepPath, answers, plan, context 
     `[STEP_PATH]: ${abs}` +
     `\n[GCODE_OUTPUT_PATH]: ${gcodePath}` +
     `\n${geomBlock(geometry)}` +
-    `\n[CEVAPLAR]: ${JSON.stringify(answers ?? {})}` +
+    camParamsBlock(answers) +
     `\n[ONAYLANAN_PLAN]: ${JSON.stringify(plan)}` +
     threadGuidance +
-    "\n[GOREV]: Bu plani FreeCAD Path (CAM) koduna cevir ve GRBL G-code olarak yukaridaki cikti yoluna yaz.";
+    "\n[GOREV]: Bu plani FreeCAD Path (CAM) operasyonlarina cevir; [CAM_PARAMETRELERI]'ndeki takim capi, spindle hizi, ilerlemeler, pasa derinligi, WCS ve post-processor degerlerini KULLAN. Toolpath hesabini FreeCAD yapsin ve secilen post-processor'un export'u ile yukaridaki cikti yoluna G-code yazdirilsin. G-code'u SEN yazma.";
 
   let lastError = "Bilinmeyen hata";
   let previousCode = null;
@@ -251,6 +231,18 @@ export async function generateCamGcodeFromPlan(stepPath, answers, plan, context 
       lastError = err.message;
       previousCode = null;
       problem = null;
+      continue;
+    }
+
+    // Reject (and ask the model to fix) any script that would bypass FreeCAD's
+    // Path/CAM API + post-processor and emit G-code directly.
+    const violation = validateCamCode(code);
+    if (violation) {
+      lastError = violation;
+      previousCode = code;
+      problem =
+        violation +
+        " Plani SADECE FreeCAD Path (CAM) operasyonlarina cevir; toolpath ve G-code uretimini FreeCAD Path + grbl_post.export yapsin.";
       continue;
     }
 

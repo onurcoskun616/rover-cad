@@ -2,17 +2,6 @@ import fs from "node:fs";
 import path from "node:path";
 import { callFreecadTool, extractResultText } from "./freecadMcpClient.js";
 import { config } from "../config.js";
-import { detectThreads } from "./threadSpec.js";
-
-// Fixed machining parameters. These are conservative aluminium settings for a
-// 6mm flat endmill; exposing them to the user is a future step (HANDOFF #10).
-const TOOL_DIAMETER_MM = 6;
-const SPINDLE_RPM = 10000;
-// IMPORTANT: FreeCAD ToolController feeds are App::PropertySpeed. A bare number
-// is interpreted as mm/SECOND, so 500 would be dangerously fast. Always pass a
-// unit-tagged string (HANDOFF #7).
-const HORIZ_FEED = "500 mm/min";
-const VERT_FEED = "120 mm/min";
 
 // Resolve a caller-supplied step name to an absolute path locked inside the
 // output directory (defends against path traversal, HANDOFF §4).
@@ -40,75 +29,12 @@ function stepInsertPy(stepPath, docName) {
   ].join("\n");
 }
 
-// Analyse the geometry of a STEP file. A part is "simple" (2.5D millable by the
-// outer-profile + drilling operations we emit) only if:
-//   - every face is planar, or a cylinder whose axis is vertical (parallel to Z)
-//     — i.e. drillable holes / vertical walls; and
-//   - it has at most two distinct horizontal (Z-normal) plane levels: the top
-//     and the bottom. A third level means a pocket, step or counterbore floor,
-//     which profile+drill would silently leave unmachined, so we reject it as
-//     complex rather than ship G-code that doesn't match the model.
-// Spheres, cones, tilted cylinders, tori and free-form (B-spline) faces are
-// always complex.
-const ANALYZE_CODE_TMPL = (stepPath) =>
-  [
-    stepInsertPy(stepPath, "RoverCAM_analyze"),
-    "simple = True",
-    'reason = ""',
-    "levels = set()",
-    "for o in shape_objs:",
-    "    for f in o.Shape.Faces:",
-    "        t = f.Surface.__class__.__name__",
-    "        if t == 'Plane':",
-    "            n = f.Surface.Axis",
-    "            if abs(abs(n.z) - 1.0) < 1e-3:",
-    "                levels.add(round(f.Surface.Position.z, 3))",
-    "            continue",
-    "        elif t == 'Cylinder':",
-    "            ax = f.Surface.Axis",
-    "            if abs(abs(ax.z) - 1.0) > 1e-3:",
-    "                simple = False; reason = 'egik silindir'; break",
-    "        else:",
-    "            simple = False; reason = t; break",
-    "    if not simple:",
-    "        break",
-    "if simple and len(levels) > 2:",
-    "    simple = False; reason = 'cep/kademe (pocket veya step)'",
-    "print('CAM_SIMPLE=' + ('1' if simple else '0'))",
-    "print('CAM_REASON=' + reason)",
-    "try:",
-    "    FreeCAD.closeDocument(doc.Name)",
-    "except Exception:",
-    "    pass",
-  ].join("\n");
-
-/**
- * @param {string} stepPath basename or path of a STEP file in the output dir
- * @returns {Promise<{simple: boolean, reason: string}>}
- */
-export async function analyzeStepGeometry(stepPath) {
-  const abs = resolveStepPath(stepPath);
-  if (!fs.existsSync(abs)) {
-    return { simple: false, reason: "STEP dosyasi bulunamadi" };
-  }
-  const result = await callFreecadTool(config.freecadMcp.toolName, {
-    [config.freecadMcp.toolParam]: ANALYZE_CODE_TMPL(abs),
-  });
-  const text = extractResultText(result);
-  const simpleMatch = text.match(/CAM_SIMPLE=([01])/);
-  const reasonMatch = text.match(/CAM_REASON=(.*)/);
-  if (!simpleMatch) {
-    return { simple: false, reason: "Geometri analizi basarisiz: " + text };
-  }
-  return {
-    simple: simpleMatch[1] === "1",
-    reason: reasonMatch ? reasonMatch[1].trim() : "",
-  };
-}
-
 // Produce a compact geometry summary of a STEP file for the CAM assistant to
 // reason about (it never sees the CAD itself). Includes the bounding box, per
-// surface-type face counts, distinct cylinder radii, volume and area.
+// surface-type face counts, distinct cylinder radii, volume, area and the
+// distinct horizontal (Z-normal) plane levels — a part with more than two levels
+// (top + bottom) is stepped/multi-level, which the assistant uses to add a
+// per-step machining question.
 const DESCRIBE_CODE_TMPL = (stepPath) =>
   [
     stepInsertPy(stepPath, "RoverCAM_describe"),
@@ -116,12 +42,17 @@ const DESCRIBE_CODE_TMPL = (stepPath) =>
     "bb = None",
     "faces = {}",
     "radii = []",
+    "levels = set()",
     "for o in shape_objs:",
     "    for f in o.Shape.Faces:",
     "        t = f.Surface.__class__.__name__",
     "        faces[t] = faces.get(t, 0) + 1",
     "        if t == 'Cylinder':",
     "            radii.append(round(f.Surface.Radius, 2))",
+    "        elif t == 'Plane':",
+    "            n = f.Surface.Axis",
+    "            if abs(abs(n.z) - 1.0) < 1e-3:",
+    "                levels.add(round(f.Surface.Position.z, 3))",
     "    b = o.Shape.BoundBox",
     "    if bb is None:",
     "        bb = FreeCAD.BoundBox(b)",
@@ -135,6 +66,8 @@ const DESCRIBE_CODE_TMPL = (stepPath) =>
     "    'surfaceAreaMm2': round(area, 2),",
     "    'faceCountsByType': faces,",
     "    'cylinderRadiiMm': sorted(set(radii)),",
+    "    'horizontalLevelsMm': sorted(levels),",
+    "    'horizontalLevelCount': len(levels),",
     "    'solidCount': len(shape_objs),",
     "}",
     "print('GEOM_JSON=' + json.dumps(summary))",
@@ -162,137 +95,4 @@ export async function describeStepGeometry(stepPath) {
     throw new Error("Geometri ozeti alinamadi: " + text);
   }
   return JSON.parse(match[1]);
-}
-
-function gcodeGenPy(stepPath, gcodePath) {
-  return [
-    stepInsertPy(stepPath, "RoverCAM"),
-    "base = shape_objs[0]",
-    "",
-    "# --- Import the CAM (Path) API. Module layout differs across FreeCAD",
-    "# versions, so try the 1.0/1.1 layout first, then the legacy PathScripts.",
-    "import Path",
-    "try:",
-    "    from Path.Main import Job as PathJob",
-    "    import Path.Op.Profile as PathProfile",
-    "    import Path.Op.Drilling as PathDrilling",
-    "    _api = 'new'",
-    "except Exception:",
-    "    from PathScripts import PathJob",
-    "    from PathScripts import PathProfile",
-    "    from PathScripts import PathDrilling",
-    "    _api = 'old'",
-    "",
-    "job = PathJob.Create('RoverJob', [base], None)",
-    "doc.recompute()",
-    "",
-    "# The default job ships with one tool controller; reuse it as our 6mm",
-    "# flat endmill and set safe aluminium feeds/speeds.",
-    "tcs = list(getattr(job, 'Tools').Group) if hasattr(job, 'Tools') else []",
-    "if not tcs and hasattr(job, 'ToolController'):",
-    "    tcs = list(job.ToolController)",
-    "if not tcs:",
-    "    raise RuntimeError('Job has no tool controller to configure')",
-    "tc = tcs[0]",
-    `tc.HorizFeed = ${JSON.stringify(HORIZ_FEED)}`,
-    `tc.VertFeed = ${JSON.stringify(VERT_FEED)}`,
-    `tc.SpindleSpeed = float(${SPINDLE_RPM})`,
-    "try:",
-    `    tc.Tool.Diameter = '${TOOL_DIAMETER_MM} mm'`,
-    "except Exception:",
-    "    pass",
-    "",
-    "ops = []",
-    "# Outer profile (contour). Do NOT process holes here — holes are drilled.",
-    "prof = PathProfile.Create('Profile')",
-    "prof.ToolController = tc",
-    "try:",
-    "    prof.processHoles = False",
-    "    prof.processPerimeter = True",
-    "    prof.Side = 'Outside'",
-    "except Exception:",
-    "    pass",
-    "ops.append(prof)",
-    "",
-    "# Drilling for vertical cylindrical holes, if any exist.",
-    "try:",
-    "    drl = PathDrilling.Create('Drilling')",
-    "    drl.ToolController = tc",
-    "    ops.append(drl)",
-    "except Exception:",
-    "    pass",
-    "",
-    "doc.recompute()",
-    "",
-    "# Post-process to GRBL G-code. NEVER pass '--help' to a post processor:",
-    "# argparse calls sys.exit and kills FreeCAD (HANDOFF #6).",
-    "try:",
-    "    from Path.Post.scripts import grbl_post",
-    "except Exception:",
-    "    from PathScripts.post import grbl_post",
-    "",
-    "postlist = []",
-    "if hasattr(job, 'Operations') and hasattr(job.Operations, 'Group'):",
-    "    postlist = list(job.Operations.Group)",
-    "if not postlist:",
-    "    postlist = ops",
-    "",
-    `_out = ${JSON.stringify(gcodePath)}`,
-    "grbl_post.export(postlist, _out, '--no-show-editor')",
-    "print('GCODE_PATH=' + _out)",
-    "try:",
-    "    FreeCAD.closeDocument(doc.Name)",
-    "except Exception:",
-    "    pass",
-  ].join("\n");
-}
-
-/**
- * Generate GRBL G-code for a simple part. Threaded/fastener features (from the
- * prompt) and non-simple geometry route to the CAM assistant instead of getting
- * naive toolpaths.
- * @param {string} stepPath basename or path of a STEP file in the output dir
- * @param {string} [context] the original prompt / description, scanned for
- *   metric-thread and fastener keywords (M6, somun, civata, vida, ...)
- * @returns {Promise<{complex: boolean, message?: string, gcodePath?: string}>}
- */
-export async function generateGcode(stepPath, context = "") {
-  const abs = resolveStepPath(stepPath);
-  if (!fs.existsSync(abs)) {
-    throw new Error("STEP dosyasi bulunamadi: " + path.basename(abs));
-  }
-
-  // Threads/fasteners are never a simple drill+profile job: they need a pilot
-  // hole sized from the metric table plus tapping or thread milling. Force the
-  // assistant flow so those decisions are made explicitly.
-  const threads = detectThreads(context);
-  if (threads.hasThread) {
-    const sizeList = threads.sizes.map((s) => `M${s}`).join(", ");
-    return {
-      complex: true,
-      message:
-        "Disli/baglanti elemani ozelligi tespit edildi" +
-        (sizeList ? ` (${sizeList})` : "") +
-        "; CAM asistani ile pilot delik capi ve dis yontemi belirlenecek.",
-    };
-  }
-
-  const analysis = await analyzeStepGeometry(abs);
-  if (!analysis.simple) {
-    return {
-      complex: true,
-      message: "Bu parca karmasik; CAM asistani ile devam edin.",
-    };
-  }
-
-  const gcodePath = abs.replace(/\.(step|stp)$/i, "") + ".gcode";
-  const result = await callFreecadTool(config.freecadMcp.toolName, {
-    [config.freecadMcp.toolParam]: gcodeGenPy(abs, gcodePath),
-  });
-  const text = extractResultText(result);
-  const match = text.match(/GCODE_PATH=(.+)/);
-  if (result?.isError || !match) {
-    throw new Error("G-code uretilemedi: " + (text || "bilinmeyen hata"));
-  }
-  return { complex: false, gcodePath: match[1].trim() };
 }

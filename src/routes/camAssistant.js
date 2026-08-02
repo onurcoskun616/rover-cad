@@ -2,10 +2,10 @@ import path from "node:path";
 import { Router } from "express";
 import { apiKeyAuth } from "./apiKeyAuth.js";
 import {
-  generateCamQuestions,
   generateCamPlan,
   generateCamGcodeFromPlan,
 } from "../services/camAssistantService.js";
+import { getNextCamStep } from "../services/camWizardService.js";
 import { createJob, runJob } from "../services/jobStore.js";
 
 function makeFileUrl(proto, host, filePath) {
@@ -28,17 +28,21 @@ function requireStepPath(req, res) {
 // fall through untouched instead of being caught by a router-wide auth gate.
 const router = Router();
 
-// Step 2: questions the machinist must answer before planning.
-router.post("/cam-questions", apiKeyAuth, async (req, res, next) => {
+// Step 2: sequential wizard. Given the answers so far, return the next step to
+// ask (its recommendations shaped by earlier answers), or { done: true } once
+// everything needed is collected. Stateless — the client resends all answers.
+router.post("/cam-step", apiKeyAuth, async (req, res, next) => {
   try {
     const stepPath = requireStepPath(req, res);
     if (!stepPath) return;
-    const { prompt } = req.body ?? {};
-    const questions = await generateCamQuestions(
+    const { prompt, answers, targetIndex } = req.body ?? {};
+    const result = await getNextCamStep(
       stepPath,
       typeof prompt === "string" ? prompt : "",
+      answers && typeof answers === "object" ? answers : {},
+      Number.isInteger(targetIndex) ? targetIndex : undefined,
     );
-    res.json({ questions });
+    res.json(result);
   } catch (err) {
     next(err);
   }
