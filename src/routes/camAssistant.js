@@ -7,6 +7,7 @@ import {
   generateCamGcodeFromPlan,
 } from "../services/camAssistantService.js";
 import { getNextCamStep } from "../services/camWizardService.js";
+import { effectiveAnswers } from "../services/inventoryService.js";
 import { computeQuote, generateQuotePdf } from "../services/quoteService.js";
 import { createJob, runJob } from "../services/jobStore.js";
 
@@ -149,12 +150,23 @@ router.post("/cam-quote", apiKeyAuth, async (req, res, next) => {
   try {
     const { mode, minutes, answers, bbox, inputs, partName, material } = req.body ?? {};
     const quoteMode = mode === "detayli" ? "detayli" : "basit";
+    const eff = effectiveAnswers(answers && typeof answers === "object" ? answers : {});
+    const quoteInputs = inputs && typeof inputs === "object" ? { ...inputs } : {};
+    // If a machine profile is selected and no hourly rate was entered, use the
+    // profile's rate (integrates the inventory with the quote engine).
+    if (
+      quoteMode === "basit" &&
+      (quoteInputs.hourlyRate === undefined || quoteInputs.hourlyRate === null || quoteInputs.hourlyRate === "") &&
+      eff._machineHourlyRate
+    ) {
+      quoteInputs.hourlyRate = eff._machineHourlyRate;
+    }
     const quote = computeQuote({
       mode: quoteMode,
       minutes: Number(minutes) || 0,
-      answers: answers && typeof answers === "object" ? answers : {},
+      answers: eff,
       bbox: bbox && typeof bbox === "object" ? bbox : {},
-      inputs: inputs && typeof inputs === "object" ? inputs : {},
+      inputs: quoteInputs,
     });
     const pdfPath = await generateQuotePdf({
       partName: typeof partName === "string" ? partName : "",

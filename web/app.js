@@ -841,6 +841,153 @@ async function loadStlPreview(stlUrl) {
   }
 }
 
+// --- Machine & tool inventory ("Makine ve Takımlarım") ---------------------
+const mainSection = document.querySelector("main");
+const inventorySection = document.getElementById("inventory-section");
+const navMain = document.getElementById("nav-main");
+const navInventory = document.getElementById("nav-inventory");
+const machinesList = document.getElementById("machines-list");
+const toolsList = document.getElementById("tools-list");
+
+function showView(view) {
+  const inv = view === "inventory";
+  inventorySection.hidden = !inv;
+  mainSection.hidden = inv;
+  navInventory.classList.toggle("active", inv);
+  navMain.classList.toggle("active", !inv);
+  if (inv) {
+    loadMachines();
+    loadTools();
+  }
+}
+
+async function apiJson(url, options) {
+  const resp = await fetch(url, {
+    ...options,
+    headers: { "Content-Type": "application/json", "x-api-key": API_KEY, ...(options?.headers || {}) },
+  });
+  return { ok: resp.ok, data: await readJson(resp) };
+}
+
+async function loadMachines() {
+  machinesList.innerHTML = "<li>Yükleniyor…</li>";
+  const { ok, data } = await apiJson(`${API_BASE}/machines`, { method: "GET" });
+  if (!ok || !data) {
+    machinesList.innerHTML = "<li>Makineler yüklenemedi.</li>";
+    return;
+  }
+  const machines = data.machines || [];
+  if (!machines.length) {
+    machinesList.innerHTML = "<li class=\"inventory-empty\">Kayıtlı makine yok.</li>";
+    return;
+  }
+  machinesList.innerHTML = "";
+  machines.forEach((m) => {
+    const li = document.createElement("li");
+    li.className = "inventory-item";
+    const info = document.createElement("span");
+    info.textContent = `${m.name} — ${m.axisCount} eksen, ${m.postProcessor}, ${m.hourlyRate} TL/saat`;
+    const del = document.createElement("button");
+    del.type = "button";
+    del.className = "secondary";
+    del.textContent = "Sil";
+    del.addEventListener("click", () => deleteEntity("machines", m.id, loadMachines));
+    li.append(info, del);
+    machinesList.appendChild(li);
+  });
+}
+
+async function loadTools() {
+  toolsList.innerHTML = "<li>Yükleniyor…</li>";
+  const { ok, data } = await apiJson(`${API_BASE}/tools`, { method: "GET" });
+  if (!ok || !data) {
+    toolsList.innerHTML = "<li>Takımlar yüklenemedi.</li>";
+    return;
+  }
+  const tools = data.tools || [];
+  if (!tools.length) {
+    toolsList.innerHTML = "<li class=\"inventory-empty\">Kayıtlı takım yok.</li>";
+    return;
+  }
+  toolsList.innerHTML = "";
+  tools.forEach((t) => {
+    const li = document.createElement("li");
+    li.className = "inventory-item";
+    const info = document.createElement("span");
+    info.textContent = `${t.name} — Ø${t.diameter}mm, ${t.flutes} ağız, ${t.material}${t.stock != null ? `, stok: ${t.stock}` : ""}`;
+    const del = document.createElement("button");
+    del.type = "button";
+    del.className = "secondary";
+    del.textContent = "Sil";
+    del.addEventListener("click", () => deleteEntity("tools", t.id, loadTools));
+    li.append(info, del);
+    toolsList.appendChild(li);
+  });
+}
+
+async function deleteEntity(kind, id, reload) {
+  const { ok } = await apiJson(`${API_BASE}/${kind}/${id}`, { method: "DELETE" });
+  if (ok) reload();
+}
+
+function fieldNum(id) {
+  const v = document.getElementById(id).value.trim();
+  return v === "" ? undefined : Number(v);
+}
+
+async function addMachineProfile() {
+  const name = document.getElementById("m-name").value.trim();
+  if (!name) {
+    alert("Makine adı zorunludur.");
+    return;
+  }
+  const body = {
+    name,
+    axisCount: Number(document.getElementById("m-axis").value),
+    postProcessor: document.getElementById("m-post").value,
+    maxSpindleRpm: fieldNum("m-rpm"),
+    workArea: { x: fieldNum("m-wx"), y: fieldNum("m-wy"), z: fieldNum("m-wz") },
+    hourlyRate: fieldNum("m-rate"),
+  };
+  const { ok, data } = await apiJson(`${API_BASE}/machines`, { method: "POST", body: JSON.stringify(body) });
+  if (!ok) {
+    alert(data?.error ?? "Makine eklenemedi.");
+    return;
+  }
+  document.getElementById("m-name").value = "";
+  loadMachines();
+}
+
+async function addToolProfile() {
+  const name = document.getElementById("t-name").value.trim();
+  if (!name) {
+    alert("Takım adı/kodu zorunludur.");
+    return;
+  }
+  const body = {
+    name,
+    type: document.getElementById("t-type").value,
+    diameter: fieldNum("t-dia"),
+    flutes: fieldNum("t-flutes"),
+    material: document.getElementById("t-material").value,
+    cuttingSpeedMin: fieldNum("t-vmin"),
+    cuttingSpeedMax: fieldNum("t-vmax"),
+    stock: fieldNum("t-stock"),
+  };
+  const { ok, data } = await apiJson(`${API_BASE}/tools`, { method: "POST", body: JSON.stringify(body) });
+  if (!ok) {
+    alert(data?.error ?? "Takım eklenemedi.");
+    return;
+  }
+  document.getElementById("t-name").value = "";
+  loadTools();
+}
+
+navMain.addEventListener("click", () => showView("main"));
+navInventory.addEventListener("click", () => showView("inventory"));
+document.getElementById("m-add").addEventListener("click", addMachineProfile);
+document.getElementById("t-add").addEventListener("click", addToolProfile);
+
 generateBtn.addEventListener("click", handleGenerate);
 reviseBtn.addEventListener("click", handleRevise);
 pdfBtn.addEventListener("click", handlePdf);

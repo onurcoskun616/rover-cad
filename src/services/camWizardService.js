@@ -1,6 +1,12 @@
 import fs from "node:fs";
 import { describeStepGeometry, resolveStepPath } from "./camService.js";
 import { detectThreads, THREAD_METHOD_QUESTION } from "./threadSpec.js";
+import {
+  listMachines,
+  suitableTools,
+  toolLabel,
+  effectiveAnswers,
+} from "./inventoryService.js";
 
 // --- Deterministic machining data -------------------------------------------
 // Cutting parameters must be reproducible, so they come from a table + the
@@ -150,6 +156,15 @@ export function suggestOperations(geometry) {
   return { is3D, text: ops.join(", ") };
 }
 
+// Note about drillable hole diameters detected in the geometry (for the tool
+// step intro), derived from the distinct cylinder radii.
+function holeDiametersNote(geometry) {
+  const radii = Array.isArray(geometry?.cylinderRadiiMm) ? geometry.cylinderRadiiMm : [];
+  const dias = radii.map((r) => Math.round(r * 2 * 100) / 100).filter((d) => d > 0);
+  if (!dias.length) return "";
+  return `Tespit edilen delik caplari: ${dias.join(", ")} mm.`;
+}
+
 // Read an existing answer, else a recommended default.
 function pick(answers, name, fallback) {
   const v = answers?.[name];
@@ -206,14 +221,28 @@ function buildApplicableSteps({ geometry, threads, answers }) {
     ],
   });
 
-  // 3. Machine axis + post-processor / controller
+  // 3. Machine axis + post-processor / controller. Saved machine profiles are
+  //    offered first; picking one overrides the manual axis/post fields.
+  const machines = listMachines();
+  const machineFields = [];
+  let machineIntro;
+  if (machines.length) {
+    const opts = [...machines.map((m) => m.name), "Elle gir (yeni makine)"];
+    machineFields.push(
+      selectField("machine", "Kayitli makine", opts, pick(a, "machine", opts[0])),
+    );
+    machineIntro =
+      "Kayitli makinelerinizden secin (eksen/post-processor otomatik dolar) veya 'Elle gir' ile asagidan girin.";
+  }
+  machineFields.push(
+    selectField("axisCount", "Tezgah ekseni", AXIS_OPTIONS, pick(a, "axisCount", AXIS_OPTIONS[0])),
+    selectField("postProcessor", "Post-processor / kontrolcu", POST_OPTIONS, pick(a, "postProcessor", POST_OPTIONS[0])),
+  );
   steps.push({
     id: "machine",
     title: "3. Tezgah ekseni ve post-processor",
-    fields: [
-      selectField("axisCount", "Tezgah ekseni", AXIS_OPTIONS, pick(a, "axisCount", AXIS_OPTIONS[0])),
-      selectField("postProcessor", "Post-processor / kontrolcu", POST_OPTIONS, pick(a, "postProcessor", POST_OPTIONS[0])),
-    ],
+    intro: machineIntro,
+    fields: machineFields,
   });
 
   // 4. Workholding
@@ -235,8 +264,25 @@ function buildApplicableSteps({ geometry, threads, answers }) {
     ],
   });
 
-  // 6. Tool selection (recommended endmill + cutter comp; thread method).
-  const toolFields = [
+  // 6. Tool selection. Saved tools (nearest recommended diameter first) are
+  //    offered; picking one overrides the manual diameter. Otherwise the
+  //    geometry-recommended diameter is used.
+  const toolFields = [];
+  const savedTools = suitableTools(endmill);
+  let toolIntro = holeDiametersNote(geometry);
+  if (savedTools.length) {
+    const opts = [...savedTools.map((t) => toolLabel(t)), "Elle gir (yeni takim)"];
+    toolFields.push(
+      selectField("tool", "Kayitli takim", opts, pick(a, "tool", opts[0])),
+    );
+    const nearest = savedTools[0];
+    toolIntro =
+      `${toolIntro} Envanterden en yakin: ${nearest.name} O${nearest.diameter}mm (onerilen O${endmill}mm).`.trim();
+  } else {
+    toolIntro =
+      `${toolIntro} Envanterinizde kayitli takim yok; onerilen O${endmill}mm.`.trim();
+  }
+  toolFields.push(
     numberField("endmillDiameter", "Ana freze capi", "mm", endmill),
     selectField(
       "cutterComp",
@@ -244,7 +290,7 @@ function buildApplicableSteps({ geometry, threads, answers }) {
       CUTTER_COMP_OPTIONS,
       pick(a, "cutterComp", CUTTER_COMP_OPTIONS[0]),
     ),
-  ];
+  );
   if (threads?.hasThread) {
     toolFields.push(
       selectField("threadMethod", THREAD_METHOD_QUESTION.question, THREAD_METHOD_QUESTION.options, pick(a, "threadMethod", THREAD_METHOD_QUESTION.options[0])),
@@ -253,6 +299,7 @@ function buildApplicableSteps({ geometry, threads, answers }) {
   steps.push({
     id: "tooling",
     title: "6. Takim secimi",
+    intro: toolIntro || undefined,
     fields: toolFields,
   });
 
@@ -351,7 +398,8 @@ export function nextCamStep({ geometry, threads, answers, targetIndex }) {
  * @returns {string}
  */
 export function camParamsBlock(answers, geometry) {
-  const a = answers ?? {};
+  // Resolve selected machine/tool profiles so the plan/code use their values.
+  const a = effectiveAnswers(answers);
   const fin = deriveFinishParams(a);
   const repeats = geometry ? repeatedFeatures(geometry) : [];
   const repeatNote = repeats.length
@@ -362,11 +410,13 @@ export function camParamsBlock(answers, geometry) {
     `- Malzeme: ${a.material ?? "?"}`,
     `- Stok (ham blok) mm: ${a.stockX ?? "?"} x ${a.stockY ?? "?"} x ${a.stockZ ?? "?"} (her yuzeyden pay: ${a.stockMargin ?? "?"} mm)`,
     `- Ust yuzey Face operasyonu: ${a.faceTop ?? "?"}`,
+    a._machineName ? `- Makine profili: ${a._machineName}` : null,
     `- Tezgah ekseni: ${a.axisCount ?? "?"}`,
     `- Post-processor / kontrolcu: ${a.postProcessor ?? "GRBL"}`,
     `- Baglama: ${a.workholding ?? "?"}`,
     `- Referans/sifir (WCS): ${a.wcs ?? "?"}`,
     `- Calisma duzlemi: ${a.workPlane ?? "G17 / XY"}`,
+    a._toolName ? `- Takim profili: ${a._toolName} (${a._toolMaterial ?? ""}, ${a._toolFlutes ?? "?"} agiz)` : null,
     `- Ana freze capi: ${a.endmillDiameter ?? "?"} mm`,
     `- Takim yaricap kompanzasyonu: ${a.cutterComp ?? "Yok"}`,
     a.threadMethod ? `- Dis yontemi: ${a.threadMethod}` : null,

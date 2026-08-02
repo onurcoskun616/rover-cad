@@ -8,6 +8,8 @@ const freecadArgs = (process.env.FREECAD_MCP_ARGS ?? "freecad-mcp")
 export const config = {
   port: Number(process.env.PORT ?? 3000),
   outputDir: path.resolve(process.env.OUTPUT_DIR ?? "output"),
+  // Persistent user data (machine/tool inventory). File-based JSON store.
+  dataDir: path.resolve(process.env.DATA_DIR ?? "data"),
   corsOrigin: process.env.CORS_ORIGIN ?? "*",
   apiKey: process.env.API_KEY ?? "",
   freecadMcp: {

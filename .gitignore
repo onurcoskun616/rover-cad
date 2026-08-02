@@ -3,6 +3,9 @@ node_modules/
 output/*
 !output/.gitkeep
 
+# User inventory data (machine/tool profiles), created at runtime
+data/
+
 # Local Netlify folder
 .netlify
 
