@@ -7,8 +7,12 @@ const API_KEY = "1d48ec585a4b306db72a23be0b7ce8f56618c1275a3ea5efcee96df1106712f
 
 const tabText = document.getElementById("tab-text");
 const tabImage = document.getElementById("tab-image");
+const tabStep = document.getElementById("tab-step");
 const panelText = document.getElementById("panel-text");
 const panelImage = document.getElementById("panel-image");
+const panelStep = document.getElementById("panel-step");
+const stepInput = document.getElementById("step-input");
+const stepLabel = document.getElementById("step-label");
 const promptInput = document.getElementById("prompt-input");
 const imageInput = document.getElementById("image-input");
 const imageLabel = document.getElementById("image-label");
@@ -57,7 +61,7 @@ const camReviseInput = document.getElementById("cam-revise-input");
 const camReviseSubmit = document.getElementById("cam-revise-submit");
 
 let viewer = null;
-let mode = "text"; // "text" | "image"
+let mode = "text"; // "text" | "image" | "step"
 let lastStepPath = null;
 let lastGeneratedCode = null;
 let lastBbox = null;
@@ -70,21 +74,34 @@ let camPlan = null;
 
 function setMode(next) {
   mode = next;
-  const isText = next === "text";
-  tabText.classList.toggle("active", isText);
-  tabImage.classList.toggle("active", !isText);
-  tabText.setAttribute("aria-selected", String(isText));
-  tabImage.setAttribute("aria-selected", String(!isText));
-  panelText.hidden = !isText;
-  panelImage.hidden = isText;
+  const tabs = [
+    [tabText, panelText, "text"],
+    [tabImage, panelImage, "image"],
+    [tabStep, panelStep, "step"],
+  ];
+  for (const [tab, panel, name] of tabs) {
+    const active = name === next;
+    tab.classList.toggle("active", active);
+    tab.setAttribute("aria-selected", String(active));
+    panel.hidden = !active;
+  }
+  generateBtn.textContent = next === "step" ? "Yükle ve Önizle" : "Oluştur";
 }
 
 tabText.addEventListener("click", () => setMode("text"));
 tabImage.addEventListener("click", () => setMode("image"));
+tabStep.addEventListener("click", () => setMode("step"));
 
 imageInput.addEventListener("change", () => {
   const file = imageInput.files?.[0];
   imageLabel.textContent = file ? file.name : "Bir teknik resim seçin (PNG, JPG…)";
+});
+
+stepInput.addEventListener("change", () => {
+  const file = stepInput.files?.[0];
+  stepLabel.textContent = file
+    ? file.name
+    : "Bir STEP/IGES dosyası seçin (.step, .stp, .iges, .igs)";
 });
 
 function setLoading(isLoading, message) {
@@ -241,7 +258,7 @@ async function handleGenerate() {
       headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
       body: JSON.stringify({ prompt }),
     };
-  } else {
+  } else if (mode === "image") {
     const file = imageInput.files?.[0];
     if (!file) {
       showError("Lütfen bir teknik resim seçin.");
@@ -255,6 +272,19 @@ async function handleGenerate() {
       form.append("prompt", lastPrompt);
     }
     url = `${API_BASE}/generate-from-image`;
+    options = { method: "POST", headers: { "x-api-key": API_KEY }, body: form };
+  } else {
+    // STEP/IGES upload: import in FreeCAD, preview, then jump straight to CAM.
+    const file = stepInput.files?.[0];
+    if (!file) {
+      showError("Lütfen bir STEP/IGES dosyası seçin.");
+      return;
+    }
+    baseMessage = "Dosya yükleniyor ve FreeCAD'e aktarılıyor";
+    lastPrompt = "";
+    const form = new FormData();
+    form.append("file", file);
+    url = `${API_BASE}/upload-step`;
     options = { method: "POST", headers: { "x-api-key": API_KEY }, body: form };
   }
 

@@ -30,23 +30,12 @@ const SHAPE_OBJS_PY = [
 // the export/measure epilogue picks up whatever solids it left behind. Collapsing
 // the calls avoids re-parsing the document and re-deriving shape_objs three times
 // and removes three MCP round-trips per attempt.
-function buildRunExportCode(outputDir, baseName, generatedCode) {
-  const stepPath = path.join(outputDir, `${baseName}.step`);
-  const stlPath = path.join(outputDir, `${baseName}.stl`);
-
+// Export + measure epilogue (shared by the generate and upload flows): pick the
+// top-level solids in the active document, export STEP + a coarse preview STL,
+// and print the paths and bounding box. Runs in the same round-trip as whatever
+// produced the geometry.
+function exportEpiloguePy(outputDir, stepPath, stlPath) {
   return [
-    "import FreeCAD",
-    "if FreeCAD.ActiveDocument is not None:",
-    "    try:",
-    "        FreeCAD.closeDocument(FreeCAD.ActiveDocument.Name)",
-    "    except Exception:",
-    "        pass",
-    'FreeCAD.newDocument("RoverCAD")',
-    "",
-    "# --- generated model code ---",
-    generatedCode,
-    "",
-    "# --- export + measure epilogue (single round-trip) ---",
     "import Part, Mesh, os",
     "doc = FreeCAD.ActiveDocument",
     "if doc is None:",
@@ -82,6 +71,50 @@ function buildRunExportCode(outputDir, baseName, generatedCode) {
   ].join("\n");
 }
 
+function freshDocPy() {
+  return [
+    "import FreeCAD",
+    "if FreeCAD.ActiveDocument is not None:",
+    "    try:",
+    "        FreeCAD.closeDocument(FreeCAD.ActiveDocument.Name)",
+    "    except Exception:",
+    "        pass",
+    'FreeCAD.newDocument("RoverCAD")',
+  ].join("\n");
+}
+
+function buildRunExportCode(outputDir, baseName, generatedCode) {
+  const stepPath = path.join(outputDir, `${baseName}.step`);
+  const stlPath = path.join(outputDir, `${baseName}.stl`);
+
+  return [
+    freshDocPy(),
+    "",
+    "# --- generated model code ---",
+    generatedCode,
+    "",
+    "# --- export + measure epilogue (single round-trip) ---",
+    exportEpiloguePy(outputDir, stepPath, stlPath),
+  ].join("\n");
+}
+
+// Import an uploaded STEP/IGES file into a fresh document and run the same
+// export epilogue, normalising it to a STEP + preview STL the rest of the
+// pipeline (preview, CAM, TechDraw) understands. Part.insert dispatches by file
+// extension, so it handles both STEP and IGES.
+function buildImportExportCode(outputDir, baseName, uploadedPath) {
+  const stepPath = path.join(outputDir, `${baseName}.step`);
+  const stlPath = path.join(outputDir, `${baseName}.stl`);
+
+  return [
+    freshDocPy(),
+    "import Part",
+    `Part.insert(${JSON.stringify(uploadedPath)}, FreeCAD.ActiveDocument.Name)`,
+    "",
+    exportEpiloguePy(outputDir, stepPath, stlPath),
+  ].join("\n");
+}
+
 /**
  * Run the generated code and export/measure in a single FreeCAD call.
  * @param {string} generatedCode FreeCAD Python for the model
@@ -102,6 +135,51 @@ export async function runGeneratedCodeAndExport(generatedCode) {
   const stepMatch = text.match(/STEP_PATH=(.+)/);
   if (result?.isError || text.startsWith("Failed to execute code") || !stepMatch) {
     return { ok: false, error: text || "FreeCAD kodu calistiramadi" };
+  }
+
+  const stlMatch = text.match(/STL_PATH=(.+)/);
+  const x = text.match(/BBOX_X=([-\d.eE+]+)/);
+  const y = text.match(/BBOX_Y=([-\d.eE+]+)/);
+  const z = text.match(/BBOX_Z=([-\d.eE+]+)/);
+
+  return {
+    ok: true,
+    stepPath: stepMatch[1].trim(),
+    stlPath: stlMatch ? stlMatch[1].trim() : null,
+    baseName,
+    bbox: {
+      x: x ? Number(x[1]) : null,
+      y: y ? Number(y[1]) : null,
+      z: z ? Number(z[1]) : null,
+    },
+  };
+}
+
+/**
+ * Import an uploaded STEP/IGES file, normalise it to STEP + preview STL, and
+ * read the bounding box — all in one FreeCAD round-trip. A corrupt or
+ * unsupported file makes FreeCAD raise, which surfaces as ok:false + a message.
+ * @param {string} uploadedPath absolute path of the uploaded CAD file
+ * @returns {Promise<{ok: boolean, error?: string, stepPath?: string,
+ *   stlPath?: string, baseName?: string, bbox?: {x:number,y:number,z:number}}>}
+ */
+export async function runImportAndExport(uploadedPath) {
+  const baseName = `rover_upload_${Date.now()}_${randomUUID().slice(0, 8)}`;
+  const code = buildImportExportCode(config.outputDir, baseName, uploadedPath);
+
+  const result = await callFreecadTool(config.freecadMcp.toolName, {
+    [config.freecadMcp.toolParam]: code,
+  });
+  const text = extractResultText(result);
+
+  const stepMatch = text.match(/STEP_PATH=(.+)/);
+  if (result?.isError || text.startsWith("Failed to execute code") || !stepMatch) {
+    return {
+      ok: false,
+      error:
+        "CAD dosyasi FreeCAD'e aktarilamadi (bozuk ya da desteklenmeyen dosya olabilir): " +
+        (text || "bilinmeyen hata"),
+    };
   }
 
   const stlMatch = text.match(/STL_PATH=(.+)/);
