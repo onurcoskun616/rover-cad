@@ -136,14 +136,23 @@
             <p id="cam-status-text"></p>
           </div>
 
-          <!-- CAM assistant (every part): questions -> plan -> confirm -->
+          <!-- CAM assistant (every part): step-by-step wizard -> plan -> confirm -->
           <div id="cam-assistant" class="cam-assistant" hidden>
             <h3 class="cam-assistant-title">CAM Asistanı</h3>
-            <p class="cam-assistant-intro">
-              İşleme planı için birkaç soruyu yanıtlayın.
-            </p>
 
-            <form id="cam-questions-form" class="cam-questions"></form>
+            <div id="cam-wizard" class="cam-wizard" hidden>
+              <p id="cam-step-progress" class="cam-step-progress"></p>
+              <h4 id="cam-step-title" class="cam-step-title"></h4>
+              <p id="cam-step-intro" class="cam-step-intro" hidden></p>
+              <form id="cam-step-fields" class="cam-step-fields"></form>
+              <div class="cam-wizard-nav">
+                <button id="cam-back-btn" type="button" class="secondary" hidden>
+                  Geri
+                </button>
+                <button id="cam-next-btn" type="button">İleri</button>
+              </div>
+            </div>
+
             <button id="cam-plan-btn" type="button" hidden>Plan Oluştur</button>
 
             <div id="cam-plan-view" class="cam-plan" hidden>

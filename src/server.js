@@ -35,8 +35,8 @@ app.use("/jobs", jobsRouter);
 // preview them. Registered before the "/"-mounted CAM assistant router so these
 // public downloads are never intercepted.
 app.use("/files", express.static(config.outputDir));
-// CAM assistant (question -> plan -> confirm) for every part:
-// /cam-questions, /cam-plan, /cam-confirm.
+// CAM assistant (step wizard -> plan -> confirm) for every part:
+// /cam-step, /cam-plan, /cam-confirm.
 // Mounted at "/" (its routes carry their own auth), so keep it last.
 app.use("/", camAssistantRouter);
 

@@ -5,16 +5,15 @@ import { runClaudeCli, stripCodeFence } from "./claudeCli.js";
 import { callFreecadTool, extractResultText } from "./freecadMcpClient.js";
 import { config } from "../config.js";
 import { resolveStepPath, describeStepGeometry } from "./camService.js";
+import { camParamsBlock } from "./camWizardService.js";
 import {
   detectThreads,
   detectThreadMethod,
   threadGuidanceBlock,
-  THREAD_METHOD_QUESTION,
 } from "./threadSpec.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const promptFile = (name) => path.join(__dirname, "..", "prompts", name);
-const QUESTIONS_PROMPT = promptFile("cam-questions-system-prompt.txt");
 const PLAN_PROMPT = promptFile("cam-plan-system-prompt.txt");
 const CODE_PROMPT = promptFile("cam-code-system-prompt.txt");
 
@@ -77,79 +76,6 @@ function geomBlock(geometry) {
   return `[GEOMETRI_OZETI]: ${JSON.stringify(geometry)}`;
 }
 
-// Added deterministically when the part has more than two horizontal levels
-// (i.e. it is stepped/multi-level), so the machinist is always asked how the
-// steps should be machined. Options are ASCII-only to match the prompt style.
-const STEP_LEVEL_QUESTION = {
-  question:
-    "Parcada birden fazla kademe (yukseklik seviyesi) var. Her kademe ayri bir operasyon olarak mi islenecek?",
-  options: ["Evet, her kademe ayri islensin", "Hayir, tek operasyonda", "Diger"],
-};
-
-/**
- * Produce the (max 5) questions needed before planning machining of a part. When
- * threads/fasteners are detected in the prompt, the tap-vs-thread-milling
- * question is added deterministically so it is always offered.
- * @param {string} stepPath basename/path of a STEP file in the output dir
- * @param {string} [context] original prompt/description, scanned for threads
- * @returns {Promise<Array<{question: string, options: string[]}>>}
- */
-export async function generateCamQuestions(stepPath, context = "") {
-  const geometry = await describeStepGeometry(stepPath);
-  const threads = detectThreads(context);
-  const isStepped = (geometry.horizontalLevelCount ?? 0) > 2;
-
-  let input = geomBlock(geometry);
-  if (threads.hasThread) {
-    // We add the threading-method question ourselves, so tell the model not to.
-    input +=
-      "\n[NOT]: Bu parcada metrik dis tespit edildi; dis yontemi (tap/frezeleme) sorusunu SEN SORMA.";
-  }
-  if (isStepped) {
-    // We add the per-step question ourselves, so tell the model not to.
-    input +=
-      "\n[NOT]: Bu parcada birden fazla kademe/seviye tespit edildi; kademelerin ayri islenip islenmeyecegi sorusunu SEN SORMA (biz ekleyecegiz), ancak diger sorulari bu kademeli geometriye gore uyarla.";
-  }
-  input += "\n[GOREV]: Bu parcanin islenmesi icin gereken sorulari uret.";
-
-  const questions = await runClaudeJson(input, QUESTIONS_PROMPT, (parsed) => {
-    if (!Array.isArray(parsed)) throw new Error("Sorular bir dizi olmali");
-    const list = parsed
-      .filter((q) => q && typeof q.question === "string")
-      .slice(0, 5)
-      .map((q) => ({
-        question: q.question,
-        options: Array.isArray(q.options) ? q.options.map(String) : [],
-      }));
-    if (list.length === 0) throw new Error("Gecerli soru uretilemedi");
-    return list;
-  });
-
-  // Deterministically guarantee the geometry-driven questions, keeping the total
-  // at <= 5 by trimming model-generated questions from the end (the standard
-  // material/axis/workholding/reference questions come first, so they survive).
-  const extras = [];
-  if (threads.hasThread) {
-    const already = questions.some((q) =>
-      /tap|kılavuz|klavuz|frez|thread/i.test(q.question),
-    );
-    if (!already) extras.push({ ...THREAD_METHOD_QUESTION });
-  }
-  if (isStepped) {
-    const already = questions.some((q) =>
-      /kademe|seviye|basamak|step/i.test(q.question),
-    );
-    if (!already) extras.push({ ...STEP_LEVEL_QUESTION });
-  }
-  if (extras.length) {
-    const room = Math.max(1, 5 - extras.length);
-    if (questions.length > room) questions.length = room;
-    questions.push(...extras);
-  }
-
-  return questions;
-}
-
 /**
  * Draft (or revise) a human-readable CAM operation plan.
  * @param {string} stepPath
@@ -159,9 +85,7 @@ export async function generateCamQuestions(stepPath, context = "") {
  */
 export async function generateCamPlan(stepPath, answers, opts = {}) {
   const geometry = await describeStepGeometry(stepPath);
-  let input =
-    geomBlock(geometry) +
-    `\n[CEVAPLAR]: ${JSON.stringify(answers ?? {})}`;
+  let input = geomBlock(geometry) + camParamsBlock(answers);
 
   // Inject computed pilot-hole diameters so the plan mentions the correct sizes.
   const threads = detectThreads(opts.context ?? "");
@@ -277,10 +201,10 @@ export async function generateCamGcodeFromPlan(stepPath, answers, plan, context 
     `[STEP_PATH]: ${abs}` +
     `\n[GCODE_OUTPUT_PATH]: ${gcodePath}` +
     `\n${geomBlock(geometry)}` +
-    `\n[CEVAPLAR]: ${JSON.stringify(answers ?? {})}` +
+    camParamsBlock(answers) +
     `\n[ONAYLANAN_PLAN]: ${JSON.stringify(plan)}` +
     threadGuidance +
-    "\n[GOREV]: Bu plani FreeCAD Path (CAM) operasyonlarina cevir; toolpath hesabini FreeCAD yapsin ve grbl_post.export ile yukaridaki cikti yoluna GRBL G-code yazdirilsin. G-code'u SEN yazma.";
+    "\n[GOREV]: Bu plani FreeCAD Path (CAM) operasyonlarina cevir; [CAM_PARAMETRELERI]'ndeki takim capi, spindle hizi, ilerlemeler, pasa derinligi, WCS ve post-processor degerlerini KULLAN. Toolpath hesabini FreeCAD yapsin ve secilen post-processor'un export'u ile yukaridaki cikti yoluna G-code yazdirilsin. G-code'u SEN yazma.";
 
   let lastError = "Bilinmeyen hata";
   let previousCode = null;

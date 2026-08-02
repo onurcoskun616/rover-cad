@@ -49,7 +49,7 @@ router.post("/", (req, res) => {
         };
       }
 
-      // The CAM assistant (/cam-questions) and the technical drawing
+      // The CAM assistant (/cam-step) and the technical drawing
       // (/generate-pdf) are produced on demand, so no extra FreeCAD round-trip
       // here.
       return {
