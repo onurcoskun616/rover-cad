@@ -3,6 +3,7 @@ import { Router } from "express";
 import { apiKeyAuth } from "./apiKeyAuth.js";
 import {
   generateCamPlan,
+  generateCamPreview,
   generateCamGcodeFromPlan,
 } from "../services/camAssistantService.js";
 import { getNextCamStep } from "../services/camWizardService.js";
@@ -65,13 +66,47 @@ router.post("/cam-plan", apiKeyAuth, async (req, res, next) => {
   }
 });
 
-// Step 4: on approval, build real Path operations and export GRBL G-code. Async
-// (polled via /jobs/:id): this runs the Claude CLI plus FreeCAD Path ops with a
-// retry loop and can easily exceed Cloudflare's 100s limit.
-router.post("/cam-confirm", apiKeyAuth, (req, res) => {
+// Step 4: build the Path operations and export a TOOLPATH PREVIEW (no G-code
+// yet). Async (polled via /jobs/:id). Returns a preview file URL to visualise
+// plus a token so the confirm step can reuse the exact same operations.
+router.post("/cam-preview", apiKeyAuth, (req, res) => {
   const stepPath = requireStepPath(req, res);
   if (!stepPath) return;
   const { answers, plan, prompt } = req.body ?? {};
+  if (!plan || typeof plan !== "object") {
+    return res.status(400).json({ error: "plan is required" });
+  }
+
+  const context = typeof prompt === "string" ? prompt : "";
+  const proto = req.protocol;
+  const host = req.get("host");
+  const jobId = createJob();
+
+  runJob(
+    jobId,
+    async () => {
+      const result = await generateCamPreview(stepPath, answers ?? {}, plan, context);
+      return {
+        ok: true,
+        body: {
+          token: result.token,
+          previewUrl: makeFileUrl(proto, host, result.previewPath),
+        },
+      };
+    },
+    { exclusive: true },
+  );
+
+  res.status(202).json({ jobId });
+});
+
+// Step 5: only AFTER the user approves the previewed toolpath, post-process it
+// into G-code. Reuses the approved operations via `token` so the exported
+// G-code matches the preview exactly. Async (polled via /jobs/:id).
+router.post("/cam-confirm", apiKeyAuth, (req, res) => {
+  const stepPath = requireStepPath(req, res);
+  if (!stepPath) return;
+  const { answers, plan, prompt, token } = req.body ?? {};
   if (!plan || typeof plan !== "object") {
     return res.status(400).json({ error: "plan is required" });
   }
@@ -89,6 +124,7 @@ router.post("/cam-confirm", apiKeyAuth, (req, res) => {
         answers ?? {},
         plan,
         context,
+        typeof token === "string" ? token : null,
       );
       return {
         ok: true,

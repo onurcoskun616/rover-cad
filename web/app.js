@@ -47,7 +47,10 @@ const camNextBtn = document.getElementById("cam-next-btn");
 const camPlanBtn = document.getElementById("cam-plan-btn");
 const camPlanView = document.getElementById("cam-plan-view");
 const camPlanText = document.getElementById("cam-plan-text");
+const camPreviewBtn = document.getElementById("cam-preview-btn");
+const camPreviewView = document.getElementById("cam-preview-view");
 const camConfirmBtn = document.getElementById("cam-confirm-btn");
+const camRejectBtn = document.getElementById("cam-reject-btn");
 const camReviseBtn = document.getElementById("cam-revise-btn");
 const camReviseBox = document.getElementById("cam-revise-box");
 const camReviseInput = document.getElementById("cam-revise-input");
@@ -62,6 +65,7 @@ let lastPrompt = "";
 let camAnswers = {};
 let camStepIndex = 0;
 let camStepFieldNames = [];
+let camPreviewToken = null;
 let camPlan = null;
 
 function setMode(next) {
@@ -130,11 +134,13 @@ function resetCamAssistant() {
   camPlanBtn.hidden = true;
   camPlanView.hidden = true;
   camPlanText.textContent = "";
+  camPreviewView.hidden = true;
   camReviseBox.hidden = true;
   camReviseInput.value = "";
   camAnswers = {};
   camStepIndex = 0;
   camStepFieldNames = [];
+  camPreviewToken = null;
   camPlan = null;
 }
 
@@ -558,6 +564,9 @@ async function requestCamPlan(changeRequest) {
     camPlanView.hidden = false;
     camReviseBox.hidden = true;
     camReviseInput.value = "";
+    // A new plan invalidates any previous toolpath preview/approval.
+    camPreviewView.hidden = true;
+    camPreviewToken = null;
     gcodeLink.hidden = true;
   } catch (err) {
     setCamStatus(`Sunucuya bağlanılamadı: ${err.message}`, false);
@@ -571,11 +580,68 @@ async function handleCamPlan() {
   await requestCamPlan(null);
 }
 
-async function handleCamConfirm() {
+// Build the Path operations and show a toolpath preview in the 3D viewer. No
+// G-code is produced until the user approves this preview.
+async function handleCamPreview() {
   if (!camPlan) return;
-  camConfirmBtn.disabled = true;
+  camPreviewBtn.disabled = true;
   camReviseBtn.disabled = true;
-  setCamStatus("Plan onaylandı, G-code üretiliyor…", true);
+  camPreviewView.hidden = true;
+  camPreviewToken = null;
+  gcodeLink.hidden = true;
+  setCamStatus("Takım yolu hesaplanıyor (önizleme)…", true);
+  try {
+    const result = await runAsyncJob(
+      `${API_BASE}/cam-preview`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
+        body: JSON.stringify({
+          stepPath: lastStepPath,
+          answers: camAnswers,
+          plan: camPlan,
+          prompt: lastPrompt,
+        }),
+      },
+      (seconds) => setCamStatus(`Takım yolu hesaplanıyor (önizleme)… (${seconds} sn)`, true),
+    );
+
+    if (result.error || !result.ok || !result.body?.previewUrl) {
+      setCamStatus(result.error ?? result.body?.error ?? "Önizleme üretilemedi.", false);
+      return;
+    }
+    camPreviewToken = result.body.token ?? null;
+    await renderToolpathPreview(result.body.previewUrl);
+    setCamStatus("", false);
+    camPreviewView.hidden = false;
+  } catch (err) {
+    setCamStatus(`Sunucuya bağlanılamadı: ${err.message}`, false);
+  } finally {
+    camPreviewBtn.disabled = false;
+    camReviseBtn.disabled = false;
+  }
+}
+
+async function renderToolpathPreview(previewUrl) {
+  const response = await fetch(previewUrl);
+  const data = await readJson(response);
+  const { initViewer, loadToolpath } = await import("./viewer.js");
+  if (!viewer) viewer = initViewer(viewerContainer);
+  loadToolpath(viewer, data ?? { toolpaths: [] });
+}
+
+function handleCamReject() {
+  // Reject the previewed toolpath: return to the plan so it can be revised.
+  camPreviewView.hidden = true;
+  camPreviewToken = null;
+  setCamStatus("Takım yolu reddedildi. Planı değiştirip tekrar önizleyin.", false);
+}
+
+async function handleCamConfirm() {
+  if (!camPlan || !camPreviewToken) return;
+  camConfirmBtn.disabled = true;
+  camRejectBtn.disabled = true;
+  setCamStatus("Takım yolu onaylandı, G-code üretiliyor…", true);
   try {
     const result = await runAsyncJob(
       `${API_BASE}/cam-confirm`,
@@ -587,9 +653,10 @@ async function handleCamConfirm() {
           answers: camAnswers,
           plan: camPlan,
           prompt: lastPrompt,
+          token: camPreviewToken,
         }),
       },
-      (seconds) => setCamStatus(`Plan onaylandı, G-code üretiliyor… (${seconds} sn)`, true),
+      (seconds) => setCamStatus(`G-code üretiliyor… (${seconds} sn)`, true),
     );
 
     if (result.error || !result.ok || !result.body?.gcodeUrl) {
@@ -603,7 +670,7 @@ async function handleCamConfirm() {
     setCamStatus(`Sunucuya bağlanılamadı: ${err.message}`, false);
   } finally {
     camConfirmBtn.disabled = false;
-    camReviseBtn.disabled = false;
+    camRejectBtn.disabled = false;
   }
 }
 
@@ -626,7 +693,9 @@ camBtn.addEventListener("click", handleCam);
 camNextBtn.addEventListener("click", handleCamNext);
 camBackBtn.addEventListener("click", handleCamBack);
 camPlanBtn.addEventListener("click", handleCamPlan);
+camPreviewBtn.addEventListener("click", handleCamPreview);
 camConfirmBtn.addEventListener("click", handleCamConfirm);
+camRejectBtn.addEventListener("click", handleCamReject);
 camReviseBtn.addEventListener("click", () => {
   camReviseBox.hidden = !camReviseBox.hidden;
 });

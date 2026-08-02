@@ -17,13 +17,20 @@ const MATERIAL_DATA = {
 };
 const DEFAULT_FLUTES = 2;
 
-export const MATERIAL_OPTIONS = Object.keys(MATERIAL_DATA);
+export const MATERIAL_OPTIONS = [
+  "Aluminyum",
+  "Celik",
+  "Paslanmaz Celik",
+  "Plastik",
+  "Ahsap",
+  "Diger",
+];
 const AXIS_OPTIONS = ["3 eksen", "4 eksen", "5 eksen"];
-const POST_OPTIONS = ["GRBL", "LinuxCNC", "Mach3/Mach4", "Marlin", "Genel (generic)"];
+const POST_OPTIONS = ["GRBL", "Mach3", "LinuxCNC", "Fanuc"];
 const WORKHOLDING_OPTIONS = [
   "Mengene",
-  "Vakum tabla",
-  "Civata/kelepce ile tabla",
+  "Vakum tablasi",
+  "Ozel fikstur",
   "Diger",
 ];
 const WCS_OPTIONS = [
@@ -32,17 +39,37 @@ const WCS_OPTIONS = [
   "Sol-alt kose, alt yuzey",
   "Diger",
 ];
+const WORKPLANE_OPTIONS = ["G17 / XY", "G18 / XZ", "G19 / YZ"];
+const CUTTER_COMP_OPTIONS = [
+  "Yok (kapali)",
+  "G41 (sol / climb taraf)",
+  "G42 (sag)",
+];
+const FACE_TOP_OPTIONS = [
+  "Evet, ust yuzey yuzeylensin (Face)",
+  "Hayir, gerekli degil",
+];
+const MILLING_DIR_OPTIONS = [
+  "Climb (ters yonlu)",
+  "Conventional (duz yonlu)",
+];
 const STEP_STRATEGY_OPTIONS = [
   "Her kademe ayri operasyon",
   "Tek operasyonda (kademeli pasalar)",
 ];
+const OP_MAPPING_OPTIONS = [
+  "Otomatik esleştir (onerilen)",
+  "Plani gorunce elle duzenlerim",
+];
+const GROUP_REPEATED_OPTIONS = [
+  "Evet, tek operasyon olarak grupla",
+  "Hayir, ayri ayri isle",
+];
 
 /**
- * Recommend spindle speed and feeds from material + tool diameter using the
- * standard formulas: rpm = Vc*1000/(pi*D), feed = rpm*fz*flutes.
- * @param {string} material
- * @param {number} toolDiameterMm
- * @returns {{spindleRpm:number, horizFeed:number, vertFeed:number, stepdown:number}}
+ * Recommend spindle speed, feeds, stepdown and stepover from material + tool
+ * diameter using the standard formulas: rpm = Vc*1000/(pi*D), feed = rpm*fz*z.
+ * @returns {{spindleRpm:number, horizFeed:number, vertFeed:number, stepdown:number, stepover:number}}
  */
 export function recommendCuttingParams(material, toolDiameterMm) {
   const d = MATERIAL_DATA[material] ?? MATERIAL_DATA.Aluminyum;
@@ -52,19 +79,32 @@ export function recommendCuttingParams(material, toolDiameterMm) {
   const horizFeed = Math.max(50, Math.round(rpm * d.fz * DEFAULT_FLUTES));
   const vertFeed = Math.max(20, Math.round(horizFeed * 0.3));
   const stepdown = Math.max(0.2, Math.round(d.apFactor * D * 10) / 10);
-  return { spindleRpm: rpm, horizFeed, vertFeed, stepdown };
+  const stepover = Math.max(0.1, Math.round(0.4 * D * 10) / 10);
+  return { spindleRpm: rpm, horizFeed, vertFeed, stepdown, stepover };
+}
+
+// Finish-pass parameters are derived deterministically from the roughing values
+// the user confirmed: lighter cut, finer stepover, no leftover allowance.
+function deriveFinishParams(answers) {
+  const feed = Number(answers?.horizFeed) || 0;
+  const stepdown = Number(answers?.stepdown) || 1;
+  const stepover = Number(answers?.stepover) || 1;
+  return {
+    finishFeed: Math.max(30, Math.round(feed * 0.6)),
+    finishStepdown: Math.max(0.1, Math.round(stepdown * 0.3 * 10) / 10),
+    finishStepover: Math.max(0.05, Math.round(stepover * 0.25 * 100) / 100),
+  };
 }
 
 // Raw stock: part bounding box + a machining margin on each side.
-const STOCK_MARGIN_MM = 5;
-function recommendStock(geometry) {
+function recommendStock(geometry, marginMm) {
   const bb = geometry?.boundingBoxMm ?? {};
-  const pad = (v) => Math.max(1, Math.ceil((Number(v) || 0) + 2 * STOCK_MARGIN_MM));
+  const m = Number(marginMm) >= 0 ? Number(marginMm) : 5;
+  const pad = (v) => Math.max(1, Math.ceil((Number(v) || 0) + 2 * m));
   return { x: pad(bb.x), y: pad(bb.y), z: pad(bb.z) };
 }
 
-// Recommend a general-purpose flat endmill sized to the part. Small parts get a
-// smaller tool so it fits the features.
+// Recommend a general-purpose flat endmill sized to the part.
 function recommendEndmill(geometry) {
   const bb = geometry?.boundingBoxMm ?? {};
   const minXY = Math.min(Number(bb.x) || 50, Number(bb.y) || 50);
@@ -73,34 +113,73 @@ function recommendEndmill(geometry) {
   return 8;
 }
 
-// Detected drillable hole diameters (from cylinder radii), for the tool step's
-// informational note.
-function holeDiametersNote(geometry) {
-  const radii = Array.isArray(geometry?.cylinderRadiiMm) ? geometry.cylinderRadiiMm : [];
-  const dias = radii.map((r) => Math.round(r * 2 * 100) / 100).filter((d) => d > 0);
-  if (dias.length === 0) return "";
-  return `Tespit edilen delik caplari: ${dias.join(", ")} mm (delme icin).`;
+// Group cylindrical faces by radius; radii present 2+ times are repeated
+// features (e.g. a set of identical mounting holes).
+export function repeatedFeatures(geometry) {
+  const counts = geometry?.cylinderRadiusCounts ?? {};
+  const out = [];
+  for (const [r, c] of Object.entries(counts)) {
+    if (c >= 2) {
+      out.push({ diameterMm: Math.round(Number(r) * 2 * 100) / 100, count: c });
+    }
+  }
+  return out.sort((a, b) => b.count - a.count);
 }
 
-// Read an existing answer, else a recommended default. Numbers are returned as
-// numbers so the frontend prefills a numeric input.
+// Heuristic feature -> standard-operation suggestion, shown to the user and fed
+// to the planner so operations are named specifically (not just pocket/profile).
+export function suggestOperations(geometry) {
+  const f = geometry?.faceCountsByType ?? {};
+  const levels = geometry?.horizontalLevelCount ?? 0;
+  const holes = (geometry?.cylinderRadiiMm ?? []).length;
+  const freeform =
+    (f.BSplineSurface || 0) +
+    (f.Cone || 0) +
+    (f.Sphere || 0) +
+    (f.Toroid || 0) +
+    (f.SurfaceOfRevolution || 0) +
+    (f.SurfaceOfExtrusion || 0);
+  const is3D = freeform > 0;
+  const ops = ["Face (ust yuzey)"];
+  if (levels > 2) ops.push("2D Adaptive Clearing + 2D Pocket (kademe/cepler)");
+  ops.push("2D Contour (dis kontur)");
+  if (holes > 0) ops.push("Drilling (delikler)");
+  if (is3D) {
+    ops.push("3D Adaptive Clearing (kaba) + Parallel/Scallop (finis)");
+  }
+  return { is3D, text: ops.join(", ") };
+}
+
+// Read an existing answer, else a recommended default.
 function pick(answers, name, fallback) {
   const v = answers?.[name];
   return v === undefined || v === "" ? fallback : v;
 }
 
+function selectField(name, label, options, value, intro) {
+  const f = { name, label, type: "select", options, value };
+  if (intro) f.intro = intro;
+  return f;
+}
+function numberField(name, label, unit, value) {
+  return { name, label, type: "number", unit, value };
+}
+
 /**
- * Build the ordered list of applicable wizard steps, each with its fields
- * prefilled from prior answers (so recommendations reflect earlier choices and
- * revisiting a step keeps the user's input). Conditional steps (thread method,
- * multi-level strategy) are only included when the geometry/prompt calls for it.
+ * Build the ordered list of applicable wizard steps, each prefilled from prior
+ * answers (so recommendations reflect earlier choices and revisiting keeps
+ * input). Conditional steps (thread method, stepped strategy, repeated-feature
+ * grouping) appear only when the geometry/prompt calls for them.
  */
 function buildApplicableSteps({ geometry, threads, answers }) {
   const a = answers ?? {};
-  const stock = recommendStock(geometry);
+  const margin = pick(a, "stockMargin", 5);
+  const stock = recommendStock(geometry, margin);
   const endmill = pick(a, "endmillDiameter", recommendEndmill(geometry));
   const params = recommendCuttingParams(a.material, endmill);
   const isStepped = (geometry?.horizontalLevelCount ?? 0) > 2;
+  const repeats = repeatedFeatures(geometry);
+  const opSuggestion = suggestOperations(geometry);
 
   const steps = [];
 
@@ -109,25 +188,21 @@ function buildApplicableSteps({ geometry, threads, answers }) {
     id: "material",
     title: "1. Malzeme secimi",
     fields: [
-      {
-        name: "material",
-        label: "Malzeme",
-        type: "select",
-        options: MATERIAL_OPTIONS,
-        value: pick(a, "material", MATERIAL_OPTIONS[0]),
-      },
+      selectField("material", "Malzeme", MATERIAL_OPTIONS, pick(a, "material", MATERIAL_OPTIONS[0])),
     ],
   });
 
-  // 2. Stock (raw block) size
+  // 2. Stock (raw block): per-side margin, block size, and top-face facing.
   steps.push({
     id: "stock",
     title: "2. Stok (ham blok) boyutu",
-    intro: "Onerilen: parca olculeri + her kenardan 5 mm pay.",
+    intro: "Blok, parca olculeri + her yuzeyden pay olarak onerilir.",
     fields: [
-      { name: "stockX", label: "Stok X", type: "number", unit: "mm", value: pick(a, "stockX", stock.x) },
-      { name: "stockY", label: "Stok Y", type: "number", unit: "mm", value: pick(a, "stockY", stock.y) },
-      { name: "stockZ", label: "Stok Z", type: "number", unit: "mm", value: pick(a, "stockZ", stock.z) },
+      numberField("stockMargin", "Her yuzeyden pay", "mm", margin),
+      numberField("stockX", "Stok X", "mm", pick(a, "stockX", stock.x)),
+      numberField("stockY", "Stok Y", "mm", pick(a, "stockY", stock.y)),
+      numberField("stockZ", "Stok Z", "mm", pick(a, "stockZ", stock.z)),
+      selectField("faceTop", "Ust yuzey ilk islemde yuzeylensin mi? (Face)", FACE_TOP_OPTIONS, pick(a, "faceTop", FACE_TOP_OPTIONS[0])),
     ],
   });
 
@@ -136,20 +211,8 @@ function buildApplicableSteps({ geometry, threads, answers }) {
     id: "machine",
     title: "3. Tezgah ekseni ve post-processor",
     fields: [
-      {
-        name: "axisCount",
-        label: "Tezgah ekseni",
-        type: "select",
-        options: AXIS_OPTIONS,
-        value: pick(a, "axisCount", AXIS_OPTIONS[0]),
-      },
-      {
-        name: "postProcessor",
-        label: "Post-processor / kontrolcu",
-        type: "select",
-        options: POST_OPTIONS,
-        value: pick(a, "postProcessor", POST_OPTIONS[0]),
-      },
+      selectField("axisCount", "Tezgah ekseni", AXIS_OPTIONS, pick(a, "axisCount", AXIS_OPTIONS[0])),
+      selectField("postProcessor", "Post-processor / kontrolcu", POST_OPTIONS, pick(a, "postProcessor", POST_OPTIONS[0])),
     ],
   });
 
@@ -158,85 +221,91 @@ function buildApplicableSteps({ geometry, threads, answers }) {
     id: "workholding",
     title: "4. Baglama yontemi",
     fields: [
-      {
-        name: "workholding",
-        label: "Baglama",
-        type: "select",
-        options: WORKHOLDING_OPTIONS,
-        value: pick(a, "workholding", WORKHOLDING_OPTIONS[0]),
-      },
+      selectField("workholding", "Baglama", WORKHOLDING_OPTIONS, pick(a, "workholding", WORKHOLDING_OPTIONS[0])),
     ],
   });
 
-  // 5. Reference / zero point (WCS)
+  // 5. Reference/zero point (WCS) + working plane (asked separately).
   steps.push({
-    id: "wcs",
-    title: "5. Referans / sifir noktasi (WCS)",
+    id: "reference",
+    title: "5. Referans noktasi (WCS) ve calisma duzlemi",
     fields: [
-      {
-        name: "wcs",
-        label: "Sifir noktasi",
-        type: "select",
-        options: WCS_OPTIONS,
-        value: pick(a, "wcs", WCS_OPTIONS[0]),
-      },
+      selectField("wcs", "Sifir noktasi (WCS)", WCS_OPTIONS, pick(a, "wcs", WCS_OPTIONS[0])),
+      selectField("workPlane", "Calisma duzlemi", WORKPLANE_OPTIONS, pick(a, "workPlane", WORKPLANE_OPTIONS[0])),
     ],
   });
 
-  // 6. Tool selection (geometry-recommended endmill + confirm/change; thread
-  //    method when threads are present).
+  // 6. Tool selection (recommended endmill + cutter comp; thread method).
   const toolFields = [
-    {
-      name: "endmillDiameter",
-      label: "Ana freze capi",
-      type: "number",
-      unit: "mm",
-      value: endmill,
-    },
+    numberField("endmillDiameter", "Ana freze capi", "mm", endmill),
+    selectField(
+      "cutterComp",
+      "Takim yaricap kompanzasyonu (torna: kesici ucu yaricapi)",
+      CUTTER_COMP_OPTIONS,
+      pick(a, "cutterComp", CUTTER_COMP_OPTIONS[0]),
+    ),
   ];
   if (threads?.hasThread) {
-    toolFields.push({
-      name: "threadMethod",
-      label: THREAD_METHOD_QUESTION.question,
-      type: "select",
-      options: THREAD_METHOD_QUESTION.options,
-      value: pick(a, "threadMethod", THREAD_METHOD_QUESTION.options[0]),
-    });
+    toolFields.push(
+      selectField("threadMethod", THREAD_METHOD_QUESTION.question, THREAD_METHOD_QUESTION.options, pick(a, "threadMethod", THREAD_METHOD_QUESTION.options[0])),
+    );
   }
   steps.push({
     id: "tooling",
     title: "6. Takim secimi",
-    intro: holeDiametersNote(geometry) || undefined,
     fields: toolFields,
   });
 
-  // 7. Cutting parameters (recommended from material + tool; confirm/change).
+  // 7. Operation-type mapping (feature -> standard operation name).
   steps.push({
-    id: "cutting",
-    title: "7. Kesme parametreleri",
-    intro: `Onerilenler ${a.material ?? MATERIAL_OPTIONS[0]} + O${endmill}mm takima gore hesaplandi.`,
+    id: "operations",
+    title: "7. Operasyon tipi esleştirmesi",
+    intro: `Tespit edilen ozelliklere onerilen operasyonlar: ${opSuggestion.text}. Parca ${opSuggestion.is3D ? "3D (serbest yuzeyli)" : "2.5D"} olarak degerlendirildi.`,
     fields: [
-      { name: "spindleRpm", label: "Spindle hizi", type: "number", unit: "rpm", value: pick(a, "spindleRpm", params.spindleRpm) },
-      { name: "horizFeed", label: "Yatay ilerleme", type: "number", unit: "mm/min", value: pick(a, "horizFeed", params.horizFeed) },
-      { name: "vertFeed", label: "Dikey ilerleme", type: "number", unit: "mm/min", value: pick(a, "vertFeed", params.vertFeed) },
-      { name: "stepdown", label: "Pasa derinligi", type: "number", unit: "mm", value: pick(a, "stepdown", params.stepdown) },
+      selectField("operationMapping", "Operasyon esleştirmesi", OP_MAPPING_OPTIONS, pick(a, "operationMapping", OP_MAPPING_OPTIONS[0])),
     ],
   });
 
-  // 8. Multi-level / stepped operation confirmation (only if stepped).
+  // 8. Cutting parameters — roughing values (+ finish derived later),
+  //    stock-to-leave, stepover and milling direction.
+  steps.push({
+    id: "cutting",
+    title: "8. Kesme parametreleri (kaba + finis)",
+    intro: `Onerilenler ${a.material ?? MATERIAL_OPTIONS[0]} + O${endmill}mm takima gore. Kaba ve finis ayri operasyon planlanir.`,
+    fields: [
+      numberField("spindleRpm", "Spindle hizi", "rpm", pick(a, "spindleRpm", params.spindleRpm)),
+      numberField("horizFeed", "Yatay ilerleme", "mm/min", pick(a, "horizFeed", params.horizFeed)),
+      numberField("vertFeed", "Dikey ilerleme", "mm/min", pick(a, "vertFeed", params.vertFeed)),
+      numberField("stepdown", "Kesme derinligi (stepdown)", "mm", pick(a, "stepdown", params.stepdown)),
+      numberField("stepover", "Yanal adim (stepover)", "mm", pick(a, "stepover", params.stepover)),
+      numberField("roughStockToLeave", "Kaba isleme finis payi (stock to leave)", "mm", pick(a, "roughStockToLeave", 0.3)),
+      selectField("millingDirection", "Kesme yonu", MILLING_DIR_OPTIONS, pick(a, "millingDirection", MILLING_DIR_OPTIONS[0])),
+    ],
+  });
+
+  // 9. Multi-level / stepped strategy (only if stepped).
   if (isStepped) {
     steps.push({
       id: "steps",
-      title: "8. Kademe / cok seviyeli operasyon",
+      title: "9. Kademe / cok seviyeli operasyon",
       intro: `Parcada ${geometry.horizontalLevelCount} farkli yukseklik seviyesi tespit edildi.`,
       fields: [
-        {
-          name: "stepStrategy",
-          label: "Kademeler nasil islensin?",
-          type: "select",
-          options: STEP_STRATEGY_OPTIONS,
-          value: pick(a, "stepStrategy", STEP_STRATEGY_OPTIONS[0]),
-        },
+        selectField("stepStrategy", "Kademeler nasil islensin?", STEP_STRATEGY_OPTIONS, pick(a, "stepStrategy", STEP_STRATEGY_OPTIONS[0])),
+      ],
+    });
+  }
+
+  // 10. Repeated-feature grouping (only if identical features detected).
+  if (repeats.length) {
+    const desc = repeats
+      .map((r) => `${r.count} adet O${r.diameterMm}mm`)
+      .join(", ");
+    steps.push({
+      id: "repeated",
+      title: "10. Tekrarlayan ozellik tespiti",
+      intro: `Ayni capta tekrarlayan ozellik tespit edildi: ${desc}. Tek operasyon olarak gruplanabilir.`,
+      fields: [
+        selectField("groupRepeated", "Tekrarlayan ozellikler nasil islensin?", GROUP_REPEATED_OPTIONS, pick(a, "groupRepeated", GROUP_REPEATED_OPTIONS[0])),
       ],
     });
   }
@@ -248,9 +317,8 @@ function buildApplicableSteps({ geometry, threads, answers }) {
  * Resolve which wizard step to show. The applicable step list depends only on
  * the geometry/prompt (not on answers), so navigation is index-driven: pass a
  * targetIndex to render a specific step (recomputed so its recommendations
- * reflect the current answers, and its fields prefilled from them). Without a
+ * reflect current answers, and its fields prefilled from them). Without a
  * targetIndex, returns the first unanswered step. targetIndex >= total => done.
- * @param {{geometry:object, threads:object, answers:object, targetIndex?:number}} ctx
  */
 export function nextCamStep({ geometry, threads, answers, targetIndex }) {
   const a = answers ?? {};
@@ -276,35 +344,49 @@ export function nextCamStep({ geometry, threads, answers, targetIndex }) {
 
 /**
  * Format the collected wizard answers into a block the plan/code prompts consume
- * and must honour (exact tool diameter, feeds/speeds, WCS, post-processor, ...).
+ * and must honour (exact tool diameter, feeds/speeds, WCS, post-processor,
+ * roughing + derived finishing, cutter comp, work plane, ...).
  * @param {object} answers
+ * @param {object} [geometry] used to note repeated features to group
  * @returns {string}
  */
-export function camParamsBlock(answers) {
+export function camParamsBlock(answers, geometry) {
   const a = answers ?? {};
+  const fin = deriveFinishParams(a);
+  const repeats = geometry ? repeatedFeatures(geometry) : [];
+  const repeatNote = repeats.length
+    ? repeats.map((r) => `${r.count}xO${r.diameterMm}mm`).join(", ")
+    : "";
   return [
     "\n[CAM_PARAMETRELERI] (bu degerlere uy):",
     `- Malzeme: ${a.material ?? "?"}`,
-    `- Stok (ham blok) mm: ${a.stockX ?? "?"} x ${a.stockY ?? "?"} x ${a.stockZ ?? "?"}`,
+    `- Stok (ham blok) mm: ${a.stockX ?? "?"} x ${a.stockY ?? "?"} x ${a.stockZ ?? "?"} (her yuzeyden pay: ${a.stockMargin ?? "?"} mm)`,
+    `- Ust yuzey Face operasyonu: ${a.faceTop ?? "?"}`,
     `- Tezgah ekseni: ${a.axisCount ?? "?"}`,
     `- Post-processor / kontrolcu: ${a.postProcessor ?? "GRBL"}`,
     `- Baglama: ${a.workholding ?? "?"}`,
     `- Referans/sifir (WCS): ${a.wcs ?? "?"}`,
+    `- Calisma duzlemi: ${a.workPlane ?? "G17 / XY"}`,
     `- Ana freze capi: ${a.endmillDiameter ?? "?"} mm`,
+    `- Takim yaricap kompanzasyonu: ${a.cutterComp ?? "Yok"}`,
     a.threadMethod ? `- Dis yontemi: ${a.threadMethod}` : null,
-    `- Spindle hizi: ${a.spindleRpm ?? "?"} rpm`,
-    `- Yatay ilerleme (HorizFeed): ${a.horizFeed ?? "?"} mm/min`,
-    `- Dikey ilerleme (VertFeed): ${a.vertFeed ?? "?"} mm/min`,
-    `- Pasa derinligi (stepdown): ${a.stepdown ?? "?"} mm`,
+    `- Operasyon esleştirme: ${a.operationMapping ?? "otomatik"}`,
+    "- KABA (roughing):",
+    `    spindle ${a.spindleRpm ?? "?"} rpm, ilerleme ${a.horizFeed ?? "?"} mm/min, dikey ${a.vertFeed ?? "?"} mm/min,`,
+    `    stepdown ${a.stepdown ?? "?"} mm, stepover ${a.stepover ?? "?"} mm, stock-to-leave ${a.roughStockToLeave ?? "?"} mm`,
+    "- FINIS (finishing, kabadan turetildi):",
+    `    ilerleme ${fin.finishFeed} mm/min, stepdown ${fin.finishStepdown} mm, stepover ${fin.finishStepover} mm, stock-to-leave 0 mm`,
+    `- Kesme yonu: ${a.millingDirection ?? "Climb"}`,
     a.stepStrategy ? `- Kademe stratejisi: ${a.stepStrategy}` : null,
+    repeatNote ? `- Tekrarlayan ozellikler (${a.groupRepeated ?? "grupla"}): ${repeatNote}` : null,
   ]
     .filter(Boolean)
     .join("\n");
 }
 
 // The wizard hits /cam-step once per step, so cache the (immutable) geometry
-// summary per STEP file to avoid re-running FreeCAD on every step. Keyed by
-// absolute path + mtime so a regenerated file with the same name is re-analysed.
+// summary per STEP file. Keyed by absolute path + mtime so a regenerated file
+// with the same name is re-analysed.
 const geometryCache = new Map();
 const GEOM_CACHE_MAX = 50;
 
@@ -330,6 +412,7 @@ export async function getGeometryCached(stepPath) {
  * @param {string} stepPath
  * @param {string} prompt original prompt (scanned for threads)
  * @param {object} answers accumulated answers
+ * @param {number} [targetIndex]
  */
 export async function getNextCamStep(stepPath, prompt, answers, targetIndex) {
   const geometry = await getGeometryCached(stepPath);
