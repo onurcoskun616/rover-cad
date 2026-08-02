@@ -159,8 +159,8 @@
               <h4>Önerilen İşleme Planı</h4>
               <pre id="cam-plan-text"></pre>
               <div class="cam-plan-actions">
-                <button id="cam-confirm-btn" type="button">
-                  Onayla ve G-code Üret
+                <button id="cam-preview-btn" type="button">
+                  Takım Yolunu Önizle
                 </button>
                 <button id="cam-revise-btn" type="button" class="secondary">
                   Planı Değiştir
@@ -175,6 +175,28 @@
                 <button id="cam-revise-submit" type="button">
                   Yeni Plan Oluştur
                 </button>
+              </div>
+
+              <!-- Toolpath simulation approval: shown after preview renders in
+                   the 3D viewer. G-code is only exported after approval. -->
+              <div id="cam-preview-view" class="cam-preview-view" hidden>
+                <p class="cam-preview-note">
+                  Takım yolu önizlemesi yukarıdaki 3D görüntüleyicide
+                  gösteriliyor (mavi: kesme, turuncu: hızlı hareket). Bu takım
+                  yolunu onaylıyor musunuz?
+                </p>
+                <div class="cam-plan-actions">
+                  <button id="cam-confirm-btn" type="button">
+                    Onayla ve G-code Üret
+                  </button>
+                  <button
+                    id="cam-reject-btn"
+                    type="button"
+                    class="secondary"
+                  >
+                    Reddet
+                  </button>
+                </div>
               </div>
             </div>
           </div>

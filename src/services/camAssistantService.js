@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { runClaudeCli, stripCodeFence } from "./claudeCli.js";
 import { callFreecadTool, extractResultText } from "./freecadMcpClient.js";
@@ -85,7 +86,7 @@ function geomBlock(geometry) {
  */
 export async function generateCamPlan(stepPath, answers, opts = {}) {
   const geometry = await describeStepGeometry(stepPath);
-  let input = geomBlock(geometry) + camParamsBlock(answers);
+  let input = geomBlock(geometry) + camParamsBlock(answers, geometry);
 
   // Inject computed pilot-hole diameters so the plan mentions the correct sizes.
   const threads = detectThreads(opts.context ?? "");
@@ -146,66 +147,131 @@ const GCODE_LITERAL_RE =
   /["'][^"'\n]*\b(G0?[0-3]|G1[789]|G2[01]|G9[01]|M0?[3-9]|M30)\b/;
 
 /**
- * Static guardrail on the generated FreeCAD script: G-code must be produced ONLY
- * by real FreeCAD Path operations + the post-processor, never hand-written by
- * the LLM. The model translates the plan into Path API calls; FreeCAD computes
- * the toolpaths and grbl_post emits the G-code.
+ * Static guardrail on the generated FreeCAD script. The LLM only builds FreeCAD
+ * Path (CAM) operations into a variable named `job`; it must NOT touch G-code at
+ * all — a separate trusted epilogue (never the model) runs the toolpath preview
+ * and the post-processor. So the script must not export, open/write files, or
+ * contain any raw G-code, and it must create a Path Job assigned to `job`.
  * @param {string} code the generated Python (code fences already stripped)
  * @returns {string|null} a Turkish violation message, or null if the code is OK
  */
 export function validateCamCode(code) {
-  if (!/\.export\s*\(/.test(code)) {
-    return "Kod bir post-processor export cagrisi (orn. grbl_post.export(...)) icermiyor; G-code yalnizca FreeCAD post-processor tarafindan uretilmeli.";
+  if (/\.export\s*\(/.test(code)) {
+    return "Kod bir post-processor export cagrisi iceriyor; G-code'u SEN uretme. Sadece Path operasyonlarini `job` icine kur; export'u sistem yapacak.";
   }
   if (/\bopen\s*\(/.test(code)) {
-    return "Kod bir dosya acip yaziyor; cikti G-code dosyasini KENDIN yazma. Dosyayi yalnizca grbl_post.export(...) olusturmali.";
+    return "Kod bir dosya aciyor; hicbir dosya acma/yazma yapma. Sadece FreeCAD Path operasyonlarini kur.";
   }
   if (GCODE_LITERAL_RE.test(code)) {
-    return "Kod ham G-code/M-code komutlari iceriyor; toolpath hesabini ve G-code'u FreeCAD Path operasyonlari + post-processor uretmeli, sen G-code yazmamalisin.";
+    return "Kod ham G-code/M-code komutlari iceriyor; toolpath'i ve G-code'u FreeCAD hesaplar. Sen sadece Path operasyonlari kuracaksin.";
   }
   if (!/\bJob\b/.test(code)) {
     return "Kod bir FreeCAD Path Job olusturmuyor; gercek CAM operasyonlari (Path Workbench API) kullanilmali.";
   }
+  if (!/\bjob\s*=(?!=)/.test(code)) {
+    return "Path Job nesnesi tam olarak `job` adli degiskene atanmali (job = PathJob.Create(...)).";
+  }
   return null;
 }
 
-/**
- * Turn an approved plan into real FreeCAD Path operations and GRBL G-code.
- * @param {string} stepPath
- * @param {object} answers
- * @param {object} plan approved plan object
- * @returns {Promise<{gcodePath: string}>}
- */
-export async function generateCamGcodeFromPlan(stepPath, answers, plan, context = "") {
-  const abs = resolveStepPath(stepPath);
-  if (!fs.existsSync(abs)) {
-    throw new Error("STEP dosyasi bulunamadi: " + path.basename(abs));
-  }
-  const geometry = await describeStepGeometry(stepPath);
-  const gcodePath = abs.replace(/\.(step|stp)$/i, "") + "_cam.gcode";
-  // Remove any stale file so an existence check after execution is meaningful.
-  try {
-    fs.unlinkSync(gcodePath);
-  } catch {
-    // not present; fine
-  }
+// Candidate FreeCAD post-processor module names for each controller choice, with
+// grbl as the final fallback. Used by the trusted post-processing epilogue.
+function postModuleCandidates(postName) {
+  const p = String(postName || "").toLowerCase();
+  let list;
+  if (p.includes("mach")) list = ["mach3_mach4", "mach3", "mach4"];
+  else if (p.includes("linux")) list = ["linuxcnc", "linuxcnc_post"];
+  else if (p.includes("fanuc")) list = ["fanuc", "fanuc_post", "refactored_grbl"];
+  else list = ["grbl_post", "grbl"];
+  if (!list.includes("grbl_post")) list.push("grbl_post");
+  return list;
+}
 
-  // Compute pilot diameters from the metric thread table and tell the code
-  // generator exactly what to drill and which threading operation to add.
-  const threads = detectThreads(context);
-  const threadGuidance = threads.hasThread
-    ? threadGuidanceBlock(threads.sizes, detectThreadMethod(answers))
-    : "";
+// Trusted epilogue (NOT model output): extract the toolpath polylines FreeCAD
+// computed for each operation in `job`, and write them as JSON for the viewer.
+// Rapids are flagged so the preview can distinguish them from cutting moves.
+function previewEpiloguePy(previewJsonPath) {
+  return [
+    "",
+    "# --- trusted toolpath preview epilogue (system, not model) ---",
+    "import json as _json",
+    "try:",
+    "    _grp = list(job.Operations.Group)",
+    "except Exception as _e:",
+    "    raise RuntimeError('job.Operations bulunamadi: ' + str(_e))",
+    "_paths = []",
+    "for _op in _grp:",
+    "    _p = getattr(_op, 'Path', None)",
+    "    if _p is None:",
+    "        continue",
+    "    _x = _y = _z = 0.0",
+    "    _seg = []",
+    "    for _c in _p.Commands:",
+    "        _pr = _c.Parameters",
+    "        if 'X' in _pr: _x = float(_pr['X'])",
+    "        if 'Y' in _pr: _y = float(_pr['Y'])",
+    "        if 'Z' in _pr: _z = float(_pr['Z'])",
+    "        _rap = 1 if _c.Name in ('G0', 'G00') else 0",
+    "        _seg.append([round(_x, 3), round(_y, 3), round(_z, 3), _rap])",
+    "    if len(_seg) > 2000:",
+    "        _k = (len(_seg) // 2000) + 1",
+    "        _seg = _seg[::_k]",
+    "    if _seg:",
+    "        _paths.append({'op': str(getattr(_op, 'Label', _op.Name)), 'points': _seg})",
+    `_out = ${JSON.stringify(previewJsonPath)}`,
+    "with open(_out, 'w') as _f:",
+    "    _json.dump({'toolpaths': _paths}, _f)",
+    "print('PREVIEW_JSON=' + _out)",
+  ].join("\n");
+}
 
-  const baseInput =
+// Trusted epilogue (NOT model output): post-process the operations FreeCAD built
+// in `job` into G-code with the chosen controller's post-processor.
+function postEpiloguePy(gcodePath, postName) {
+  const candidates = postModuleCandidates(postName);
+  return [
+    "",
+    "# --- trusted post-processing epilogue (system, not model) ---",
+    `_cands = ${JSON.stringify(candidates)}`,
+    "post_mod = None",
+    "for _mn in _cands:",
+    "    for _pkg in ('Path.Post.scripts.', 'PathScripts.post.'):",
+    "        try:",
+    "            post_mod = __import__(_pkg + _mn, fromlist=[_mn])",
+    "            break",
+    "        except Exception:",
+    "            post_mod = None",
+    "    if post_mod is not None:",
+    "        break",
+    "if post_mod is None:",
+    "    raise RuntimeError('post-processor modulu bulunamadi')",
+    "_grp = list(job.Operations.Group)",
+    `_out = ${JSON.stringify(gcodePath)}`,
+    "post_mod.export(_grp, _out, '--no-show-editor')",
+    "print('GCODE_PATH=' + _out)",
+  ].join("\n");
+}
+
+// Build the shared prompt input asking the model to translate the plan into Path
+// operations assigned to `job` — with no G-code, no export, no file I/O.
+function buildPathCodeInput(abs, geometry, answers, plan, threadGuidance) {
+  return (
     `[STEP_PATH]: ${abs}` +
-    `\n[GCODE_OUTPUT_PATH]: ${gcodePath}` +
     `\n${geomBlock(geometry)}` +
-    camParamsBlock(answers) +
+    camParamsBlock(answers, geometry) +
     `\n[ONAYLANAN_PLAN]: ${JSON.stringify(plan)}` +
     threadGuidance +
-    "\n[GOREV]: Bu plani FreeCAD Path (CAM) operasyonlarina cevir; [CAM_PARAMETRELERI]'ndeki takim capi, spindle hizi, ilerlemeler, pasa derinligi, WCS ve post-processor degerlerini KULLAN. Toolpath hesabini FreeCAD yapsin ve secilen post-processor'un export'u ile yukaridaki cikti yoluna G-code yazdirilsin. G-code'u SEN yazma.";
+    "\n[GOREV]: Bu plani FreeCAD Path (CAM) operasyonlarina cevir ve olusturdugun Path Job'u tam olarak `job` adli degiskene ata. [CAM_PARAMETRELERI]'ndeki takim capi, spindle hizi, ilerlemeler, stepdown, stepover, stock-to-leave, kesme yonu (climb/conventional), WCS ve calisma duzlemini KULLAN. Kaba ve finis AYRI operasyonlar olsun. Post-processor CALISTIRMA, export ETME, dosya ACMA, G-code YAZMA, hicbir sey print ETME — bunlari sistem yapacak."
+  );
+}
 
+/**
+ * Run the LLM->Path-code loop, appending a trusted epilogue and executing it in
+ * FreeCAD. Retries with corrective feedback on validation/runtime failure.
+ * @returns {Promise<{code:string, text:string}>} validated code + FreeCAD output
+ */
+async function generateAndRunPathCode({ abs, geometry, answers, plan, threadGuidance, epiloguePy, successMarker }) {
+  const baseInput = buildPathCodeInput(abs, geometry, answers, plan, threadGuidance);
   let lastError = "Bilinmeyen hata";
   let previousCode = null;
   let problem = null;
@@ -221,10 +287,7 @@ export async function generateCamGcodeFromPlan(stepPath, answers, plan, context 
 
     let code;
     try {
-      const raw = await runClaudeCli(input, {
-        systemPromptFile: CODE_PROMPT,
-        allowRead: false,
-      });
+      const raw = await runClaudeCli(input, { systemPromptFile: CODE_PROMPT, allowRead: false });
       code = stripCodeFence(raw);
       if (!code) throw new Error("Bos kod dondu");
     } catch (err) {
@@ -234,26 +297,22 @@ export async function generateCamGcodeFromPlan(stepPath, answers, plan, context 
       continue;
     }
 
-    // Reject (and ask the model to fix) any script that would bypass FreeCAD's
-    // Path/CAM API + post-processor and emit G-code directly.
     const violation = validateCamCode(code);
     if (violation) {
       lastError = violation;
       previousCode = code;
-      problem =
-        violation +
-        " Plani SADECE FreeCAD Path (CAM) operasyonlarina cevir; toolpath ve G-code uretimini FreeCAD Path + grbl_post.export yapsin.";
+      problem = violation + " Sadece Path operasyonlarini `job` icine kur.";
       continue;
     }
 
-    let runText = "";
+    let text = "";
     try {
       const result = await callFreecadTool(config.freecadMcp.toolName, {
-        [config.freecadMcp.toolParam]: code,
+        [config.freecadMcp.toolParam]: code + "\n" + epiloguePy,
       });
-      runText = extractResultText(result);
-      if (result?.isError || runText.startsWith("Failed to execute code")) {
-        throw new Error(runText || "FreeCAD kodu calistiramadi");
+      text = extractResultText(result);
+      if (result?.isError || text.startsWith("Failed to execute code")) {
+        throw new Error(text || "FreeCAD kodu calistiramadi");
       }
     } catch (err) {
       lastError = err.message;
@@ -262,15 +321,130 @@ export async function generateCamGcodeFromPlan(stepPath, answers, plan, context 
       continue;
     }
 
-    if (fs.existsSync(gcodePath)) {
-      return { gcodePath };
+    if (text.includes(successMarker)) {
+      return { code, text };
     }
-    lastError = "G-code dosyasi olusmadi";
+    lastError = `Beklenen cikti (${successMarker}) uretilmedi`;
     previousCode = code;
     problem =
-      "Kod calisti ama beklenen G-code dosyasi olusmadi. grbl_post.export cagrisinin " +
-      "verilen cikti yoluna yazdigindan ve GCODE_PATH yazdirdigindan emin ol.";
+      "Path operasyonlari `job.Operations` altinda olusmadi gibi gorunuyor. Gecerli Path operasyonlarini `job` uzerine ekle ve recompute et.";
   }
 
-  throw new Error("CAM G-code uretilemedi: " + lastError);
+  throw new Error("CAM Path kodu uretilemedi: " + lastError);
+}
+
+// Store validated Path code between the preview and the confirm step so the
+// exported G-code comes from the exact toolpaths the user approved.
+const codeStore = new Map();
+const CODE_STORE_TTL_MS = 30 * 60 * 1000;
+const CODE_STORE_MAX = 50;
+
+function storePathCode(code) {
+  const token = randomUUID();
+  if (codeStore.size >= CODE_STORE_MAX) {
+    codeStore.delete(codeStore.keys().next().value);
+  }
+  codeStore.set(token, { code, ts: Date.now() });
+  return token;
+}
+function takePathCode(token) {
+  const entry = codeStore.get(token);
+  if (!entry) return null;
+  if (Date.now() - entry.ts > CODE_STORE_TTL_MS) {
+    codeStore.delete(token);
+    return null;
+  }
+  return entry.code;
+}
+
+function threadGuidanceFor(answers, context) {
+  const threads = detectThreads(context);
+  return threads.hasThread
+    ? threadGuidanceBlock(threads.sizes, detectThreadMethod(answers))
+    : "";
+}
+
+/**
+ * Build the Path operations for the approved plan and export a toolpath PREVIEW
+ * (no G-code yet). Returns the preview file path and a token to reuse the exact
+ * same operations when the user approves and confirms.
+ * @returns {Promise<{previewPath:string, token:string}>}
+ */
+export async function generateCamPreview(stepPath, answers, plan, context = "") {
+  const abs = resolveStepPath(stepPath);
+  if (!fs.existsSync(abs)) {
+    throw new Error("STEP dosyasi bulunamadi: " + path.basename(abs));
+  }
+  const geometry = await describeStepGeometry(stepPath);
+  const previewPath = abs.replace(/\.(step|stp)$/i, "") + "_toolpath.json";
+  try {
+    fs.unlinkSync(previewPath);
+  } catch {
+    // not present; fine
+  }
+
+  const { code } = await generateAndRunPathCode({
+    abs,
+    geometry,
+    answers,
+    plan,
+    threadGuidance: threadGuidanceFor(answers, context),
+    epiloguePy: previewEpiloguePy(previewPath),
+    successMarker: "PREVIEW_JSON=",
+  });
+
+  if (!fs.existsSync(previewPath)) {
+    throw new Error("Takim yolu onizlemesi uretilemedi");
+  }
+  const token = storePathCode(code);
+  return { previewPath, token };
+}
+
+/**
+ * Post-process the approved toolpaths into G-code. When `reuseToken` refers to a
+ * stored preview, the exact same Path code is reused so the exported G-code
+ * matches what the user approved; otherwise the code is generated fresh.
+ * @returns {Promise<{gcodePath: string}>}
+ */
+export async function generateCamGcodeFromPlan(stepPath, answers, plan, context = "", reuseToken = null) {
+  const abs = resolveStepPath(stepPath);
+  if (!fs.existsSync(abs)) {
+    throw new Error("STEP dosyasi bulunamadi: " + path.basename(abs));
+  }
+  const gcodePath = abs.replace(/\.(step|stp)$/i, "") + "_cam.gcode";
+  try {
+    fs.unlinkSync(gcodePath);
+  } catch {
+    // not present; fine
+  }
+  const postName = answers?.postProcessor;
+  const epiloguePy = postEpiloguePy(gcodePath, postName);
+
+  const stored = reuseToken ? takePathCode(reuseToken) : null;
+  if (stored) {
+    // Reuse the approved toolpaths verbatim: run the stored code + post epilogue.
+    const result = await callFreecadTool(config.freecadMcp.toolName, {
+      [config.freecadMcp.toolParam]: stored + "\n" + epiloguePy,
+    });
+    const text = extractResultText(result);
+    if ((result?.isError || !text.includes("GCODE_PATH=")) && !fs.existsSync(gcodePath)) {
+      throw new Error("G-code uretilemedi: " + (text || "bilinmeyen hata"));
+    }
+    if (!fs.existsSync(gcodePath)) throw new Error("G-code dosyasi olusmadi");
+    return { gcodePath };
+  }
+
+  // No approved preview to reuse → generate the Path code and post-process it.
+  const geometry = await describeStepGeometry(stepPath);
+  await generateAndRunPathCode({
+    abs,
+    geometry,
+    answers,
+    plan,
+    threadGuidance: threadGuidanceFor(answers, context),
+    epiloguePy,
+    successMarker: "GCODE_PATH=",
+  });
+  if (!fs.existsSync(gcodePath)) throw new Error("G-code dosyasi olusmadi");
+  return { gcodePath };
 }
