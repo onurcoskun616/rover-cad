@@ -235,6 +235,120 @@
             hidden
             >G-code dosyasını indir</a
           >
+
+          <!-- Quote / cost engine: available once the toolpath (and its
+               estimated time) is known. -->
+          <div id="cam-quote" class="cam-quote" hidden>
+            <h4>Teklif / Maliyet</h4>
+            <p id="cam-quote-time" class="cam-quote-time"></p>
+            <button id="cam-quote-btn" type="button">Teklif Oluştur</button>
+
+            <div id="cam-quote-form" class="cam-quote-form" hidden>
+              <div class="cam-quote-mode">
+                <label class="cam-option">
+                  <input type="radio" name="quote-mode" value="basit" checked />
+                  <span>Basit</span>
+                </label>
+                <label class="cam-option">
+                  <input type="radio" name="quote-mode" value="detayli" />
+                  <span>Detaylı</span>
+                </label>
+              </div>
+
+              <div id="quote-fields-basit" class="quote-fields">
+                <div class="cam-field">
+                  <label for="q-hourlyRate">Saatlik makine ücreti (TL/saat)</label>
+                  <input id="q-hourlyRate" type="number" step="any" value="500" />
+                </div>
+                <div class="cam-field">
+                  <label for="q-materialPrice-b">Malzeme birim fiyatı</label>
+                  <input id="q-materialPrice-b" type="number" step="any" placeholder="0" />
+                </div>
+                <div class="cam-field">
+                  <label for="q-materialUnit-b">Malzeme fiyat birimi</label>
+                  <select id="q-materialUnit-b">
+                    <option value="cm3">TL/cm³</option>
+                    <option value="kg">TL/kg</option>
+                  </select>
+                </div>
+                <div class="cam-field">
+                  <label for="q-profitPct-b">Kâr marjı (%)</label>
+                  <input id="q-profitPct-b" type="number" step="any" value="20" />
+                </div>
+              </div>
+
+              <div id="quote-fields-detayli" class="quote-fields" hidden>
+                <div class="cam-field">
+                  <label for="q-materialPrice-d">Malzeme birim fiyatı</label>
+                  <input id="q-materialPrice-d" type="number" step="any" placeholder="0" />
+                </div>
+                <div class="cam-field">
+                  <label for="q-materialUnit-d">Malzeme fiyat birimi</label>
+                  <select id="q-materialUnit-d">
+                    <option value="cm3">TL/cm³</option>
+                    <option value="kg">TL/kg</option>
+                  </select>
+                </div>
+                <div class="cam-field">
+                  <label for="q-amortHourly">Makine amortisman payı (TL/saat)</label>
+                  <input id="q-amortHourly" type="number" step="any" placeholder="0" />
+                </div>
+                <div class="cam-field">
+                  <label for="q-energyPrice">Enerji birim fiyatı (TL/kWh)</label>
+                  <input id="q-energyPrice" type="number" step="any" placeholder="0" />
+                </div>
+                <div class="cam-field">
+                  <label for="q-powerKw">Makine güç tüketimi (kW)</label>
+                  <input id="q-powerKw" type="number" step="any" placeholder="0" />
+                </div>
+                <div class="cam-field">
+                  <label for="q-toolCost">Takım maliyeti (TL/takım)</label>
+                  <input id="q-toolCost" type="number" step="any" placeholder="0" />
+                </div>
+                <div class="cam-field">
+                  <label for="q-toolLifeParts">Takım ömrü (parça)</label>
+                  <input id="q-toolLifeParts" type="number" step="any" placeholder="0" />
+                </div>
+                <div class="cam-field">
+                  <label for="q-consumableHourly">Sarf malzeme (TL/saat)</label>
+                  <input id="q-consumableHourly" type="number" step="any" placeholder="0" />
+                </div>
+                <div class="cam-field">
+                  <label for="q-consumablePerPart">Sarf malzeme (TL/parça)</label>
+                  <input id="q-consumablePerPart" type="number" step="any" placeholder="0" />
+                </div>
+                <div class="cam-field">
+                  <label for="q-overheadPct">Genel gider payı (%)</label>
+                  <input id="q-overheadPct" type="number" step="any" placeholder="0" />
+                </div>
+                <div class="cam-field">
+                  <label for="q-scrapPct">Fire/hata payı (%)</label>
+                  <input id="q-scrapPct" type="number" step="any" placeholder="0" />
+                </div>
+                <div class="cam-field">
+                  <label for="q-profitPct-d">Kâr marjı (%)</label>
+                  <input id="q-profitPct-d" type="number" step="any" placeholder="0" />
+                </div>
+              </div>
+
+              <button id="cam-quote-submit" type="button">
+                Hesapla ve Teklif Oluştur
+              </button>
+            </div>
+
+            <div id="cam-quote-result" class="cam-quote-result" hidden>
+              <pre id="cam-quote-breakdown"></pre>
+              <a
+                id="cam-quote-pdf"
+                class="file-link"
+                href="#"
+                target="_blank"
+                rel="noopener"
+                hidden
+                >Teklif Formu (PDF) indir</a
+              >
+            </div>
+          </div>
         </div>
 
         <details class="code-details">

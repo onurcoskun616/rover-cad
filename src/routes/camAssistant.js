@@ -7,6 +7,7 @@ import {
   generateCamGcodeFromPlan,
 } from "../services/camAssistantService.js";
 import { getNextCamStep } from "../services/camWizardService.js";
+import { computeQuote, generateQuotePdf } from "../services/quoteService.js";
 import { createJob, runJob } from "../services/jobStore.js";
 
 function makeFileUrl(proto, host, filePath) {
@@ -91,6 +92,7 @@ router.post("/cam-preview", apiKeyAuth, (req, res) => {
         body: {
           token: result.token,
           previewUrl: makeFileUrl(proto, host, result.previewPath),
+          estimatedMinutes: result.estimatedMinutes,
         },
       };
     },
@@ -138,6 +140,35 @@ router.post("/cam-confirm", apiKeyAuth, (req, res) => {
   );
 
   res.status(202).json({ jobId });
+});
+
+// Quote/cost engine: compute a cost breakdown from the estimated machining time
+// (from the preview) + user cost inputs, and render a "Teklif Formu" PDF.
+// Synchronous (no FreeCAD/LLM): arithmetic + a quick PDF write.
+router.post("/cam-quote", apiKeyAuth, async (req, res, next) => {
+  try {
+    const { mode, minutes, answers, bbox, inputs, partName, material } = req.body ?? {};
+    const quoteMode = mode === "detayli" ? "detayli" : "basit";
+    const quote = computeQuote({
+      mode: quoteMode,
+      minutes: Number(minutes) || 0,
+      answers: answers && typeof answers === "object" ? answers : {},
+      bbox: bbox && typeof bbox === "object" ? bbox : {},
+      inputs: inputs && typeof inputs === "object" ? inputs : {},
+    });
+    const pdfPath = await generateQuotePdf({
+      partName: typeof partName === "string" ? partName : "",
+      bbox: bbox ?? {},
+      material: typeof material === "string" ? material : answers?.material,
+      quote,
+    });
+    res.json({
+      quote,
+      pdfUrl: makeFileUrl(req.protocol, req.get("host"), pdfPath),
+    });
+  } catch (err) {
+    next(err);
+  }
 });
 
 export default router;

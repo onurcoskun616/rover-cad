@@ -59,6 +59,16 @@ const camReviseBtn = document.getElementById("cam-revise-btn");
 const camReviseBox = document.getElementById("cam-revise-box");
 const camReviseInput = document.getElementById("cam-revise-input");
 const camReviseSubmit = document.getElementById("cam-revise-submit");
+const camQuote = document.getElementById("cam-quote");
+const camQuoteTime = document.getElementById("cam-quote-time");
+const camQuoteBtn = document.getElementById("cam-quote-btn");
+const camQuoteForm = document.getElementById("cam-quote-form");
+const quoteFieldsBasit = document.getElementById("quote-fields-basit");
+const quoteFieldsDetayli = document.getElementById("quote-fields-detayli");
+const camQuoteSubmit = document.getElementById("cam-quote-submit");
+const camQuoteResult = document.getElementById("cam-quote-result");
+const camQuoteBreakdown = document.getElementById("cam-quote-breakdown");
+const camQuotePdf = document.getElementById("cam-quote-pdf");
 
 let viewer = null;
 let mode = "text"; // "text" | "image" | "step"
@@ -70,6 +80,7 @@ let camAnswers = {};
 let camStepIndex = 0;
 let camStepFieldNames = [];
 let camPreviewToken = null;
+let camEstimatedMinutes = null;
 let camPlan = null;
 
 function setMode(next) {
@@ -154,10 +165,15 @@ function resetCamAssistant() {
   camPreviewView.hidden = true;
   camReviseBox.hidden = true;
   camReviseInput.value = "";
+  camQuote.hidden = true;
+  camQuoteForm.hidden = true;
+  camQuoteResult.hidden = true;
+  camQuotePdf.hidden = true;
   camAnswers = {};
   camStepIndex = 0;
   camStepFieldNames = [];
   camPreviewToken = null;
+  camEstimatedMinutes = null;
   camPlan = null;
 }
 
@@ -594,9 +610,13 @@ async function requestCamPlan(changeRequest) {
     camPlanView.hidden = false;
     camReviseBox.hidden = true;
     camReviseInput.value = "";
-    // A new plan invalidates any previous toolpath preview/approval.
+    // A new plan invalidates any previous toolpath preview/approval/quote.
     camPreviewView.hidden = true;
     camPreviewToken = null;
+    camEstimatedMinutes = null;
+    camQuote.hidden = true;
+    camQuoteForm.hidden = true;
+    camQuoteResult.hidden = true;
     gcodeLink.hidden = true;
   } catch (err) {
     setCamStatus(`Sunucuya bağlanılamadı: ${err.message}`, false);
@@ -641,9 +661,17 @@ async function handleCamPreview() {
       return;
     }
     camPreviewToken = result.body.token ?? null;
+    camEstimatedMinutes = result.body.estimatedMinutes ?? null;
     await renderToolpathPreview(result.body.previewUrl);
     setCamStatus("", false);
     camPreviewView.hidden = false;
+    // The toolpath (and its estimated time) is known → enable the quote engine.
+    if (camEstimatedMinutes != null) {
+      camQuoteTime.textContent = `Tahmini işleme süresi: ${camEstimatedMinutes} dk`;
+      camQuote.hidden = false;
+      camQuoteForm.hidden = true;
+      camQuoteResult.hidden = true;
+    }
   } catch (err) {
     setCamStatus(`Sunucuya bağlanılamadı: ${err.message}`, false);
   } finally {
@@ -704,6 +732,103 @@ async function handleCamConfirm() {
   }
 }
 
+function setQuoteMode(mode) {
+  const detailed = mode === "detayli";
+  quoteFieldsBasit.hidden = detailed;
+  quoteFieldsDetayli.hidden = !detailed;
+}
+
+function currentQuoteMode() {
+  const checked = camQuoteForm.querySelector('input[name="quote-mode"]:checked');
+  return checked ? checked.value : "basit";
+}
+
+function numVal(id) {
+  const el = document.getElementById(id);
+  if (!el) return undefined;
+  const v = el.value.trim();
+  return v === "" ? undefined : Number(v);
+}
+
+function collectQuoteInputs(mode) {
+  if (mode === "detayli") {
+    return {
+      materialPrice: numVal("q-materialPrice-d"),
+      materialPriceUnit: document.getElementById("q-materialUnit-d").value,
+      amortHourly: numVal("q-amortHourly"),
+      energyPrice: numVal("q-energyPrice"),
+      powerKw: numVal("q-powerKw"),
+      toolCost: numVal("q-toolCost"),
+      toolLifeParts: numVal("q-toolLifeParts"),
+      consumableHourly: numVal("q-consumableHourly"),
+      consumablePerPart: numVal("q-consumablePerPart"),
+      overheadPct: numVal("q-overheadPct"),
+      scrapPct: numVal("q-scrapPct"),
+      profitPct: numVal("q-profitPct-d"),
+    };
+  }
+  return {
+    hourlyRate: numVal("q-hourlyRate"),
+    materialPrice: numVal("q-materialPrice-b"),
+    materialPriceUnit: document.getElementById("q-materialUnit-b").value,
+    profitPct: numVal("q-profitPct-b"),
+  };
+}
+
+function renderQuoteBreakdown(quote) {
+  const lines = [`Tahmini süre: ${quote.minutes} dk`, ""];
+  const pad = (s, n) => String(s).padEnd(n);
+  for (const it of quote.items) {
+    lines.push(`${pad(it.label, 34)} ${Number(it.amount).toLocaleString("tr-TR")} TL`);
+  }
+  lines.push("");
+  lines.push(`${pad("TOPLAM", 34)} ${Number(quote.total).toLocaleString("tr-TR")} TL`);
+  return lines.join("\n");
+}
+
+async function handleQuoteSubmit() {
+  if (camEstimatedMinutes == null) {
+    setCamStatus("Önce takım yolu önizlemesi oluşturun.", false);
+    return;
+  }
+  const mode = currentQuoteMode();
+  camQuoteSubmit.disabled = true;
+  setCamStatus("Teklif hesaplanıyor…", true);
+  try {
+    const response = await fetch(`${API_BASE}/cam-quote`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
+      body: JSON.stringify({
+        mode,
+        minutes: camEstimatedMinutes,
+        answers: camAnswers,
+        bbox: lastBbox,
+        material: camAnswers.material,
+        partName: lastPrompt || "Parca",
+        inputs: collectQuoteInputs(mode),
+      }),
+    });
+    const data = await readJson(response);
+    if (!response.ok || !data?.quote) {
+      setCamStatus(data?.error ?? "Teklif oluşturulamadı.", false);
+      return;
+    }
+    setCamStatus("", false);
+    camQuoteBreakdown.textContent = renderQuoteBreakdown(data.quote);
+    if (data.pdfUrl) {
+      camQuotePdf.href = data.pdfUrl;
+      camQuotePdf.hidden = false;
+    } else {
+      camQuotePdf.hidden = true;
+    }
+    camQuoteResult.hidden = false;
+  } catch (err) {
+    setCamStatus(`Sunucuya bağlanılamadı: ${err.message}`, false);
+  } finally {
+    camQuoteSubmit.disabled = false;
+  }
+}
+
 async function loadStlPreview(stlUrl) {
   try {
     const { initViewer, loadStl } = await import("./viewer.js");
@@ -733,6 +858,15 @@ camReviseSubmit.addEventListener("click", () => {
   const change = camReviseInput.value.trim();
   if (change) requestCamPlan(change);
 });
+camQuoteBtn.addEventListener("click", () => {
+  camQuoteForm.hidden = false;
+  camQuoteResult.hidden = true;
+  setQuoteMode(currentQuoteMode());
+});
+camQuoteForm.querySelectorAll('input[name="quote-mode"]').forEach((radio) => {
+  radio.addEventListener("change", () => setQuoteMode(radio.value));
+});
+camQuoteSubmit.addEventListener("click", handleQuoteSubmit);
 promptInput.addEventListener("keydown", (event) => {
   if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
     handleGenerate();

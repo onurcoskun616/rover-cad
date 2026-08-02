@@ -188,39 +188,59 @@ function postModuleCandidates(postName) {
 }
 
 // Trusted epilogue (NOT model output): extract the toolpath polylines FreeCAD
-// computed for each operation in `job`, and write them as JSON for the viewer.
+// computed for each operation in `job`, estimate machining time from the move
+// lengths and feed rates, and write it all as JSON for the viewer + quote.
 // Rapids are flagged so the preview can distinguish them from cutting moves.
-function previewEpiloguePy(previewJsonPath) {
+function previewEpiloguePy(previewJsonPath, defaultFeed) {
+  const feed = Number(defaultFeed) > 0 ? Number(defaultFeed) : 500;
   return [
     "",
-    "# --- trusted toolpath preview epilogue (system, not model) ---",
-    "import json as _json",
+    "# --- trusted toolpath preview + time epilogue (system, not model) ---",
+    "import json as _json, math as _math",
     "try:",
     "    _grp = list(job.Operations.Group)",
     "except Exception as _e:",
     "    raise RuntimeError('job.Operations bulunamadi: ' + str(_e))",
+    `_default_feed = float(${feed})`,
+    "_rapid_rate = 3000.0  # mm/min assumed rapid rate for time estimate",
     "_paths = []",
+    "_op_minutes = {}",
+    "_total_min = 0.0",
     "for _op in _grp:",
     "    _p = getattr(_op, 'Path', None)",
     "    if _p is None:",
     "        continue",
     "    _x = _y = _z = 0.0",
+    "    _feed = _default_feed",
     "    _seg = []",
+    "    _op_min = 0.0",
     "    for _c in _p.Commands:",
     "        _pr = _c.Parameters",
-    "        if 'X' in _pr: _x = float(_pr['X'])",
-    "        if 'Y' in _pr: _y = float(_pr['Y'])",
-    "        if 'Z' in _pr: _z = float(_pr['Z'])",
+    "        if 'F' in _pr:",
+    "            try: _feed = float(_pr['F'])",
+    "            except Exception: pass",
+    "        _nx = float(_pr['X']) if 'X' in _pr else _x",
+    "        _ny = float(_pr['Y']) if 'Y' in _pr else _y",
+    "        _nz = float(_pr['Z']) if 'Z' in _pr else _z",
+    "        _d = _math.sqrt((_nx-_x)**2 + (_ny-_y)**2 + (_nz-_z)**2)",
     "        _rap = 1 if _c.Name in ('G0', 'G00') else 0",
+    "        _rate = _rapid_rate if _rap else (_feed if _feed > 0 else _default_feed)",
+    "        if _rate > 0:",
+    "            _op_min += _d / _rate",
+    "        _x, _y, _z = _nx, _ny, _nz",
     "        _seg.append([round(_x, 3), round(_y, 3), round(_z, 3), _rap])",
     "    if len(_seg) > 2000:",
     "        _k = (len(_seg) // 2000) + 1",
     "        _seg = _seg[::_k]",
+    "    _lbl = str(getattr(_op, 'Label', _op.Name))",
     "    if _seg:",
-    "        _paths.append({'op': str(getattr(_op, 'Label', _op.Name)), 'points': _seg})",
+    "        _paths.append({'op': _lbl, 'points': _seg})",
+    "    _op_minutes[_lbl] = round(_op_min, 3)",
+    "    _total_min += _op_min",
     `_out = ${JSON.stringify(previewJsonPath)}`,
     "with open(_out, 'w') as _f:",
-    "    _json.dump({'toolpaths': _paths}, _f)",
+    "    _json.dump({'toolpaths': _paths, 'estimatedMinutes': round(_total_min, 2), 'opMinutes': _op_minutes}, _f)",
+    "print('EST_MINUTES=' + str(round(_total_min, 2)))",
     "print('PREVIEW_JSON=' + _out)",
   ].join("\n");
 }
@@ -383,21 +403,23 @@ export async function generateCamPreview(stepPath, answers, plan, context = "") 
     // not present; fine
   }
 
-  const { code } = await generateAndRunPathCode({
+  const { code, text } = await generateAndRunPathCode({
     abs,
     geometry,
     answers,
     plan,
     threadGuidance: threadGuidanceFor(answers, context),
-    epiloguePy: previewEpiloguePy(previewPath),
+    epiloguePy: previewEpiloguePy(previewPath, answers?.horizFeed),
     successMarker: "PREVIEW_JSON=",
   });
 
   if (!fs.existsSync(previewPath)) {
     throw new Error("Takim yolu onizlemesi uretilemedi");
   }
+  const estMatch = text.match(/EST_MINUTES=([-\d.eE+]+)/);
+  const estimatedMinutes = estMatch ? Number(estMatch[1]) : null;
   const token = storePathCode(code);
-  return { previewPath, token };
+  return { previewPath, token, estimatedMinutes };
 }
 
 /**
