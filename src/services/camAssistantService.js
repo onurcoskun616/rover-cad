@@ -215,6 +215,36 @@ export function planToText(plan) {
 
 const GCODE_ATTEMPTS = 3;
 
+// Common G-code / M-code command tokens; if any appears as a literal inside the
+// generated Python, the model is hand-writing G-code instead of letting FreeCAD
+// compute it.
+const GCODE_LITERAL_RE =
+  /["'][^"'\n]*\b(G0?[0-3]|G1[789]|G2[01]|G9[01]|M0?[3-9]|M30)\b/;
+
+/**
+ * Static guardrail on the generated FreeCAD script: G-code must be produced ONLY
+ * by real FreeCAD Path operations + the post-processor, never hand-written by
+ * the LLM. The model translates the plan into Path API calls; FreeCAD computes
+ * the toolpaths and grbl_post emits the G-code.
+ * @param {string} code the generated Python (code fences already stripped)
+ * @returns {string|null} a Turkish violation message, or null if the code is OK
+ */
+export function validateCamCode(code) {
+  if (!/\.export\s*\(/.test(code)) {
+    return "Kod bir post-processor export cagrisi (orn. grbl_post.export(...)) icermiyor; G-code yalnizca FreeCAD post-processor tarafindan uretilmeli.";
+  }
+  if (/\bopen\s*\(/.test(code)) {
+    return "Kod bir dosya acip yaziyor; cikti G-code dosyasini KENDIN yazma. Dosyayi yalnizca grbl_post.export(...) olusturmali.";
+  }
+  if (GCODE_LITERAL_RE.test(code)) {
+    return "Kod ham G-code/M-code komutlari iceriyor; toolpath hesabini ve G-code'u FreeCAD Path operasyonlari + post-processor uretmeli, sen G-code yazmamalisin.";
+  }
+  if (!/\bJob\b/.test(code)) {
+    return "Kod bir FreeCAD Path Job olusturmuyor; gercek CAM operasyonlari (Path Workbench API) kullanilmali.";
+  }
+  return null;
+}
+
 /**
  * Turn an approved plan into real FreeCAD Path operations and GRBL G-code.
  * @param {string} stepPath
@@ -250,7 +280,7 @@ export async function generateCamGcodeFromPlan(stepPath, answers, plan, context 
     `\n[CEVAPLAR]: ${JSON.stringify(answers ?? {})}` +
     `\n[ONAYLANAN_PLAN]: ${JSON.stringify(plan)}` +
     threadGuidance +
-    "\n[GOREV]: Bu plani FreeCAD Path (CAM) koduna cevir ve GRBL G-code olarak yukaridaki cikti yoluna yaz.";
+    "\n[GOREV]: Bu plani FreeCAD Path (CAM) operasyonlarina cevir; toolpath hesabini FreeCAD yapsin ve grbl_post.export ile yukaridaki cikti yoluna GRBL G-code yazdirilsin. G-code'u SEN yazma.";
 
   let lastError = "Bilinmeyen hata";
   let previousCode = null;
@@ -277,6 +307,18 @@ export async function generateCamGcodeFromPlan(stepPath, answers, plan, context 
       lastError = err.message;
       previousCode = null;
       problem = null;
+      continue;
+    }
+
+    // Reject (and ask the model to fix) any script that would bypass FreeCAD's
+    // Path/CAM API + post-processor and emit G-code directly.
+    const violation = validateCamCode(code);
+    if (violation) {
+      lastError = violation;
+      previousCode = code;
+      problem =
+        violation +
+        " Plani SADECE FreeCAD Path (CAM) operasyonlarina cevir; toolpath ve G-code uretimini FreeCAD Path + grbl_post.export yapsin.";
       continue;
     }
 
