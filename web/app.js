@@ -298,8 +298,8 @@ function showResult(data) {
   reviseSection.hidden = !lastGeneratedCode;
 
   lastStepPath = data.stepPath ?? null;
-  // Offer CAM for any part with an exported STEP: simple parts get automatic
-  // G-code, complex parts fall through to the assistant flow.
+  // Offer CAM for any part with an exported STEP; every part goes through the
+  // CAM assistant (questions -> plan -> confirm).
   if (lastStepPath) {
     camSection.hidden = false;
   }
@@ -399,35 +399,11 @@ async function handleCam() {
   camBtn.disabled = true;
   gcodeLink.hidden = true;
   resetCamAssistant();
-  setCamStatus("CNC G-code üretiliyor…", true);
 
+  // Every part goes through the CAM assistant (questions -> plan -> confirm);
+  // there is no automatic G-code path anymore, so open the question form.
   try {
-    const result = await runAsyncJob(
-      `${API_BASE}/generate-cam`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
-        body: JSON.stringify({ stepPath: lastStepPath, prompt: lastPrompt }),
-      },
-      (seconds) => setCamStatus(`CNC G-code üretiliyor… (${seconds} sn)`, true),
-    );
-
-    if (result.error || !result.ok) {
-      setCamStatus(result.error ?? result.body?.error ?? "İşlem başarısız.", false);
-      return;
-    }
-    if (result.body?.complex) {
-      // Complex part → start the assistant question flow.
-      await startCamAssistant();
-      return;
-    }
-    setCamStatus("G-code hazır.", false);
-    if (result.body?.gcodeUrl) {
-      gcodeLink.href = result.body.gcodeUrl;
-      gcodeLink.hidden = false;
-    }
-  } catch (err) {
-    setCamStatus(`Sunucuya bağlanılamadı: ${err.message}`, false);
+    await startCamAssistant();
   } finally {
     camBtn.disabled = false;
   }

@@ -130,18 +130,17 @@
         </div>
 
         <div id="cam-section" class="cam-section" hidden>
-          <button id="cam-btn" type="button">CNC G-code Üret</button>
+          <button id="cam-btn" type="button">CAM Oluştur</button>
           <div id="cam-status" class="status-section" hidden>
             <div id="cam-spinner" class="spinner" hidden></div>
             <p id="cam-status-text"></p>
           </div>
 
-          <!-- Complex-part assistant: questions -> plan -> confirm -->
+          <!-- CAM assistant (every part): questions -> plan -> confirm -->
           <div id="cam-assistant" class="cam-assistant" hidden>
-            <h3 class="cam-assistant-title">Karmaşık parça · CAM Asistanı</h3>
+            <h3 class="cam-assistant-title">CAM Asistanı</h3>
             <p class="cam-assistant-intro">
-              Bu parça otomatik CAM için karmaşık. İşleme planı için birkaç soruyu
-              yanıtlayın.
+              İşleme planı için birkaç soruyu yanıtlayın.
             </p>
 
             <form id="cam-questions-form" class="cam-questions"></form>

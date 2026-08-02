@@ -5,7 +5,6 @@ import { config } from "./config.js";
 import healthRouter from "./routes/health.js";
 import generateRouter from "./routes/generate.js";
 import generateFromImageRouter from "./routes/generateFromImage.js";
-import generateCamRouter from "./routes/generateCam.js";
 import reviseRouter from "./routes/revise.js";
 import generatePdfRouter from "./routes/generatePdf.js";
 import jobsRouter from "./routes/jobs.js";
@@ -28,7 +27,6 @@ app.use(express.json());
 app.use("/health", healthRouter);
 app.use("/generate", generateRouter);
 app.use("/generate-from-image", generateFromImageRouter);
-app.use("/generate-cam", generateCamRouter);
 app.use("/revise", reviseRouter);
 app.use("/generate-pdf", generatePdfRouter);
 // Poll async job status started by the routes above.
@@ -37,7 +35,8 @@ app.use("/jobs", jobsRouter);
 // preview them. Registered before the "/"-mounted CAM assistant router so these
 // public downloads are never intercepted.
 app.use("/files", express.static(config.outputDir));
-// CAM assistant for complex parts: /cam-questions, /cam-plan, /cam-confirm.
+// CAM assistant (question -> plan -> confirm) for every part:
+// /cam-questions, /cam-plan, /cam-confirm.
 // Mounted at "/" (its routes carry their own auth), so keep it last.
 app.use("/", camAssistantRouter);
 

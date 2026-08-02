@@ -77,6 +77,15 @@ function geomBlock(geometry) {
   return `[GEOMETRI_OZETI]: ${JSON.stringify(geometry)}`;
 }
 
+// Added deterministically when the part has more than two horizontal levels
+// (i.e. it is stepped/multi-level), so the machinist is always asked how the
+// steps should be machined. Options are ASCII-only to match the prompt style.
+const STEP_LEVEL_QUESTION = {
+  question:
+    "Parcada birden fazla kademe (yukseklik seviyesi) var. Her kademe ayri bir operasyon olarak mi islenecek?",
+  options: ["Evet, her kademe ayri islensin", "Hayir, tek operasyonda", "Diger"],
+};
+
 /**
  * Produce the (max 5) questions needed before planning machining of a part. When
  * threads/fasteners are detected in the prompt, the tap-vs-thread-milling
@@ -88,12 +97,18 @@ function geomBlock(geometry) {
 export async function generateCamQuestions(stepPath, context = "") {
   const geometry = await describeStepGeometry(stepPath);
   const threads = detectThreads(context);
+  const isStepped = (geometry.horizontalLevelCount ?? 0) > 2;
 
   let input = geomBlock(geometry);
   if (threads.hasThread) {
     // We add the threading-method question ourselves, so tell the model not to.
     input +=
       "\n[NOT]: Bu parcada metrik dis tespit edildi; dis yontemi (tap/frezeleme) sorusunu SEN SORMA.";
+  }
+  if (isStepped) {
+    // We add the per-step question ourselves, so tell the model not to.
+    input +=
+      "\n[NOT]: Bu parcada birden fazla kademe/seviye tespit edildi; kademelerin ayri islenip islenmeyecegi sorusunu SEN SORMA (biz ekleyecegiz), ancak diger sorulari bu kademeli geometriye gore uyarla.";
   }
   input += "\n[GOREV]: Bu parcanin islenmesi icin gereken sorulari uret.";
 
@@ -110,15 +125,26 @@ export async function generateCamQuestions(stepPath, context = "") {
     return list;
   });
 
+  // Deterministically guarantee the geometry-driven questions, keeping the total
+  // at <= 5 by trimming model-generated questions from the end (the standard
+  // material/axis/workholding/reference questions come first, so they survive).
+  const extras = [];
   if (threads.hasThread) {
     const already = questions.some((q) =>
       /tap|kılavuz|klavuz|frez|thread/i.test(q.question),
     );
-    if (!already) {
-      // Keep the total at <= 5 while guaranteeing the threading question.
-      if (questions.length >= 5) questions.length = 4;
-      questions.push({ ...THREAD_METHOD_QUESTION });
-    }
+    if (!already) extras.push({ ...THREAD_METHOD_QUESTION });
+  }
+  if (isStepped) {
+    const already = questions.some((q) =>
+      /kademe|seviye|basamak|step/i.test(q.question),
+    );
+    if (!already) extras.push({ ...STEP_LEVEL_QUESTION });
+  }
+  if (extras.length) {
+    const room = Math.max(1, 5 - extras.length);
+    if (questions.length > room) questions.length = room;
+    questions.push(...extras);
   }
 
   return questions;
