@@ -118,6 +118,12 @@ main {
   gap: 0.75rem;
 }
 
+.panel-hint {
+  margin: 0 0 0.75rem;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
 .file-drop {
   display: flex;
   align-items: center;

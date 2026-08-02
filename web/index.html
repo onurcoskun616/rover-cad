@@ -46,6 +46,15 @@
           >
             Teknik Resim ile
           </button>
+          <button
+            id="tab-step"
+            class="tab"
+            type="button"
+            role="tab"
+            aria-selected="false"
+          >
+            STEP/IGES ile
+          </button>
         </div>
 
         <div id="panel-text" class="tab-panel">
@@ -66,6 +75,22 @@
             rows="2"
             placeholder="İsteğe bağlı ek talimat (örn: delik çapı 8mm)"
           ></textarea>
+        </div>
+
+        <div id="panel-step" class="tab-panel" hidden>
+          <p class="panel-hint">
+            Mevcut bir STEP/IGES dosyanız mı var? Yükleyin; 3D önizlemesini
+            görün ve doğrudan CAM asistanına geçin.
+          </p>
+          <label for="step-input" class="file-drop">
+            <span id="step-label">Bir STEP/IGES dosyası seçin (.step, .stp, .iges, .igs)</span>
+            <input
+              id="step-input"
+              type="file"
+              accept=".step,.stp,.iges,.igs"
+              hidden
+            />
+          </label>
         </div>
 
         <button id="generate-btn" type="button">Oluştur</button>
