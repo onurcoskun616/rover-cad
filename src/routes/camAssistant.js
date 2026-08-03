@@ -68,10 +68,11 @@ router.post("/cam-plan", apiKeyAuth, async (req, res, next) => {
   }
 });
 
-// Step 4: build the Path operations and export a TOOLPATH PREVIEW (no G-code
-// yet). Async (polled via /jobs/:id). Returns a preview file URL to visualise
-// plus a token so the confirm step can reuse the exact same operations.
-router.post("/cam-preview", apiKeyAuth, (req, res) => {
+// Step 4: build the Path operations and export the TOOLPATH SIMULATION data
+// (ordered tool positions per operation; no G-code yet). Async (polled via
+// /jobs/:id). Returns the simulation file URL to animate plus a token so the
+// confirm step can reuse the exact same operations.
+router.post("/cam-simulate", apiKeyAuth, (req, res) => {
   const stepPath = requireStepPath(req, res);
   if (!stepPath) return;
   const { answers, plan, prompt } = req.body ?? {};
@@ -92,7 +93,7 @@ router.post("/cam-preview", apiKeyAuth, (req, res) => {
         ok: true,
         body: {
           token: result.token,
-          previewUrl: makeFileUrl(proto, host, result.previewPath),
+          simulationUrl: makeFileUrl(proto, host, result.previewPath),
           estimatedMinutes: result.estimatedMinutes,
         },
       };

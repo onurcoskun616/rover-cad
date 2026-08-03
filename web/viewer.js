@@ -30,9 +30,15 @@ export function initViewer(container) {
 
   let currentMesh = null;
   let currentToolpath = null;
+  let frameCb = null;
+  let lastT = performance.now();
 
   function animate() {
     requestAnimationFrame(animate);
+    const now = performance.now();
+    const dt = (now - lastT) / 1000;
+    lastT = now;
+    if (frameCb) frameCb(dt);
     controls.update();
     renderer.render(scene, camera);
   }
@@ -57,6 +63,111 @@ export function initViewer(container) {
     getToolpath: () => currentToolpath,
     setToolpath: (t) => {
       currentToolpath = t;
+    },
+    setFrameCb: (cb) => {
+      frameCb = cb;
+    },
+  };
+}
+
+// Animate a tool travelling along the CAM toolpath. Draws the full path
+// (cyan cutting / faint orange rapids) plus a moving tool (cone) that follows
+// the ordered points. Returns a controller: play/pause/setSpeed/seek + an
+// onUpdate({progress, op}) callback for the timeline and operation label.
+// `data` is { toolpaths: [{ op, points: [[x,y,z,rapid], ...] }, ...] }.
+export function loadSimulation(viewer, data, { onUpdate } = {}) {
+  // Reuse the static path rendering, then overlay a moving tool.
+  loadToolpath(viewer, data);
+  const group = viewer.getToolpath();
+
+  // Flatten all operations, in order, into one point sequence carrying the op
+  // name and cumulative distance so we can interpolate at any progress value.
+  // The tool is parented to the toolpath group, so it uses raw (local) coords
+  // that line up with the drawn path (the group itself is offset to origin).
+  const seq = [];
+  const paths = (data && data.toolpaths) || [];
+  for (const p of paths) {
+    for (const pt of p.points || []) {
+      seq.push({ v: new THREE.Vector3(pt[0], pt[1], pt[2]), op: p.op });
+    }
+  }
+
+  const cum = [0];
+  let total = 0;
+  for (let i = 1; i < seq.length; i++) {
+    total += seq[i].v.distanceTo(seq[i - 1].v);
+    cum.push(total);
+  }
+
+  // Tool marker: a small cone pointing down (-Z), sized to the scene.
+  const span = total > 0 ? total : 10;
+  const toolLen = Math.max(4, span * 0.02);
+  const toolR = toolLen * 0.35;
+  const tool = new THREE.Mesh(
+    new THREE.ConeGeometry(toolR, toolLen, 20),
+    new THREE.MeshStandardMaterial({ color: 0xff4d4d, metalness: 0.2, roughness: 0.5 }),
+  );
+  tool.rotation.x = Math.PI; // point tip toward -Z (into the work)
+  if (seq.length) tool.position.copy(seq[0].v);
+  // Parent to the toolpath group so it shares the group's offset and is
+  // disposed together on the next load.
+  if (group) group.add(tool);
+  else viewer.scene.add(tool);
+
+  let distance = 0;
+  let playing = false;
+  let speed = 1;
+  const baseMmPerSec = span / 15; // ~15s for a full pass at 1x
+
+  function posAt(d) {
+    if (seq.length === 0) return { v: new THREE.Vector3(), op: "" };
+    if (d <= 0) return { v: seq[0].v, op: seq[0].op };
+    if (d >= total) return { v: seq[seq.length - 1].v, op: seq[seq.length - 1].op };
+    let lo = 0;
+    let hi = cum.length - 1;
+    while (lo < hi - 1) {
+      const mid = (lo + hi) >> 1;
+      if (cum[mid] <= d) lo = mid;
+      else hi = mid;
+    }
+    const segLen = cum[hi] - cum[lo] || 1;
+    const t = (d - cum[lo]) / segLen;
+    const v = seq[lo].v.clone().lerp(seq[hi].v, t);
+    return { v, op: seq[hi].op };
+  }
+
+  function apply() {
+    const { v, op } = posAt(distance);
+    tool.position.copy(v);
+    if (onUpdate) onUpdate({ progress: total > 0 ? distance / total : 0, op });
+  }
+  apply();
+
+  viewer.setFrameCb((dt) => {
+    if (!playing || total === 0) return;
+    distance += baseMmPerSec * speed * dt;
+    if (distance >= total) {
+      distance = total;
+      playing = false;
+    }
+    apply();
+  });
+
+  return {
+    play() {
+      if (distance >= total) distance = 0;
+      playing = true;
+    },
+    pause() {
+      playing = false;
+    },
+    isPlaying: () => playing,
+    setSpeed(m) {
+      speed = m;
+    },
+    seek(t01) {
+      distance = Math.max(0, Math.min(1, t01)) * total;
+      apply();
     },
   };
 }

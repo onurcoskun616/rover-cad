@@ -53,6 +53,14 @@ const camPlanView = document.getElementById("cam-plan-view");
 const camPlanText = document.getElementById("cam-plan-text");
 const camPreviewBtn = document.getElementById("cam-preview-btn");
 const camPreviewView = document.getElementById("cam-preview-view");
+const camSimOp = document.getElementById("cam-sim-op");
+const camSimProgress = document.getElementById("cam-sim-progress");
+const camSimPlay = document.getElementById("cam-sim-play");
+const camSimSpeedBtns = {
+  1: document.getElementById("cam-sim-1x"),
+  2: document.getElementById("cam-sim-2x"),
+  5: document.getElementById("cam-sim-5x"),
+};
 const camConfirmBtn = document.getElementById("cam-confirm-btn");
 const camRejectBtn = document.getElementById("cam-reject-btn");
 const camReviseBtn = document.getElementById("cam-revise-btn");
@@ -81,6 +89,7 @@ let camStepIndex = 0;
 let camStepFieldNames = [];
 let camPreviewToken = null;
 let camEstimatedMinutes = null;
+let camSim = null; // active simulation controller
 let camPlan = null;
 
 function setMode(next) {
@@ -174,6 +183,8 @@ function resetCamAssistant() {
   camStepFieldNames = [];
   camPreviewToken = null;
   camEstimatedMinutes = null;
+  if (camSim) camSim.pause();
+  camSim = null;
   camPlan = null;
 }
 
@@ -610,7 +621,9 @@ async function requestCamPlan(changeRequest) {
     camPlanView.hidden = false;
     camReviseBox.hidden = true;
     camReviseInput.value = "";
-    // A new plan invalidates any previous toolpath preview/approval/quote.
+    // A new plan invalidates any previous simulation/approval/quote.
+    if (camSim) camSim.pause();
+    camSim = null;
     camPreviewView.hidden = true;
     camPreviewToken = null;
     camEstimatedMinutes = null;
@@ -630,8 +643,8 @@ async function handleCamPlan() {
   await requestCamPlan(null);
 }
 
-// Build the Path operations and show a toolpath preview in the 3D viewer. No
-// G-code is produced until the user approves this preview.
+// Build the Path operations and show an animated toolpath simulation in the 3D
+// viewer. No G-code is produced until the user approves this simulation.
 async function handleCamPreview() {
   if (!camPlan) return;
   camPreviewBtn.disabled = true;
@@ -639,10 +652,10 @@ async function handleCamPreview() {
   camPreviewView.hidden = true;
   camPreviewToken = null;
   gcodeLink.hidden = true;
-  setCamStatus("Takım yolu hesaplanıyor (önizleme)…", true);
+  setCamStatus("Takım yolu simülasyonu hesaplanıyor…", true);
   try {
     const result = await runAsyncJob(
-      `${API_BASE}/cam-preview`,
+      `${API_BASE}/cam-simulate`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
@@ -653,16 +666,16 @@ async function handleCamPreview() {
           prompt: lastPrompt,
         }),
       },
-      (seconds) => setCamStatus(`Takım yolu hesaplanıyor (önizleme)… (${seconds} sn)`, true),
+      (seconds) => setCamStatus(`Takım yolu simülasyonu hesaplanıyor… (${seconds} sn)`, true),
     );
 
-    if (result.error || !result.ok || !result.body?.previewUrl) {
-      setCamStatus(result.error ?? result.body?.error ?? "Önizleme üretilemedi.", false);
+    if (result.error || !result.ok || !result.body?.simulationUrl) {
+      setCamStatus(result.error ?? result.body?.error ?? "Simülasyon üretilemedi.", false);
       return;
     }
     camPreviewToken = result.body.token ?? null;
     camEstimatedMinutes = result.body.estimatedMinutes ?? null;
-    await renderToolpathPreview(result.body.previewUrl);
+    await setupSimulation(result.body.simulationUrl);
     setCamStatus("", false);
     camPreviewView.hidden = false;
     // The toolpath (and its estimated time) is known → enable the quote engine.
@@ -680,19 +693,37 @@ async function handleCamPreview() {
   }
 }
 
-async function renderToolpathPreview(previewUrl) {
-  const response = await fetch(previewUrl);
+function setSimSpeed(mult) {
+  if (camSim) camSim.setSpeed(mult);
+  Object.entries(camSimSpeedBtns).forEach(([m, btn]) => {
+    btn.classList.toggle("active", Number(m) === mult);
+  });
+}
+
+async function setupSimulation(simulationUrl) {
+  const response = await fetch(simulationUrl);
   const data = await readJson(response);
-  const { initViewer, loadToolpath } = await import("./viewer.js");
+  const { initViewer, loadSimulation } = await import("./viewer.js");
   if (!viewer) viewer = initViewer(viewerContainer);
-  loadToolpath(viewer, data ?? { toolpaths: [] });
+  camSim = loadSimulation(viewer, data ?? { toolpaths: [] }, {
+    onUpdate: ({ progress, op }) => {
+      camSimProgress.value = String(Math.round(progress * 1000));
+      camSimOp.textContent = `Operasyon: ${op || "—"}`;
+      if (camSim && !camSim.isPlaying()) camSimPlay.textContent = "Oynat";
+      if (progress >= 1) camSimPlay.textContent = "Tekrar Oynat";
+    },
+  });
+  camSimProgress.value = "0";
+  camSimPlay.textContent = "Oynat";
+  setSimSpeed(1);
 }
 
 function handleCamReject() {
   // Reject the previewed toolpath: return to the plan so it can be revised.
+  if (camSim) camSim.pause();
   camPreviewView.hidden = true;
   camPreviewToken = null;
-  setCamStatus("Takım yolu reddedildi. Planı değiştirip tekrar önizleyin.", false);
+  setCamStatus("Takım yolu reddedildi. Planı değiştirip tekrar simüle edin.", false);
 }
 
 async function handleCamConfirm() {
@@ -998,6 +1029,25 @@ camPlanBtn.addEventListener("click", handleCamPlan);
 camPreviewBtn.addEventListener("click", handleCamPreview);
 camConfirmBtn.addEventListener("click", handleCamConfirm);
 camRejectBtn.addEventListener("click", handleCamReject);
+camSimPlay.addEventListener("click", () => {
+  if (!camSim) return;
+  if (camSim.isPlaying()) {
+    camSim.pause();
+    camSimPlay.textContent = "Oynat";
+  } else {
+    camSim.play();
+    camSimPlay.textContent = "Duraklat";
+  }
+});
+camSimProgress.addEventListener("input", () => {
+  if (!camSim) return;
+  camSim.pause();
+  camSimPlay.textContent = "Oynat";
+  camSim.seek(Number(camSimProgress.value) / 1000);
+});
+Object.entries(camSimSpeedBtns).forEach(([m, btn]) => {
+  btn.addEventListener("click", () => setSimSpeed(Number(m)));
+});
 camReviseBtn.addEventListener("click", () => {
   camReviseBox.hidden = !camReviseBox.hidden;
 });
