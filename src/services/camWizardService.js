@@ -1,6 +1,12 @@
 import fs from "node:fs";
 import { describeStepGeometry, resolveStepPath } from "./camService.js";
 import { detectThreads, THREAD_METHOD_QUESTION } from "./threadSpec.js";
+import {
+  listMachines,
+  suitableTools,
+  toolLabel,
+  effectiveAnswers,
+} from "./inventoryService.js";
 
 // --- Deterministic machining data -------------------------------------------
 // Cutting parameters must be reproducible, so they come from a table + the
@@ -128,8 +134,17 @@ export function repeatedFeatures(geometry) {
 
 // Heuristic feature -> standard-operation suggestion, shown to the user and fed
 // to the planner so operations are named specifically (not just pocket/profile).
+// A part with no faces at all (e.g. a DXF imported as wires, no thickness) is a
+// pure 2D contour job — laser/plasma/sheet cutting.
+export function isTwoDGeometry(geometry) {
+  return !Object.keys(geometry?.faceCountsByType ?? {}).length;
+}
+
 export function suggestOperations(geometry) {
   const f = geometry?.faceCountsByType ?? {};
+  if (isTwoDGeometry(geometry)) {
+    return { is3D: false, is2D: true, text: "2D Contour / Profile (sac/lazer/plazma kesim)" };
+  }
   const levels = geometry?.horizontalLevelCount ?? 0;
   const holes = (geometry?.cylinderRadiiMm ?? []).length;
   const freeform =
@@ -148,6 +163,15 @@ export function suggestOperations(geometry) {
     ops.push("3D Adaptive Clearing (kaba) + Parallel/Scallop (finis)");
   }
   return { is3D, text: ops.join(", ") };
+}
+
+// Note about drillable hole diameters detected in the geometry (for the tool
+// step intro), derived from the distinct cylinder radii.
+function holeDiametersNote(geometry) {
+  const radii = Array.isArray(geometry?.cylinderRadiiMm) ? geometry.cylinderRadiiMm : [];
+  const dias = radii.map((r) => Math.round(r * 2 * 100) / 100).filter((d) => d > 0);
+  if (!dias.length) return "";
+  return `Tespit edilen delik caplari: ${dias.join(", ")} mm.`;
 }
 
 // Read an existing answer, else a recommended default.
@@ -178,6 +202,7 @@ function buildApplicableSteps({ geometry, threads, answers }) {
   const endmill = pick(a, "endmillDiameter", recommendEndmill(geometry));
   const params = recommendCuttingParams(a.material, endmill);
   const isStepped = (geometry?.horizontalLevelCount ?? 0) > 2;
+  const is2D = isTwoDGeometry(geometry);
   const repeats = repeatedFeatures(geometry);
   const opSuggestion = suggestOperations(geometry);
 
@@ -192,28 +217,48 @@ function buildApplicableSteps({ geometry, threads, answers }) {
     ],
   });
 
-  // 2. Stock (raw block): per-side margin, block size, and top-face facing.
+  // 2. Stock (raw block): per-side margin, block size, and (3D only) top-face
+  //    facing. For a pure 2D cut there is nothing to face.
+  const stockFields = [
+    numberField("stockMargin", "Her yuzeyden pay", "mm", margin),
+    numberField("stockX", "Stok X", "mm", pick(a, "stockX", stock.x)),
+    numberField("stockY", "Stok Y", "mm", pick(a, "stockY", stock.y)),
+    numberField("stockZ", "Stok Z", "mm", pick(a, "stockZ", stock.z)),
+  ];
+  if (!is2D) {
+    stockFields.push(
+      selectField("faceTop", "Ust yuzey ilk islemde yuzeylensin mi? (Face)", FACE_TOP_OPTIONS, pick(a, "faceTop", FACE_TOP_OPTIONS[0])),
+    );
+  }
   steps.push({
     id: "stock",
     title: "2. Stok (ham blok) boyutu",
     intro: "Blok, parca olculeri + her yuzeyden pay olarak onerilir.",
-    fields: [
-      numberField("stockMargin", "Her yuzeyden pay", "mm", margin),
-      numberField("stockX", "Stok X", "mm", pick(a, "stockX", stock.x)),
-      numberField("stockY", "Stok Y", "mm", pick(a, "stockY", stock.y)),
-      numberField("stockZ", "Stok Z", "mm", pick(a, "stockZ", stock.z)),
-      selectField("faceTop", "Ust yuzey ilk islemde yuzeylensin mi? (Face)", FACE_TOP_OPTIONS, pick(a, "faceTop", FACE_TOP_OPTIONS[0])),
-    ],
+    fields: stockFields,
   });
 
-  // 3. Machine axis + post-processor / controller
+  // 3. Machine axis + post-processor / controller. Saved machine profiles are
+  //    offered first; picking one overrides the manual axis/post fields.
+  const machines = listMachines();
+  const machineFields = [];
+  let machineIntro;
+  if (machines.length) {
+    const opts = [...machines.map((m) => m.name), "Elle gir (yeni makine)"];
+    machineFields.push(
+      selectField("machine", "Kayitli makine", opts, pick(a, "machine", opts[0])),
+    );
+    machineIntro =
+      "Kayitli makinelerinizden secin (eksen/post-processor otomatik dolar) veya 'Elle gir' ile asagidan girin.";
+  }
+  machineFields.push(
+    selectField("axisCount", "Tezgah ekseni", AXIS_OPTIONS, pick(a, "axisCount", AXIS_OPTIONS[0])),
+    selectField("postProcessor", "Post-processor / kontrolcu", POST_OPTIONS, pick(a, "postProcessor", POST_OPTIONS[0])),
+  );
   steps.push({
     id: "machine",
     title: "3. Tezgah ekseni ve post-processor",
-    fields: [
-      selectField("axisCount", "Tezgah ekseni", AXIS_OPTIONS, pick(a, "axisCount", AXIS_OPTIONS[0])),
-      selectField("postProcessor", "Post-processor / kontrolcu", POST_OPTIONS, pick(a, "postProcessor", POST_OPTIONS[0])),
-    ],
+    intro: machineIntro,
+    fields: machineFields,
   });
 
   // 4. Workholding
@@ -235,8 +280,25 @@ function buildApplicableSteps({ geometry, threads, answers }) {
     ],
   });
 
-  // 6. Tool selection (recommended endmill + cutter comp; thread method).
-  const toolFields = [
+  // 6. Tool selection. Saved tools (nearest recommended diameter first) are
+  //    offered; picking one overrides the manual diameter. Otherwise the
+  //    geometry-recommended diameter is used.
+  const toolFields = [];
+  const savedTools = suitableTools(endmill);
+  let toolIntro = holeDiametersNote(geometry);
+  if (savedTools.length) {
+    const opts = [...savedTools.map((t) => toolLabel(t)), "Elle gir (yeni takim)"];
+    toolFields.push(
+      selectField("tool", "Kayitli takim", opts, pick(a, "tool", opts[0])),
+    );
+    const nearest = savedTools[0];
+    toolIntro =
+      `${toolIntro} Envanterden en yakin: ${nearest.name} O${nearest.diameter}mm (onerilen O${endmill}mm).`.trim();
+  } else {
+    toolIntro =
+      `${toolIntro} Envanterinizde kayitli takim yok; onerilen O${endmill}mm.`.trim();
+  }
+  toolFields.push(
     numberField("endmillDiameter", "Ana freze capi", "mm", endmill),
     selectField(
       "cutterComp",
@@ -244,7 +306,7 @@ function buildApplicableSteps({ geometry, threads, answers }) {
       CUTTER_COMP_OPTIONS,
       pick(a, "cutterComp", CUTTER_COMP_OPTIONS[0]),
     ),
-  ];
+  );
   if (threads?.hasThread) {
     toolFields.push(
       selectField("threadMethod", THREAD_METHOD_QUESTION.question, THREAD_METHOD_QUESTION.options, pick(a, "threadMethod", THREAD_METHOD_QUESTION.options[0])),
@@ -253,6 +315,7 @@ function buildApplicableSteps({ geometry, threads, answers }) {
   steps.push({
     id: "tooling",
     title: "6. Takim secimi",
+    intro: toolIntro || undefined,
     fields: toolFields,
   });
 
@@ -260,7 +323,7 @@ function buildApplicableSteps({ geometry, threads, answers }) {
   steps.push({
     id: "operations",
     title: "7. Operasyon tipi esleştirmesi",
-    intro: `Tespit edilen ozelliklere onerilen operasyonlar: ${opSuggestion.text}. Parca ${opSuggestion.is3D ? "3D (serbest yuzeyli)" : "2.5D"} olarak degerlendirildi.`,
+    intro: `Tespit edilen ozelliklere onerilen operasyonlar: ${opSuggestion.text}. Parca ${opSuggestion.is2D ? "2D kontur (sac/lazer/plazma kesim)" : opSuggestion.is3D ? "3D (serbest yuzeyli)" : "2.5D"} olarak degerlendirildi.`,
     fields: [
       selectField("operationMapping", "Operasyon esleştirmesi", OP_MAPPING_OPTIONS, pick(a, "operationMapping", OP_MAPPING_OPTIONS[0])),
     ],
@@ -351,22 +414,29 @@ export function nextCamStep({ geometry, threads, answers, targetIndex }) {
  * @returns {string}
  */
 export function camParamsBlock(answers, geometry) {
-  const a = answers ?? {};
+  // Resolve selected machine/tool profiles so the plan/code use their values.
+  const a = effectiveAnswers(answers);
   const fin = deriveFinishParams(a);
   const repeats = geometry ? repeatedFeatures(geometry) : [];
   const repeatNote = repeats.length
     ? repeats.map((r) => `${r.count}xO${r.diameterMm}mm`).join(", ")
     : "";
+  const twoD = geometry ? isTwoDGeometry(geometry) : false;
   return [
+    twoD
+      ? "\n[2D_KESIM]: Bu parca 2D konturdur (yuzey/hacim yok). SADECE 2D Contour/Profile operasyonu uret; 3D, kademe, kaba/finis katmani, Face ve delme derinligi yok. Tek gecis kontur kesimi (sac/lazer/plazma)."
+      : null,
     "\n[CAM_PARAMETRELERI] (bu degerlere uy):",
     `- Malzeme: ${a.material ?? "?"}`,
     `- Stok (ham blok) mm: ${a.stockX ?? "?"} x ${a.stockY ?? "?"} x ${a.stockZ ?? "?"} (her yuzeyden pay: ${a.stockMargin ?? "?"} mm)`,
     `- Ust yuzey Face operasyonu: ${a.faceTop ?? "?"}`,
+    a._machineName ? `- Makine profili: ${a._machineName}` : null,
     `- Tezgah ekseni: ${a.axisCount ?? "?"}`,
     `- Post-processor / kontrolcu: ${a.postProcessor ?? "GRBL"}`,
     `- Baglama: ${a.workholding ?? "?"}`,
     `- Referans/sifir (WCS): ${a.wcs ?? "?"}`,
     `- Calisma duzlemi: ${a.workPlane ?? "G17 / XY"}`,
+    a._toolName ? `- Takim profili: ${a._toolName} (${a._toolMaterial ?? ""}, ${a._toolFlutes ?? "?"} agiz)` : null,
     `- Ana freze capi: ${a.endmillDiameter ?? "?"} mm`,
     `- Takim yaricap kompanzasyonu: ${a.cutterComp ?? "Yok"}`,
     a.threadMethod ? `- Dis yontemi: ${a.threadMethod}` : null,

@@ -115,6 +115,97 @@ function buildImportExportCode(outputDir, baseName, uploadedPath) {
   ].join("\n");
 }
 
+// Import a DXF (2D). With a thickness > 0 the closed contours are extruded to a
+// solid (STEP + STL, so it flows through the normal 3D CAM path). With no
+// thickness the raw contours are kept as a wire compound (STEP for CAM's 2D
+// Contour/Profile) plus a polyline JSON for the 2D preview.
+function buildDxfImportCode(outputDir, baseName, uploadedPath, thickness) {
+  const stepPath = path.join(outputDir, `${baseName}.step`);
+  const stlPath = path.join(outputDir, `${baseName}.stl`);
+  const contourPath = path.join(outputDir, `${baseName}_contour.json`);
+  const t = Number(thickness) > 0 ? Number(thickness) : 0;
+
+  return [
+    freshDocPy(),
+    "import Part, Mesh, os, json, FreeCAD",
+    "import importDXF",
+    "doc = FreeCAD.ActiveDocument",
+    `os.makedirs(${JSON.stringify(outputDir)}, exist_ok=True)`,
+    `importDXF.insert(${JSON.stringify(uploadedPath)}, doc.Name)`,
+    "doc.recompute()",
+    "edges = []",
+    "for o in list(doc.Objects):",
+    "    sh = getattr(o, 'Shape', None)",
+    "    if sh is not None and not sh.isNull():",
+    "        edges.extend(sh.Edges)",
+    "if not edges:",
+    "    raise RuntimeError('DXF icinde cizgi/kontur bulunamadi')",
+    "try:",
+    "    clusters = Part.sortEdges(edges)",
+    "except Exception:",
+    "    clusters = [[e] for e in edges]",
+    "wires = []",
+    "for cl in clusters:",
+    "    try:",
+    "        wires.append(Part.Wire(cl))",
+    "    except Exception:",
+    "        pass",
+    `THK = ${t}`,
+    "if THK > 0:",
+    "    faces = []",
+    "    for w in wires:",
+    "        if w.isClosed():",
+    "            try: faces.append(Part.Face(w))",
+    "            except Exception: pass",
+    "    if not faces:",
+    "        raise RuntimeError('Kapali kontur bulunamadi; 3D icin kapali profil gerekir')",
+    "    faces.sort(key=lambda f: f.Area, reverse=True)",
+    "    result = faces[0].extrude(FreeCAD.Vector(0, 0, THK))",
+    "    for hf in faces[1:]:",
+    "        try: result = result.cut(hf.extrude(FreeCAD.Vector(0, 0, THK)))",
+    "        except Exception: pass",
+    "else:",
+    "    result = Part.makeCompound(wires if wires else edges)",
+    "for o in list(doc.Objects):",
+    "    try: doc.removeObject(o.Name)",
+    "    except Exception: pass",
+    "obj = doc.addObject('Part::Feature', 'RoverDXF')",
+    "obj.Shape = result",
+    "doc.recompute()",
+    `Part.export([obj], ${JSON.stringify(stepPath)})`,
+    `print("STEP_PATH=" + ${JSON.stringify(stepPath)})`,
+    "if THK > 0:",
+    "    try:",
+    "        import MeshPart",
+    "        _m = Mesh.Mesh()",
+    "        _m.addMesh(MeshPart.meshFromShape(Shape=result, LinearDeflection=0.5, AngularDeflection=0.6))",
+    `        _m.write(${JSON.stringify(stlPath)})`,
+    `        print("STL_PATH=" + ${JSON.stringify(stlPath)})`,
+    "    except Exception as _e:",
+    "        pass",
+    "else:",
+    "    _paths = []",
+    "    for w in wires:",
+    "        _pts = []",
+    "        try:",
+    "            for p in w.discretize(Distance=1.0):",
+    "                _pts.append([round(p.x, 3), round(p.y, 3), round(p.z, 3), 0])",
+    "        except Exception:",
+    "            for e in w.Edges:",
+    "                for p in e.discretize(Number=8):",
+    "                    _pts.append([round(p.x, 3), round(p.y, 3), round(p.z, 3), 0])",
+    "        if len(_pts) > 1:",
+    "            _paths.append({'op': '2D Kontur', 'points': _pts})",
+    `    with open(${JSON.stringify(contourPath)}, 'w') as _f:`,
+    "        json.dump({'toolpaths': _paths}, _f)",
+    `    print("CONTOUR_JSON=" + ${JSON.stringify(contourPath)})`,
+    "bb = result.BoundBox",
+    'print("BBOX_X=" + str(bb.XLength))',
+    'print("BBOX_Y=" + str(bb.YLength))',
+    'print("BBOX_Z=" + str(bb.ZLength))',
+  ].join("\n");
+}
+
 /**
  * Run the generated code and export/measure in a single FreeCAD call.
  * @param {string} generatedCode FreeCAD Python for the model
@@ -192,6 +283,53 @@ export async function runImportAndExport(uploadedPath) {
     stepPath: stepMatch[1].trim(),
     stlPath: stlMatch ? stlMatch[1].trim() : null,
     baseName,
+    bbox: {
+      x: x ? Number(x[1]) : null,
+      y: y ? Number(y[1]) : null,
+      z: z ? Number(z[1]) : null,
+    },
+  };
+}
+
+/**
+ * Import a DXF (optionally extruding to a solid) and export it for the pipeline.
+ * @param {string} uploadedPath absolute path of the uploaded .dxf
+ * @param {number} thickness sheet thickness in mm; 0/blank => 2D contours only
+ * @returns {Promise<{ok:boolean, error?:string, stepPath?:string, stlPath?:string,
+ *   contourPath?:string, baseName?:string, twoD?:boolean, bbox?:object}>}
+ */
+export async function runImportDxfAndExport(uploadedPath, thickness = 0) {
+  const baseName = `rover_dxf_${Date.now()}_${randomUUID().slice(0, 8)}`;
+  const code = buildDxfImportCode(config.outputDir, baseName, uploadedPath, thickness);
+
+  const result = await callFreecadTool(config.freecadMcp.toolName, {
+    [config.freecadMcp.toolParam]: code,
+  });
+  const text = extractResultText(result);
+
+  const stepMatch = text.match(/STEP_PATH=(.+)/);
+  if (result?.isError || text.startsWith("Failed to execute code") || !stepMatch) {
+    return {
+      ok: false,
+      error:
+        "DXF FreeCAD'e aktarilamadi (bozuk dosya, kapali kontur yoklugu veya desteklenmeyen icerik olabilir): " +
+        (text || "bilinmeyen hata"),
+    };
+  }
+
+  const stlMatch = text.match(/STL_PATH=(.+)/);
+  const contourMatch = text.match(/CONTOUR_JSON=(.+)/);
+  const x = text.match(/BBOX_X=([-\d.eE+]+)/);
+  const y = text.match(/BBOX_Y=([-\d.eE+]+)/);
+  const z = text.match(/BBOX_Z=([-\d.eE+]+)/);
+
+  return {
+    ok: true,
+    stepPath: stepMatch[1].trim(),
+    stlPath: stlMatch ? stlMatch[1].trim() : null,
+    contourPath: contourMatch ? contourMatch[1].trim() : null,
+    baseName,
+    twoD: !(Number(thickness) > 0),
     bbox: {
       x: x ? Number(x[1]) : null,
       y: y ? Number(y[1]) : null,

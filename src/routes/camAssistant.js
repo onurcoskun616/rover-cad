@@ -7,6 +7,7 @@ import {
   generateCamGcodeFromPlan,
 } from "../services/camAssistantService.js";
 import { getNextCamStep } from "../services/camWizardService.js";
+import { effectiveAnswers } from "../services/inventoryService.js";
 import { computeQuote, generateQuotePdf } from "../services/quoteService.js";
 import { createJob, runJob } from "../services/jobStore.js";
 
@@ -67,10 +68,11 @@ router.post("/cam-plan", apiKeyAuth, async (req, res, next) => {
   }
 });
 
-// Step 4: build the Path operations and export a TOOLPATH PREVIEW (no G-code
-// yet). Async (polled via /jobs/:id). Returns a preview file URL to visualise
-// plus a token so the confirm step can reuse the exact same operations.
-router.post("/cam-preview", apiKeyAuth, (req, res) => {
+// Step 4: build the Path operations and export the TOOLPATH SIMULATION data
+// (ordered tool positions per operation; no G-code yet). Async (polled via
+// /jobs/:id). Returns the simulation file URL to animate plus a token so the
+// confirm step can reuse the exact same operations.
+router.post("/cam-simulate", apiKeyAuth, (req, res) => {
   const stepPath = requireStepPath(req, res);
   if (!stepPath) return;
   const { answers, plan, prompt } = req.body ?? {};
@@ -91,7 +93,7 @@ router.post("/cam-preview", apiKeyAuth, (req, res) => {
         ok: true,
         body: {
           token: result.token,
-          previewUrl: makeFileUrl(proto, host, result.previewPath),
+          simulationUrl: makeFileUrl(proto, host, result.previewPath),
           estimatedMinutes: result.estimatedMinutes,
         },
       };
@@ -149,12 +151,23 @@ router.post("/cam-quote", apiKeyAuth, async (req, res, next) => {
   try {
     const { mode, minutes, answers, bbox, inputs, partName, material } = req.body ?? {};
     const quoteMode = mode === "detayli" ? "detayli" : "basit";
+    const eff = effectiveAnswers(answers && typeof answers === "object" ? answers : {});
+    const quoteInputs = inputs && typeof inputs === "object" ? { ...inputs } : {};
+    // If a machine profile is selected and no hourly rate was entered, use the
+    // profile's rate (integrates the inventory with the quote engine).
+    if (
+      quoteMode === "basit" &&
+      (quoteInputs.hourlyRate === undefined || quoteInputs.hourlyRate === null || quoteInputs.hourlyRate === "") &&
+      eff._machineHourlyRate
+    ) {
+      quoteInputs.hourlyRate = eff._machineHourlyRate;
+    }
     const quote = computeQuote({
       mode: quoteMode,
       minutes: Number(minutes) || 0,
-      answers: answers && typeof answers === "object" ? answers : {},
+      answers: eff,
       bbox: bbox && typeof bbox === "object" ? bbox : {},
-      inputs: inputs && typeof inputs === "object" ? inputs : {},
+      inputs: quoteInputs,
     });
     const pdfPath = await generateQuotePdf({
       partName: typeof partName === "string" ? partName : "",

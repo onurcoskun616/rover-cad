@@ -6,10 +6,12 @@ import healthRouter from "./routes/health.js";
 import generateRouter from "./routes/generate.js";
 import generateFromImageRouter from "./routes/generateFromImage.js";
 import uploadStepRouter from "./routes/uploadStep.js";
+import uploadDxfRouter from "./routes/uploadDxf.js";
 import reviseRouter from "./routes/revise.js";
 import generatePdfRouter from "./routes/generatePdf.js";
 import jobsRouter from "./routes/jobs.js";
 import camAssistantRouter from "./routes/camAssistant.js";
+import { machinesRouter, toolsRouter } from "./routes/inventory.js";
 import { callFreecadTool, disconnectFreecad } from "./services/freecadMcpClient.js";
 
 fs.mkdirSync(config.outputDir, { recursive: true });
@@ -29,10 +31,14 @@ app.use("/health", healthRouter);
 app.use("/generate", generateRouter);
 app.use("/generate-from-image", generateFromImageRouter);
 app.use("/upload-step", uploadStepRouter);
+app.use("/upload-dxf", uploadDxfRouter);
 app.use("/revise", reviseRouter);
 app.use("/generate-pdf", generatePdfRouter);
 // Poll async job status started by the routes above.
 app.use("/jobs", jobsRouter);
+// Machine/tool inventory (profiles reused across CAM jobs).
+app.use("/machines", machinesRouter);
+app.use("/tools", toolsRouter);
 // Serves generated STEP/STL/PDF/G-code files so the frontend can link to and
 // preview them. Registered before the "/"-mounted CAM assistant router so these
 // public downloads are never intercepted.

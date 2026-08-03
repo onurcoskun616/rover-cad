@@ -13,6 +13,8 @@ const panelImage = document.getElementById("panel-image");
 const panelStep = document.getElementById("panel-step");
 const stepInput = document.getElementById("step-input");
 const stepLabel = document.getElementById("step-label");
+const dxfThicknessField = document.getElementById("dxf-thickness-field");
+const dxfThickness = document.getElementById("dxf-thickness");
 const promptInput = document.getElementById("prompt-input");
 const imageInput = document.getElementById("image-input");
 const imageLabel = document.getElementById("image-label");
@@ -53,6 +55,14 @@ const camPlanView = document.getElementById("cam-plan-view");
 const camPlanText = document.getElementById("cam-plan-text");
 const camPreviewBtn = document.getElementById("cam-preview-btn");
 const camPreviewView = document.getElementById("cam-preview-view");
+const camSimOp = document.getElementById("cam-sim-op");
+const camSimProgress = document.getElementById("cam-sim-progress");
+const camSimPlay = document.getElementById("cam-sim-play");
+const camSimSpeedBtns = {
+  1: document.getElementById("cam-sim-1x"),
+  2: document.getElementById("cam-sim-2x"),
+  5: document.getElementById("cam-sim-5x"),
+};
 const camConfirmBtn = document.getElementById("cam-confirm-btn");
 const camRejectBtn = document.getElementById("cam-reject-btn");
 const camReviseBtn = document.getElementById("cam-revise-btn");
@@ -81,6 +91,7 @@ let camStepIndex = 0;
 let camStepFieldNames = [];
 let camPreviewToken = null;
 let camEstimatedMinutes = null;
+let camSim = null; // active simulation controller
 let camPlan = null;
 
 function setMode(next) {
@@ -112,7 +123,9 @@ stepInput.addEventListener("change", () => {
   const file = stepInput.files?.[0];
   stepLabel.textContent = file
     ? file.name
-    : "Bir STEP/IGES dosyası seçin (.step, .stp, .iges, .igs)";
+    : "Bir dosya seçin (.step, .stp, .iges, .igs, .dxf)";
+  const isDxf = !!file && /\.dxf$/i.test(file.name);
+  dxfThicknessField.hidden = !isDxf;
 });
 
 function setLoading(isLoading, message) {
@@ -174,6 +187,8 @@ function resetCamAssistant() {
   camStepFieldNames = [];
   camPreviewToken = null;
   camEstimatedMinutes = null;
+  if (camSim) camSim.pause();
+  camSim = null;
   camPlan = null;
 }
 
@@ -290,17 +305,23 @@ async function handleGenerate() {
     url = `${API_BASE}/generate-from-image`;
     options = { method: "POST", headers: { "x-api-key": API_KEY }, body: form };
   } else {
-    // STEP/IGES upload: import in FreeCAD, preview, then jump straight to CAM.
+    // STEP/IGES/DXF upload: import in FreeCAD, preview, then jump into CAM.
     const file = stepInput.files?.[0];
     if (!file) {
-      showError("Lütfen bir STEP/IGES dosyası seçin.");
+      showError("Lütfen bir CAD dosyası seçin.");
       return;
     }
     baseMessage = "Dosya yükleniyor ve FreeCAD'e aktarılıyor";
     lastPrompt = "";
     const form = new FormData();
     form.append("file", file);
-    url = `${API_BASE}/upload-step`;
+    if (/\.dxf$/i.test(file.name)) {
+      const thk = dxfThickness.value.trim();
+      if (thk) form.append("thickness", thk);
+      url = `${API_BASE}/upload-dxf`;
+    } else {
+      url = `${API_BASE}/upload-step`;
+    }
     options = { method: "POST", headers: { "x-api-key": API_KEY }, body: form };
   }
 
@@ -349,6 +370,9 @@ function showResult(data) {
     stlLink.href = data.stlUrl;
     stlLink.hidden = false;
     loadStlPreview(data.stlUrl);
+  } else if (data.contourUrl) {
+    // 2D DXF (no thickness): show the contour as lines instead of a solid.
+    loadContourPreview(data.contourUrl);
   }
   if (data.generatedCode) {
     generatedCodeEl.textContent = data.generatedCode;
@@ -610,7 +634,9 @@ async function requestCamPlan(changeRequest) {
     camPlanView.hidden = false;
     camReviseBox.hidden = true;
     camReviseInput.value = "";
-    // A new plan invalidates any previous toolpath preview/approval/quote.
+    // A new plan invalidates any previous simulation/approval/quote.
+    if (camSim) camSim.pause();
+    camSim = null;
     camPreviewView.hidden = true;
     camPreviewToken = null;
     camEstimatedMinutes = null;
@@ -630,8 +656,8 @@ async function handleCamPlan() {
   await requestCamPlan(null);
 }
 
-// Build the Path operations and show a toolpath preview in the 3D viewer. No
-// G-code is produced until the user approves this preview.
+// Build the Path operations and show an animated toolpath simulation in the 3D
+// viewer. No G-code is produced until the user approves this simulation.
 async function handleCamPreview() {
   if (!camPlan) return;
   camPreviewBtn.disabled = true;
@@ -639,10 +665,10 @@ async function handleCamPreview() {
   camPreviewView.hidden = true;
   camPreviewToken = null;
   gcodeLink.hidden = true;
-  setCamStatus("Takım yolu hesaplanıyor (önizleme)…", true);
+  setCamStatus("Takım yolu simülasyonu hesaplanıyor…", true);
   try {
     const result = await runAsyncJob(
-      `${API_BASE}/cam-preview`,
+      `${API_BASE}/cam-simulate`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
@@ -653,16 +679,16 @@ async function handleCamPreview() {
           prompt: lastPrompt,
         }),
       },
-      (seconds) => setCamStatus(`Takım yolu hesaplanıyor (önizleme)… (${seconds} sn)`, true),
+      (seconds) => setCamStatus(`Takım yolu simülasyonu hesaplanıyor… (${seconds} sn)`, true),
     );
 
-    if (result.error || !result.ok || !result.body?.previewUrl) {
-      setCamStatus(result.error ?? result.body?.error ?? "Önizleme üretilemedi.", false);
+    if (result.error || !result.ok || !result.body?.simulationUrl) {
+      setCamStatus(result.error ?? result.body?.error ?? "Simülasyon üretilemedi.", false);
       return;
     }
     camPreviewToken = result.body.token ?? null;
     camEstimatedMinutes = result.body.estimatedMinutes ?? null;
-    await renderToolpathPreview(result.body.previewUrl);
+    await setupSimulation(result.body.simulationUrl);
     setCamStatus("", false);
     camPreviewView.hidden = false;
     // The toolpath (and its estimated time) is known → enable the quote engine.
@@ -680,19 +706,37 @@ async function handleCamPreview() {
   }
 }
 
-async function renderToolpathPreview(previewUrl) {
-  const response = await fetch(previewUrl);
+function setSimSpeed(mult) {
+  if (camSim) camSim.setSpeed(mult);
+  Object.entries(camSimSpeedBtns).forEach(([m, btn]) => {
+    btn.classList.toggle("active", Number(m) === mult);
+  });
+}
+
+async function setupSimulation(simulationUrl) {
+  const response = await fetch(simulationUrl);
   const data = await readJson(response);
-  const { initViewer, loadToolpath } = await import("./viewer.js");
+  const { initViewer, loadSimulation } = await import("./viewer.js");
   if (!viewer) viewer = initViewer(viewerContainer);
-  loadToolpath(viewer, data ?? { toolpaths: [] });
+  camSim = loadSimulation(viewer, data ?? { toolpaths: [] }, {
+    onUpdate: ({ progress, op }) => {
+      camSimProgress.value = String(Math.round(progress * 1000));
+      camSimOp.textContent = `Operasyon: ${op || "—"}`;
+      if (camSim && !camSim.isPlaying()) camSimPlay.textContent = "Oynat";
+      if (progress >= 1) camSimPlay.textContent = "Tekrar Oynat";
+    },
+  });
+  camSimProgress.value = "0";
+  camSimPlay.textContent = "Oynat";
+  setSimSpeed(1);
 }
 
 function handleCamReject() {
   // Reject the previewed toolpath: return to the plan so it can be revised.
+  if (camSim) camSim.pause();
   camPreviewView.hidden = true;
   camPreviewToken = null;
-  setCamStatus("Takım yolu reddedildi. Planı değiştirip tekrar önizleyin.", false);
+  setCamStatus("Takım yolu reddedildi. Planı değiştirip tekrar simüle edin.", false);
 }
 
 async function handleCamConfirm() {
@@ -841,6 +885,166 @@ async function loadStlPreview(stlUrl) {
   }
 }
 
+// 2D contour preview (DXF without thickness): draw the contour as lines.
+async function loadContourPreview(contourUrl) {
+  try {
+    const response = await fetch(contourUrl);
+    const data = await readJson(response);
+    const { initViewer, loadToolpath } = await import("./viewer.js");
+    if (!viewer) viewer = initViewer(viewerContainer);
+    loadToolpath(viewer, data ?? { toolpaths: [] });
+  } catch (err) {
+    console.error("2D önizleme yüklenemedi:", err);
+  }
+}
+
+// --- Machine & tool inventory ("Makine ve Takımlarım") ---------------------
+const mainSection = document.querySelector("main");
+const inventorySection = document.getElementById("inventory-section");
+const navMain = document.getElementById("nav-main");
+const navInventory = document.getElementById("nav-inventory");
+const machinesList = document.getElementById("machines-list");
+const toolsList = document.getElementById("tools-list");
+
+function showView(view) {
+  const inv = view === "inventory";
+  inventorySection.hidden = !inv;
+  mainSection.hidden = inv;
+  navInventory.classList.toggle("active", inv);
+  navMain.classList.toggle("active", !inv);
+  if (inv) {
+    loadMachines();
+    loadTools();
+  }
+}
+
+async function apiJson(url, options) {
+  const resp = await fetch(url, {
+    ...options,
+    headers: { "Content-Type": "application/json", "x-api-key": API_KEY, ...(options?.headers || {}) },
+  });
+  return { ok: resp.ok, data: await readJson(resp) };
+}
+
+async function loadMachines() {
+  machinesList.innerHTML = "<li>Yükleniyor…</li>";
+  const { ok, data } = await apiJson(`${API_BASE}/machines`, { method: "GET" });
+  if (!ok || !data) {
+    machinesList.innerHTML = "<li>Makineler yüklenemedi.</li>";
+    return;
+  }
+  const machines = data.machines || [];
+  if (!machines.length) {
+    machinesList.innerHTML = "<li class=\"inventory-empty\">Kayıtlı makine yok.</li>";
+    return;
+  }
+  machinesList.innerHTML = "";
+  machines.forEach((m) => {
+    const li = document.createElement("li");
+    li.className = "inventory-item";
+    const info = document.createElement("span");
+    info.textContent = `${m.name} — ${m.axisCount} eksen, ${m.postProcessor}, ${m.hourlyRate} TL/saat`;
+    const del = document.createElement("button");
+    del.type = "button";
+    del.className = "secondary";
+    del.textContent = "Sil";
+    del.addEventListener("click", () => deleteEntity("machines", m.id, loadMachines));
+    li.append(info, del);
+    machinesList.appendChild(li);
+  });
+}
+
+async function loadTools() {
+  toolsList.innerHTML = "<li>Yükleniyor…</li>";
+  const { ok, data } = await apiJson(`${API_BASE}/tools`, { method: "GET" });
+  if (!ok || !data) {
+    toolsList.innerHTML = "<li>Takımlar yüklenemedi.</li>";
+    return;
+  }
+  const tools = data.tools || [];
+  if (!tools.length) {
+    toolsList.innerHTML = "<li class=\"inventory-empty\">Kayıtlı takım yok.</li>";
+    return;
+  }
+  toolsList.innerHTML = "";
+  tools.forEach((t) => {
+    const li = document.createElement("li");
+    li.className = "inventory-item";
+    const info = document.createElement("span");
+    info.textContent = `${t.name} — Ø${t.diameter}mm, ${t.flutes} ağız, ${t.material}${t.stock != null ? `, stok: ${t.stock}` : ""}`;
+    const del = document.createElement("button");
+    del.type = "button";
+    del.className = "secondary";
+    del.textContent = "Sil";
+    del.addEventListener("click", () => deleteEntity("tools", t.id, loadTools));
+    li.append(info, del);
+    toolsList.appendChild(li);
+  });
+}
+
+async function deleteEntity(kind, id, reload) {
+  const { ok } = await apiJson(`${API_BASE}/${kind}/${id}`, { method: "DELETE" });
+  if (ok) reload();
+}
+
+function fieldNum(id) {
+  const v = document.getElementById(id).value.trim();
+  return v === "" ? undefined : Number(v);
+}
+
+async function addMachineProfile() {
+  const name = document.getElementById("m-name").value.trim();
+  if (!name) {
+    alert("Makine adı zorunludur.");
+    return;
+  }
+  const body = {
+    name,
+    axisCount: Number(document.getElementById("m-axis").value),
+    postProcessor: document.getElementById("m-post").value,
+    maxSpindleRpm: fieldNum("m-rpm"),
+    workArea: { x: fieldNum("m-wx"), y: fieldNum("m-wy"), z: fieldNum("m-wz") },
+    hourlyRate: fieldNum("m-rate"),
+  };
+  const { ok, data } = await apiJson(`${API_BASE}/machines`, { method: "POST", body: JSON.stringify(body) });
+  if (!ok) {
+    alert(data?.error ?? "Makine eklenemedi.");
+    return;
+  }
+  document.getElementById("m-name").value = "";
+  loadMachines();
+}
+
+async function addToolProfile() {
+  const name = document.getElementById("t-name").value.trim();
+  if (!name) {
+    alert("Takım adı/kodu zorunludur.");
+    return;
+  }
+  const body = {
+    name,
+    type: document.getElementById("t-type").value,
+    diameter: fieldNum("t-dia"),
+    flutes: fieldNum("t-flutes"),
+    material: document.getElementById("t-material").value,
+    cuttingSpeedMin: fieldNum("t-vmin"),
+    cuttingSpeedMax: fieldNum("t-vmax"),
+    stock: fieldNum("t-stock"),
+  };
+  const { ok, data } = await apiJson(`${API_BASE}/tools`, { method: "POST", body: JSON.stringify(body) });
+  if (!ok) {
+    alert(data?.error ?? "Takım eklenemedi.");
+    return;
+  }
+  document.getElementById("t-name").value = "";
+  loadTools();
+}
+
+navMain.addEventListener("click", () => showView("main"));
+navInventory.addEventListener("click", () => showView("inventory"));
+document.getElementById("m-add").addEventListener("click", addMachineProfile);
+document.getElementById("t-add").addEventListener("click", addToolProfile);
+
 generateBtn.addEventListener("click", handleGenerate);
 reviseBtn.addEventListener("click", handleRevise);
 pdfBtn.addEventListener("click", handlePdf);
@@ -851,6 +1055,25 @@ camPlanBtn.addEventListener("click", handleCamPlan);
 camPreviewBtn.addEventListener("click", handleCamPreview);
 camConfirmBtn.addEventListener("click", handleCamConfirm);
 camRejectBtn.addEventListener("click", handleCamReject);
+camSimPlay.addEventListener("click", () => {
+  if (!camSim) return;
+  if (camSim.isPlaying()) {
+    camSim.pause();
+    camSimPlay.textContent = "Oynat";
+  } else {
+    camSim.play();
+    camSimPlay.textContent = "Duraklat";
+  }
+});
+camSimProgress.addEventListener("input", () => {
+  if (!camSim) return;
+  camSim.pause();
+  camSimPlay.textContent = "Oynat";
+  camSim.seek(Number(camSimProgress.value) / 1000);
+});
+Object.entries(camSimSpeedBtns).forEach(([m, btn]) => {
+  btn.addEventListener("click", () => setSimSpeed(Number(m)));
+});
 camReviseBtn.addEventListener("click", () => {
   camReviseBox.hidden = !camReviseBox.hidden;
 });

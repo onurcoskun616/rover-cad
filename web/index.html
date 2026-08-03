@@ -23,6 +23,12 @@
         Doğal dilde bir CAD isteği yazın ya da bir teknik resim yükleyin,
         otomatik olarak 3D model, teknik çizim ve CNC kodu oluşturulsun.
       </p>
+      <nav class="top-nav">
+        <button id="nav-main" class="nav-btn active" type="button">CAD / CAM</button>
+        <button id="nav-inventory" class="nav-btn" type="button">
+          Makine ve Takımlarım
+        </button>
+      </nav>
     </header>
 
     <main>
@@ -53,7 +59,7 @@
             role="tab"
             aria-selected="false"
           >
-            STEP/IGES ile
+            STEP/IGES/DXF ile
           </button>
         </div>
 
@@ -79,18 +85,25 @@
 
         <div id="panel-step" class="tab-panel" hidden>
           <p class="panel-hint">
-            Mevcut bir STEP/IGES dosyanız mı var? Yükleyin; 3D önizlemesini
-            görün ve doğrudan CAM asistanına geçin.
+            Mevcut bir CAD dosyanız mı var? STEP/IGES (3D) veya DXF (2D)
+            yükleyin; önizlemesini görün ve doğrudan CAM asistanına geçin.
           </p>
           <label for="step-input" class="file-drop">
-            <span id="step-label">Bir STEP/IGES dosyası seçin (.step, .stp, .iges, .igs)</span>
+            <span id="step-label">Bir dosya seçin (.step, .stp, .iges, .igs, .dxf)</span>
             <input
               id="step-input"
               type="file"
-              accept=".step,.stp,.iges,.igs"
+              accept=".step,.stp,.iges,.igs,.dxf"
               hidden
             />
           </label>
+          <div class="cam-field" id="dxf-thickness-field" hidden>
+            <label for="dxf-thickness">
+              Levha kalınlığı (mm) — DXF için. Boş bırakılırsa sadece 2D kesim
+              (lazer/plazma) olarak işlenir.
+            </label>
+            <input id="dxf-thickness" type="number" step="any" placeholder="Örn: 5 (boş = 2D kesim)" />
+          </div>
         </div>
 
         <button id="generate-btn" type="button">Oluştur</button>
@@ -185,7 +198,7 @@
               <pre id="cam-plan-text"></pre>
               <div class="cam-plan-actions">
                 <button id="cam-preview-btn" type="button">
-                  Takım Yolunu Önizle
+                  Simülasyonu Görüntüle
                 </button>
                 <button id="cam-revise-btn" type="button" class="secondary">
                   Planı Değiştir
@@ -206,13 +219,33 @@
                    the 3D viewer. G-code is only exported after approval. -->
               <div id="cam-preview-view" class="cam-preview-view" hidden>
                 <p class="cam-preview-note">
-                  Takım yolu önizlemesi yukarıdaki 3D görüntüleyicide
-                  gösteriliyor (mavi: kesme, turuncu: hızlı hareket). Bu takım
-                  yolunu onaylıyor musunuz?
+                  Takım yolu yukarıdaki 3D görüntüleyicide gösteriliyor (mavi:
+                  kesme, turuncu: hızlı hareket). Kırmızı takım, yolu sırayla
+                  izler. İzleyip onaylayın.
                 </p>
+
+                <div class="cam-sim-controls">
+                  <p id="cam-sim-op" class="cam-sim-op">Operasyon: —</p>
+                  <input
+                    id="cam-sim-progress"
+                    class="cam-sim-progress"
+                    type="range"
+                    min="0"
+                    max="1000"
+                    value="0"
+                  />
+                  <div class="cam-sim-buttons">
+                    <button id="cam-sim-play" type="button">Oynat</button>
+                    <span class="cam-sim-speed-label">Hız:</span>
+                    <button id="cam-sim-1x" type="button" class="secondary sim-speed active">1x</button>
+                    <button id="cam-sim-2x" type="button" class="secondary sim-speed">2x</button>
+                    <button id="cam-sim-5x" type="button" class="secondary sim-speed">5x</button>
+                  </div>
+                </div>
+
                 <div class="cam-plan-actions">
                   <button id="cam-confirm-btn" type="button">
-                    Onayla ve G-code Üret
+                    Onaylıyorum, G-code Üret
                   </button>
                   <button
                     id="cam-reject-btn"
@@ -357,6 +390,109 @@
         </details>
       </section>
     </main>
+
+    <section id="inventory-section" class="inventory-section" hidden>
+      <div class="inventory-block">
+        <h2>Makinelerim</h2>
+        <ul id="machines-list" class="inventory-list"></ul>
+        <form id="machine-form" class="inventory-form">
+          <h3>Yeni Makine Ekle</h3>
+          <div class="cam-field">
+            <label for="m-name">İsim</label>
+            <input id="m-name" type="text" placeholder="Örn: Tezgah 1" />
+          </div>
+          <div class="cam-field">
+            <label for="m-axis">Eksen sayısı</label>
+            <select id="m-axis">
+              <option value="3">3 eksen</option>
+              <option value="4">4 eksen</option>
+              <option value="5">5 eksen</option>
+            </select>
+          </div>
+          <div class="cam-field">
+            <label for="m-post">Post-processor / kontrolcü</label>
+            <select id="m-post">
+              <option>GRBL</option>
+              <option>Mach3</option>
+              <option>LinuxCNC</option>
+              <option>Fanuc</option>
+            </select>
+          </div>
+          <div class="cam-field">
+            <label for="m-rpm">Maksimum spindle hızı (rpm)</label>
+            <input id="m-rpm" type="number" step="any" placeholder="0" />
+          </div>
+          <div class="cam-field">
+            <label for="m-wx">Çalışma alanı X (mm)</label>
+            <input id="m-wx" type="number" step="any" placeholder="0" />
+          </div>
+          <div class="cam-field">
+            <label for="m-wy">Çalışma alanı Y (mm)</label>
+            <input id="m-wy" type="number" step="any" placeholder="0" />
+          </div>
+          <div class="cam-field">
+            <label for="m-wz">Çalışma alanı Z (mm)</label>
+            <input id="m-wz" type="number" step="any" placeholder="0" />
+          </div>
+          <div class="cam-field">
+            <label for="m-rate">Saatlik makine ücreti (TL/saat)</label>
+            <input id="m-rate" type="number" step="any" placeholder="0" />
+          </div>
+          <button id="m-add" type="button">Makine Ekle</button>
+        </form>
+      </div>
+
+      <div class="inventory-block">
+        <h2>Takımlarım</h2>
+        <ul id="tools-list" class="inventory-list"></ul>
+        <form id="tool-form" class="inventory-form">
+          <h3>Yeni Takım Ekle</h3>
+          <div class="cam-field">
+            <label for="t-name">İsim / kod</label>
+            <input id="t-name" type="text" placeholder="Örn: 6mm düz freze" />
+          </div>
+          <div class="cam-field">
+            <label for="t-type">Tip</label>
+            <select id="t-type">
+              <option>Duz uclu freze</option>
+              <option>Top uclu freze</option>
+              <option>Matkap</option>
+              <option>Kilavuz</option>
+              <option>Dis frezesi</option>
+              <option>Diger</option>
+            </select>
+          </div>
+          <div class="cam-field">
+            <label for="t-dia">Çap (mm)</label>
+            <input id="t-dia" type="number" step="any" placeholder="0" />
+          </div>
+          <div class="cam-field">
+            <label for="t-flutes">Kesici kenar sayısı</label>
+            <input id="t-flutes" type="number" step="any" placeholder="0" />
+          </div>
+          <div class="cam-field">
+            <label for="t-material">Malzeme</label>
+            <select id="t-material">
+              <option>Karbur</option>
+              <option>HSS</option>
+            </select>
+          </div>
+          <div class="cam-field">
+            <label for="t-vmin">Önerilen kesme hızı - min (m/min)</label>
+            <input id="t-vmin" type="number" step="any" placeholder="0" />
+          </div>
+          <div class="cam-field">
+            <label for="t-vmax">Önerilen kesme hızı - max (m/min)</label>
+            <input id="t-vmax" type="number" step="any" placeholder="0" />
+          </div>
+          <div class="cam-field">
+            <label for="t-stock">Stok adedi (opsiyonel)</label>
+            <input id="t-stock" type="number" step="any" placeholder="" />
+          </div>
+          <button id="t-add" type="button">Takım Ekle</button>
+        </form>
+      </div>
+    </section>
 
     <footer class="site-footer">
       <p>Topkapı Okulları Yapay Zeka</p>
