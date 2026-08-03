@@ -59,7 +59,7 @@
             role="tab"
             aria-selected="false"
           >
-            STEP/IGES ile
+            STEP/IGES/DXF ile
           </button>
         </div>
 
@@ -85,18 +85,25 @@
 
         <div id="panel-step" class="tab-panel" hidden>
           <p class="panel-hint">
-            Mevcut bir STEP/IGES dosyanız mı var? Yükleyin; 3D önizlemesini
-            görün ve doğrudan CAM asistanına geçin.
+            Mevcut bir CAD dosyanız mı var? STEP/IGES (3D) veya DXF (2D)
+            yükleyin; önizlemesini görün ve doğrudan CAM asistanına geçin.
           </p>
           <label for="step-input" class="file-drop">
-            <span id="step-label">Bir STEP/IGES dosyası seçin (.step, .stp, .iges, .igs)</span>
+            <span id="step-label">Bir dosya seçin (.step, .stp, .iges, .igs, .dxf)</span>
             <input
               id="step-input"
               type="file"
-              accept=".step,.stp,.iges,.igs"
+              accept=".step,.stp,.iges,.igs,.dxf"
               hidden
             />
           </label>
+          <div class="cam-field" id="dxf-thickness-field" hidden>
+            <label for="dxf-thickness">
+              Levha kalınlığı (mm) — DXF için. Boş bırakılırsa sadece 2D kesim
+              (lazer/plazma) olarak işlenir.
+            </label>
+            <input id="dxf-thickness" type="number" step="any" placeholder="Örn: 5 (boş = 2D kesim)" />
+          </div>
         </div>
 
         <button id="generate-btn" type="button">Oluştur</button>

@@ -134,8 +134,17 @@ export function repeatedFeatures(geometry) {
 
 // Heuristic feature -> standard-operation suggestion, shown to the user and fed
 // to the planner so operations are named specifically (not just pocket/profile).
+// A part with no faces at all (e.g. a DXF imported as wires, no thickness) is a
+// pure 2D contour job — laser/plasma/sheet cutting.
+export function isTwoDGeometry(geometry) {
+  return !Object.keys(geometry?.faceCountsByType ?? {}).length;
+}
+
 export function suggestOperations(geometry) {
   const f = geometry?.faceCountsByType ?? {};
+  if (isTwoDGeometry(geometry)) {
+    return { is3D: false, is2D: true, text: "2D Contour / Profile (sac/lazer/plazma kesim)" };
+  }
   const levels = geometry?.horizontalLevelCount ?? 0;
   const holes = (geometry?.cylinderRadiiMm ?? []).length;
   const freeform =
@@ -193,6 +202,7 @@ function buildApplicableSteps({ geometry, threads, answers }) {
   const endmill = pick(a, "endmillDiameter", recommendEndmill(geometry));
   const params = recommendCuttingParams(a.material, endmill);
   const isStepped = (geometry?.horizontalLevelCount ?? 0) > 2;
+  const is2D = isTwoDGeometry(geometry);
   const repeats = repeatedFeatures(geometry);
   const opSuggestion = suggestOperations(geometry);
 
@@ -207,18 +217,24 @@ function buildApplicableSteps({ geometry, threads, answers }) {
     ],
   });
 
-  // 2. Stock (raw block): per-side margin, block size, and top-face facing.
+  // 2. Stock (raw block): per-side margin, block size, and (3D only) top-face
+  //    facing. For a pure 2D cut there is nothing to face.
+  const stockFields = [
+    numberField("stockMargin", "Her yuzeyden pay", "mm", margin),
+    numberField("stockX", "Stok X", "mm", pick(a, "stockX", stock.x)),
+    numberField("stockY", "Stok Y", "mm", pick(a, "stockY", stock.y)),
+    numberField("stockZ", "Stok Z", "mm", pick(a, "stockZ", stock.z)),
+  ];
+  if (!is2D) {
+    stockFields.push(
+      selectField("faceTop", "Ust yuzey ilk islemde yuzeylensin mi? (Face)", FACE_TOP_OPTIONS, pick(a, "faceTop", FACE_TOP_OPTIONS[0])),
+    );
+  }
   steps.push({
     id: "stock",
     title: "2. Stok (ham blok) boyutu",
     intro: "Blok, parca olculeri + her yuzeyden pay olarak onerilir.",
-    fields: [
-      numberField("stockMargin", "Her yuzeyden pay", "mm", margin),
-      numberField("stockX", "Stok X", "mm", pick(a, "stockX", stock.x)),
-      numberField("stockY", "Stok Y", "mm", pick(a, "stockY", stock.y)),
-      numberField("stockZ", "Stok Z", "mm", pick(a, "stockZ", stock.z)),
-      selectField("faceTop", "Ust yuzey ilk islemde yuzeylensin mi? (Face)", FACE_TOP_OPTIONS, pick(a, "faceTop", FACE_TOP_OPTIONS[0])),
-    ],
+    fields: stockFields,
   });
 
   // 3. Machine axis + post-processor / controller. Saved machine profiles are
@@ -307,7 +323,7 @@ function buildApplicableSteps({ geometry, threads, answers }) {
   steps.push({
     id: "operations",
     title: "7. Operasyon tipi esleştirmesi",
-    intro: `Tespit edilen ozelliklere onerilen operasyonlar: ${opSuggestion.text}. Parca ${opSuggestion.is3D ? "3D (serbest yuzeyli)" : "2.5D"} olarak degerlendirildi.`,
+    intro: `Tespit edilen ozelliklere onerilen operasyonlar: ${opSuggestion.text}. Parca ${opSuggestion.is2D ? "2D kontur (sac/lazer/plazma kesim)" : opSuggestion.is3D ? "3D (serbest yuzeyli)" : "2.5D"} olarak degerlendirildi.`,
     fields: [
       selectField("operationMapping", "Operasyon esleştirmesi", OP_MAPPING_OPTIONS, pick(a, "operationMapping", OP_MAPPING_OPTIONS[0])),
     ],
@@ -405,7 +421,11 @@ export function camParamsBlock(answers, geometry) {
   const repeatNote = repeats.length
     ? repeats.map((r) => `${r.count}xO${r.diameterMm}mm`).join(", ")
     : "";
+  const twoD = geometry ? isTwoDGeometry(geometry) : false;
   return [
+    twoD
+      ? "\n[2D_KESIM]: Bu parca 2D konturdur (yuzey/hacim yok). SADECE 2D Contour/Profile operasyonu uret; 3D, kademe, kaba/finis katmani, Face ve delme derinligi yok. Tek gecis kontur kesimi (sac/lazer/plazma)."
+      : null,
     "\n[CAM_PARAMETRELERI] (bu degerlere uy):",
     `- Malzeme: ${a.material ?? "?"}`,
     `- Stok (ham blok) mm: ${a.stockX ?? "?"} x ${a.stockY ?? "?"} x ${a.stockZ ?? "?"} (her yuzeyden pay: ${a.stockMargin ?? "?"} mm)`,

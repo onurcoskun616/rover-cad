@@ -13,6 +13,8 @@ const panelImage = document.getElementById("panel-image");
 const panelStep = document.getElementById("panel-step");
 const stepInput = document.getElementById("step-input");
 const stepLabel = document.getElementById("step-label");
+const dxfThicknessField = document.getElementById("dxf-thickness-field");
+const dxfThickness = document.getElementById("dxf-thickness");
 const promptInput = document.getElementById("prompt-input");
 const imageInput = document.getElementById("image-input");
 const imageLabel = document.getElementById("image-label");
@@ -121,7 +123,9 @@ stepInput.addEventListener("change", () => {
   const file = stepInput.files?.[0];
   stepLabel.textContent = file
     ? file.name
-    : "Bir STEP/IGES dosyası seçin (.step, .stp, .iges, .igs)";
+    : "Bir dosya seçin (.step, .stp, .iges, .igs, .dxf)";
+  const isDxf = !!file && /\.dxf$/i.test(file.name);
+  dxfThicknessField.hidden = !isDxf;
 });
 
 function setLoading(isLoading, message) {
@@ -301,17 +305,23 @@ async function handleGenerate() {
     url = `${API_BASE}/generate-from-image`;
     options = { method: "POST", headers: { "x-api-key": API_KEY }, body: form };
   } else {
-    // STEP/IGES upload: import in FreeCAD, preview, then jump straight to CAM.
+    // STEP/IGES/DXF upload: import in FreeCAD, preview, then jump into CAM.
     const file = stepInput.files?.[0];
     if (!file) {
-      showError("Lütfen bir STEP/IGES dosyası seçin.");
+      showError("Lütfen bir CAD dosyası seçin.");
       return;
     }
     baseMessage = "Dosya yükleniyor ve FreeCAD'e aktarılıyor";
     lastPrompt = "";
     const form = new FormData();
     form.append("file", file);
-    url = `${API_BASE}/upload-step`;
+    if (/\.dxf$/i.test(file.name)) {
+      const thk = dxfThickness.value.trim();
+      if (thk) form.append("thickness", thk);
+      url = `${API_BASE}/upload-dxf`;
+    } else {
+      url = `${API_BASE}/upload-step`;
+    }
     options = { method: "POST", headers: { "x-api-key": API_KEY }, body: form };
   }
 
@@ -360,6 +370,9 @@ function showResult(data) {
     stlLink.href = data.stlUrl;
     stlLink.hidden = false;
     loadStlPreview(data.stlUrl);
+  } else if (data.contourUrl) {
+    // 2D DXF (no thickness): show the contour as lines instead of a solid.
+    loadContourPreview(data.contourUrl);
   }
   if (data.generatedCode) {
     generatedCodeEl.textContent = data.generatedCode;
@@ -869,6 +882,19 @@ async function loadStlPreview(stlUrl) {
     loadStl(viewer, stlUrl);
   } catch (err) {
     console.error("3D önizleme yüklenemedi:", err);
+  }
+}
+
+// 2D contour preview (DXF without thickness): draw the contour as lines.
+async function loadContourPreview(contourUrl) {
+  try {
+    const response = await fetch(contourUrl);
+    const data = await readJson(response);
+    const { initViewer, loadToolpath } = await import("./viewer.js");
+    if (!viewer) viewer = initViewer(viewerContainer);
+    loadToolpath(viewer, data ?? { toolpaths: [] });
+  } catch (err) {
+    console.error("2D önizleme yüklenemedi:", err);
   }
 }
 
