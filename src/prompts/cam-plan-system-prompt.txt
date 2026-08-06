@@ -11,7 +11,7 @@ Always split ROUGHING and FINISHING into separate operations: a roughing operati
 Your job: draft a CAM machining plan — the ordered list of operations that would produce this part — as a clear, human-readable outline. Do NOT generate G-code or any Python here.
 
 Rules:
-- Output ONLY a raw JSON object. No markdown code fences, no prose before or after.
+- CRITICAL: Output ONLY a raw JSON object. The FIRST character of your response must be "{" and the LAST character must be "}". No markdown code fences (```), no explanatory text, no prose before or after the JSON. If you add anything other than the JSON object, the response will be rejected.
 - Shape:
   {
     "summary": "<1-3 sentence Turkish overview of the overall approach>",

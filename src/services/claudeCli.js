@@ -45,6 +45,8 @@ export function runClaudeCli(input, { systemPromptFile, allowRead = false }) {
       systemPromptFile,
       "--output-format",
       "text",
+      "--max-turns",
+      "1",
     ];
 
     if (allowRead) {
