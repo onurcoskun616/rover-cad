@@ -618,19 +618,23 @@ async function requestCamPlan(changeRequest) {
   setCamStatus("İşleme planı oluşturuluyor…", true);
   camPlanBtn.disabled = true;
   try {
-    const response = await fetch(`${API_BASE}/cam-plan`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
-      body: JSON.stringify(body),
-    });
-    const data = await readJson(response);
-    if (!response.ok || !data?.plan) {
-      setCamStatus(data?.error ?? "Plan oluşturulamadı.", false);
+    const result = await runAsyncJob(
+      `${API_BASE}/cam-plan`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
+        body: JSON.stringify(body),
+      },
+      (seconds) => setCamStatus(`İşleme planı oluşturuluyor… (${seconds}s)`, true),
+    );
+    if (result.error || !result.body?.plan) {
+      setCamStatus(result.error ?? "Plan oluşturulamadı.", false);
       return;
     }
-    camPlan = data.plan;
+    const plan = result.body.plan;
+    camPlan = plan;
     setCamStatus("", false);
-    camPlanText.textContent = data.plan.planText || JSON.stringify(data.plan, null, 2);
+    camPlanText.textContent = plan.planText || JSON.stringify(plan, null, 2);
     camPlanView.hidden = false;
     camReviseBox.hidden = true;
     camReviseInput.value = "";
