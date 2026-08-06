@@ -1,4 +1,5 @@
 import spawn from "cross-spawn";
+import fs from "node:fs";
 import os from "node:os";
 import { config } from "../config.js";
 
@@ -38,6 +39,11 @@ export function stripCodeFence(text) {
  */
 export function runClaudeCli(input, { systemPromptFile, allowRead = false }) {
   return new Promise((resolve, reject) => {
+    if (!fs.existsSync(systemPromptFile)) {
+      console.error(`System prompt file not found: ${systemPromptFile}`);
+    }
+    console.log(`Claude CLI: prompt file=${systemPromptFile}, input length=${input.length}`);
+
     const args = [
       "-p",
       input,
