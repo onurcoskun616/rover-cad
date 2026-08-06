@@ -33,22 +33,38 @@ export function stripCodeFence(text) {
  * shared low-level entry point for every "ask Claude to translate X" call in the
  * backend; callers layer their own validation/parsing on top.
  *
- * @param {string} input the -p prompt text
+ * The system prompt is read from the file and embedded directly into the -p
+ * argument (not via --system-prompt-file) because the latter was silently
+ * ignored on the user's Windows setup.
+ *
+ * @param {string} input the user prompt text
  * @param {{systemPromptFile: string, allowRead?: boolean}} opts
  * @returns {Promise<string>} raw stdout, trimmed
  */
 export function runClaudeCli(input, { systemPromptFile, allowRead = false }) {
   return new Promise((resolve, reject) => {
-    if (!fs.existsSync(systemPromptFile)) {
-      console.error(`System prompt file not found: ${systemPromptFile}`);
+    // Read the system prompt and embed it at the top of the -p argument so the
+    // model always receives its role instructions regardless of whether
+    // --system-prompt-file works.
+    let systemPrompt = "";
+    try {
+      systemPrompt = fs.readFileSync(systemPromptFile, "utf8").trim();
+    } catch (err) {
+      console.error(`System prompt file read failed: ${systemPromptFile}`, err.message);
     }
-    console.log(`Claude CLI: prompt file=${systemPromptFile}, input length=${input.length}`);
+
+    const fullPrompt = systemPrompt
+      ? `<system>\n${systemPrompt}\n</system>\n\n${input}`
+      : input;
+
+    console.log(
+      `Claude CLI: system prompt ${systemPrompt ? "OK" : "MISSING"} (${systemPrompt.length} chars), ` +
+      `input ${input.length} chars, total ${fullPrompt.length} chars`,
+    );
 
     const args = [
       "-p",
-      input,
-      "--system-prompt-file",
-      systemPromptFile,
+      fullPrompt,
       "--output-format",
       "text",
       "--max-turns",
@@ -69,9 +85,6 @@ export function runClaudeCli(input, { systemPromptFile, allowRead = false }) {
     const child = spawn(config.claudeCli.command, args, {
       windowsHide: true,
       stdio: ["ignore", "pipe", "pipe"],
-      // Run outside the project directory so this one-shot call doesn't pick up
-      // this project's name, CLAUDE.md, or other ambient context and start
-      // reasoning about the backend's own side effects instead of just answering.
       cwd: os.tmpdir(),
     });
 
