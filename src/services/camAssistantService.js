@@ -114,7 +114,11 @@ export async function generateCamPlan(stepPath, answers, opts = {}) {
       `\n[ONCEKI_PLAN]: ${JSON.stringify(opts.previousPlan)}` +
       `\n[DEGISIKLIK_ISTEGI]: ${opts.changeRequest}`;
   }
-  input += "\n[GOREV]: Bu parca icin CAM operasyon planini uret.";
+  input += `
+[GOREV]: Bu parca icin CAM operasyon planini uret.
+[FORMAT]: SADECE ham JSON nesnesi dondur. Ilk karakter { son karakter } olmali. Code fence, aciklama, yorum YAZMA.
+Ornek format: {"summary":"Genel yaklasim ozeti","steps":[{"step":1,"operation":"Face","tool":"O10mm duz freze","description":"Ust yuzeyi duzelttir"}],"notes":"Ek notlar"}
+Tum metinler Turkce ve ASCII olmali (aksan yok).`;
 
   return runClaudeJson(input, PLAN_PROMPT, (parsed) => {
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
