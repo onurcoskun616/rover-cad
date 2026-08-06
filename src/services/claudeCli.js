@@ -33,9 +33,9 @@ export function stripCodeFence(text) {
  * shared low-level entry point for every "ask Claude to translate X" call in the
  * backend; callers layer their own validation/parsing on top.
  *
- * The system prompt is read from the file and embedded directly into the -p
- * argument (not via --system-prompt-file) because the latter was silently
- * ignored on the user's Windows setup.
+ * The system prompt is passed via --system-prompt-file (for setups where it
+ * works) AND embedded at the top of the -p argument (as a fallback, in case
+ * --system-prompt-file is silently ignored on certain Windows configurations).
  *
  * @param {string} input the user prompt text
  * @param {{systemPromptFile: string, allowRead?: boolean}} opts
@@ -43,9 +43,8 @@ export function stripCodeFence(text) {
  */
 export function runClaudeCli(input, { systemPromptFile, allowRead = false }) {
   return new Promise((resolve, reject) => {
-    // Read the system prompt and embed it at the top of the -p argument so the
-    // model always receives its role instructions regardless of whether
-    // --system-prompt-file works.
+    // Read the system prompt and embed it at the top of the user input as a
+    // fallback — on some Windows setups --system-prompt-file is silently ignored.
     let systemPrompt = "";
     try {
       systemPrompt = fs.readFileSync(systemPromptFile, "utf8").trim();
@@ -53,8 +52,10 @@ export function runClaudeCli(input, { systemPromptFile, allowRead = false }) {
       console.error(`System prompt file read failed: ${systemPromptFile}`, err.message);
     }
 
+    // Prepend a copy of the instructions into the user message itself so the
+    // model always receives them even if --system-prompt-file fails.
     const fullPrompt = systemPrompt
-      ? `<system>\n${systemPrompt}\n</system>\n\n${input}`
+      ? `[ROL VE TALIMATLAR — asagidakileri kesinlikle takip et]:\n${systemPrompt}\n\n---\n\n${input}`
       : input;
 
     console.log(
@@ -65,11 +66,17 @@ export function runClaudeCli(input, { systemPromptFile, allowRead = false }) {
     const args = [
       "-p",
       fullPrompt,
+      "--system-prompt-file",
+      systemPromptFile,
       "--output-format",
       "text",
-      "--max-turns",
-      "1",
     ];
+
+    // Limit turns to 1 when no tool use is needed; image flows need at least
+    // 2 turns (Read tool call + response).
+    if (!allowRead) {
+      args.push("--max-turns", "1");
+    }
 
     if (allowRead) {
       args.push("--allowedTools", "Read");
