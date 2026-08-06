@@ -52,20 +52,25 @@ router.post("/cam-step", apiKeyAuth, async (req, res, next) => {
 });
 
 // Step 3: draft (or revise) a human-readable machining plan from the answers.
-router.post("/cam-plan", apiKeyAuth, async (req, res, next) => {
-  try {
-    const stepPath = requireStepPath(req, res);
-    if (!stepPath) return;
-    const { answers, previousPlan, changeRequest, prompt } = req.body ?? {};
+// Async (polled via /jobs/:id) because the Claude CLI call can exceed
+// Cloudflare's 100s edge timeout.
+router.post("/cam-plan", apiKeyAuth, (req, res) => {
+  const stepPath = requireStepPath(req, res);
+  if (!stepPath) return;
+  const { answers, previousPlan, changeRequest, prompt } = req.body ?? {};
+
+  const jobId = createJob();
+
+  runJob(jobId, async () => {
     const plan = await generateCamPlan(stepPath, answers ?? {}, {
       previousPlan,
       changeRequest,
       context: typeof prompt === "string" ? prompt : "",
     });
-    res.json({ plan });
-  } catch (err) {
-    next(err);
-  }
+    return { ok: true, body: { plan } };
+  });
+
+  res.status(202).json({ jobId });
 });
 
 // Step 4: build the Path operations and export the TOOLPATH SIMULATION data
