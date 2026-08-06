@@ -34,7 +34,8 @@ export function parseJsonLoose(raw) {
   let start;
   let closeCh;
   if (startArr === -1 && startObj === -1) {
-    throw new Error("Yanitta JSON bulunamadi");
+    const preview = s.slice(0, 200);
+    throw new Error(`Yanitta JSON bulunamadi. Yanit: ${preview}`);
   } else if (startObj === -1 || (startArr !== -1 && startArr < startObj)) {
     start = startArr;
     closeCh = "]";
@@ -43,31 +44,45 @@ export function parseJsonLoose(raw) {
     closeCh = "}";
   }
   const end = s.lastIndexOf(closeCh);
-  if (end <= start) throw new Error("Yanitta gecerli JSON yok");
-  return JSON.parse(s.slice(start, end + 1));
+  if (end <= start) {
+    const preview = s.slice(0, 200);
+    throw new Error(`Yanitta gecerli JSON yok. Yanit: ${preview}`);
+  }
+  try {
+    return JSON.parse(s.slice(start, end + 1));
+  } catch (e) {
+    const preview = s.slice(start, start + 200);
+    throw new Error(`JSON parse hatasi: ${e.message}. Yanit: ${preview}`);
+  }
 }
 
-const JSON_ATTEMPTS = 2;
+const JSON_ATTEMPTS = 3;
 
-// Call the CLI expecting JSON, validating/normalising with `shape`. Retries once
-// with a reminder if the first response doesn't parse into a valid shape.
+// Call the CLI expecting JSON, validating/normalising with `shape`. Retries
+// with increasingly firm reminders if the response doesn't parse.
 async function runClaudeJson(input, systemPromptFile, shape) {
   let lastError;
+  let lastRaw = "";
   for (let attempt = 1; attempt <= JSON_ATTEMPTS; attempt++) {
-    const attemptInput =
-      attempt === 1
-        ? input
-        : input +
-          "\n\n[HATIRLATMA]: Onceki cevabin gecerli degildi. SADECE istenen formatta ham JSON dondur, baska hicbir sey yazma.";
+    let attemptInput = input;
+    if (attempt === 2) {
+      attemptInput +=
+        "\n\n[HATIRLATMA]: Onceki cevabin gecerli degildi. SADECE istenen formatta ham JSON dondur, baska hicbir sey yazma.";
+    } else if (attempt >= 3) {
+      attemptInput +=
+        '\n\n[SON UYARI]: Aciklama, yorum, code fence YAZMA. Ciktinin ilk karakteri { olmali. Ornek: {"summary":"...","steps":[...],"notes":"..."}';
+    }
     try {
       const raw = await runClaudeCli(attemptInput, {
         systemPromptFile,
         allowRead: false,
       });
+      lastRaw = raw;
       const parsed = parseJsonLoose(raw);
       return shape(parsed);
     } catch (err) {
       lastError = err;
+      console.warn(`runClaudeJson attempt ${attempt}/${JSON_ATTEMPTS} failed:`, err.message);
     }
   }
   throw lastError;
