@@ -281,7 +281,7 @@ async function handleGenerate() {
       showError("Lütfen bir istek yazın.");
       return;
     }
-    baseMessage = "FreeCAD'de model oluşturuluyor";
+    baseMessage = "3D model oluşturuluyor";
     lastPrompt = prompt;
     url = `${API_BASE}/generate`;
     options = {
@@ -311,7 +311,7 @@ async function handleGenerate() {
       showError("Lütfen bir CAD dosyası seçin.");
       return;
     }
-    baseMessage = "Dosya yükleniyor ve FreeCAD'e aktarılıyor";
+    baseMessage = "Dosya yükleniyor ve CAD motoruna aktarılıyor";
     lastPrompt = "";
     const form = new FormData();
     form.append("file", file);
