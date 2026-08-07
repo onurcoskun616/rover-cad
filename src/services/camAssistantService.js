@@ -101,24 +101,33 @@ function geomBlock(geometry) {
  */
 export async function generateCamPlan(stepPath, answers, opts = {}) {
   const geometry = await describeStepGeometry(stepPath);
-  let input = geomBlock(geometry) + camParamsBlock(answers, geometry);
+
+  // Build the input with the INSTRUCTION first, then data. This order is
+  // critical: when the input starts with raw geometry JSON, some models treat
+  // it as shared data and describe it instead of generating a plan.
+  let instruction = `Sen bir CNC/CAM proses plancisindir. Asagidaki geometri ve parametreleri kullanarak bir CAM isleme plani OLUSTUR.
+CIKTI FORMATI: Yanit olarak SADECE ham JSON nesnesi dondur. Ilk karakter { son karakter } olmali.
+Code fence (\`\`\`), aciklama, yorum, soru YAZMA. Sadece JSON.
+JSON yapisi: {"summary":"<Turkce genel yaklasim>","steps":[{"step":1,"operation":"<islem adi>","tool":"<takim>","description":"<Turkce aciklama>"}],"notes":"<Turkce notlar>"}
+Tum metinler Turkce ve ASCII olmali (aksan karakteri yok).
+
+`;
+
+  let data = geomBlock(geometry) + camParamsBlock(answers, geometry);
 
   // Inject computed pilot-hole diameters so the plan mentions the correct sizes.
   const threads = detectThreads(opts.context ?? "");
   if (threads.hasThread) {
-    input += threadGuidanceBlock(threads.sizes, detectThreadMethod(answers));
+    data += threadGuidanceBlock(threads.sizes, detectThreadMethod(answers));
   }
 
   if (opts.previousPlan && opts.changeRequest) {
-    input +=
+    data +=
       `\n[ONCEKI_PLAN]: ${JSON.stringify(opts.previousPlan)}` +
       `\n[DEGISIKLIK_ISTEGI]: ${opts.changeRequest}`;
   }
-  input += `
-[GOREV]: Bu parca icin CAM operasyon planini uret.
-[FORMAT]: SADECE ham JSON nesnesi dondur. Ilk karakter { son karakter } olmali. Code fence, aciklama, yorum YAZMA.
-Ornek format: {"summary":"Genel yaklasim ozeti","steps":[{"step":1,"operation":"Face","tool":"O10mm duz freze","description":"Ust yuzeyi duzelttir"}],"notes":"Ek notlar"}
-Tum metinler Turkce ve ASCII olmali (aksan yok).`;
+
+  const input = instruction + data;
 
   return runClaudeJson(input, PLAN_PROMPT, (parsed) => {
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
