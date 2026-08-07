@@ -17,11 +17,11 @@ export const config = {
     args: freecadArgs,
     toolName: process.env.FREECAD_MCP_TOOL_NAME ?? "execute_code",
     toolParam: process.env.FREECAD_MCP_TOOL_PARAM ?? "code",
-    callTimeoutMs: Number(process.env.FREECAD_MCP_CALL_TIMEOUT_MS ?? 90000),
+    callTimeoutMs: Number(process.env.FREECAD_MCP_CALL_TIMEOUT_MS ?? 180000),
   },
   claudeCli: {
     command: process.env.CLAUDE_CLI_COMMAND ?? "claude",
     model: process.env.CLAUDE_CLI_MODEL ?? "",
-    timeoutMs: Number(process.env.CLAUDE_CLI_TIMEOUT_MS ?? 120000),
+    timeoutMs: Number(process.env.CLAUDE_CLI_TIMEOUT_MS ?? 180000),
   },
 };
