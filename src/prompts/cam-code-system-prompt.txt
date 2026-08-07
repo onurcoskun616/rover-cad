@@ -23,11 +23,18 @@ Rules:
         import Path.Op.Surface as PathSurface
     except Exception:
         from PathScripts import PathJob, PathProfile, PathPocket, PathDrilling
-- Configure the tool controller(s) from [CAM_PARAMETRELERI]. CRITICAL: ToolController feeds are App::PropertySpeed — a bare number means mm/SECOND. ALWAYS assign unit-tagged strings, e.g. tc.HorizFeed = '600 mm/min', tc.VertFeed = '180 mm/min'. Set tc.SpindleSpeed as a float (rpm). Set the tool diameter to the given endmill diameter. HorizRapid / VertRapid are read-only — never assign them.
+- Configure the tool controller from [CAM_PARAMETRELERI]. After creating the Job, get the default ToolController — do NOT create a new one or try to set op.ToolController:
+    tcs = job.Tools.Group
+    tc = tcs[0]                       # the Job's default ToolController
+    tc.HorizFeed = '600 mm/min'       # ALWAYS use unit-tagged strings
+    tc.VertFeed = '180 mm/min'        # bare number = mm/SECOND, wrong!
+    tc.SpindleSpeed = 4244.0          # rpm, float
+    tc.Tool.Diameter = 6.0            # endmill diameter
+  CRITICAL: ToolController feeds are App::PropertySpeed — a bare number means mm/SECOND. ALWAYS assign unit-tagged strings as shown above. HorizRapid / VertRapid are read-only — never assign them. Do NOT try to set op.ToolController on individual operations — they inherit the Job's default ToolController automatically.
 - Create SEPARATE roughing and finishing operations: the roughing op(s) use the roughing feeds/stepdown/stepover and leave the given stock-to-leave; the finishing op(s) use the finishing feeds/stepdown/stepover and leave 0. Apply the stepdown/stepover and stock-to-leave to each op where the property exists.
 - Set the milling direction (Climb vs Conventional) on operations that expose a Direction/Side property, per [CAM_PARAMETRELERI].
 - Map each plan step to the closest available Path operation type (Face/MillFace, Adaptive, Pocket, Profile/Contour, Drilling, Surface, etc.) — do not collapse everything into a single profile/pocket.
 - For a stepped/multi-level part with "Her kademe ayri operasyon", create one operation per level and set its StartDepth/FinalDepth (or equivalent) to that level's Z range.
 - If a [DIS_ISLEME] block is present, the part has metric threads: create Drilling operations whose tool/hole diameter EXACTLY matches each listed pilot diameter, then honour the stated method — tapping means drill the pilot only (the thread is cut by a tap afterwards; GRBL cannot rigid-tap), thread milling means drill the pilot then add a helical thread-milling operation for each hole. Use the exact pilot diameters given; do not round or guess.
-- Attach every operation to a tool controller and doc.recompute() after building them.
+- Do NOT set op.ToolController on any operation — operations inherit the Job's default ToolController. Just call doc.recompute() after building all operations.
 - Use EXACTLY the STEP path given to you; do not invent other paths.
