@@ -28,26 +28,32 @@ export function stripCodeFence(text) {
   return fenceMatch ? fenceMatch[1].trim() : trimmed;
 }
 
+// Windows CMD mangles special chars (<, >, {, }, |, &, etc.) in -p arguments
+// even through cross-spawn escaping. For long or complex prompts, pipe through
+// stdin instead — the CLI prepends piped content to the -p user message.
+const PIPE_THRESHOLD = 400;
+
 /**
  * Run the Claude Code CLI once and return its raw stdout (trimmed). This is the
  * shared low-level entry point for every "ask Claude to translate X" call in the
  * backend; callers layer their own validation/parsing on top.
  *
- * @param {string} input the -p prompt text
+ * @param {string} input the prompt text
  * @param {{systemPromptFile: string, allowRead?: boolean}} opts
  * @returns {Promise<string>} raw stdout, trimmed
  */
 export function runClaudeCli(input, { systemPromptFile, allowRead = false }) {
   return new Promise((resolve, reject) => {
     const promptExists = fs.existsSync(systemPromptFile);
+    const usePipe = input.length > PIPE_THRESHOLD;
     console.log(
       `Claude CLI: prompt file ${promptExists ? "exists" : "MISSING"}: ${systemPromptFile}, ` +
-      `input ${input.length} chars`,
+      `input ${input.length} chars, delivery=${usePipe ? "stdin" : "arg"}`,
     );
 
     const args = [
       "-p",
-      input,
+      usePipe ? "Yukaridaki talimatlara yanit ver." : input,
       "--system-prompt-file",
       systemPromptFile,
       "--output-format",
@@ -67,9 +73,14 @@ export function runClaudeCli(input, { systemPromptFile, allowRead = false }) {
 
     const child = spawn(config.claudeCli.command, args, {
       windowsHide: true,
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: [usePipe ? "pipe" : "ignore", "pipe", "pipe"],
       cwd: os.tmpdir(),
     });
+
+    if (usePipe) {
+      child.stdin.write(input);
+      child.stdin.end();
+    }
 
     let stdout = "";
     let stderr = "";
