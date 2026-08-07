@@ -340,7 +340,9 @@ async function handleGenerate() {
       return;
     }
     if (!result.ok) {
-      showError(result.body?.error ?? "Model oluşturulamadı.");
+      const mainErr = result.body?.error ?? "Model oluşturulamadı.";
+      const detail = result.body?.lastError;
+      showError(detail ? `${mainErr}\n\nDetay: ${detail}` : mainErr);
       if (result.body?.generatedCode) {
         resultSection.hidden = false;
         generatedCodeEl.textContent = result.body.generatedCode;

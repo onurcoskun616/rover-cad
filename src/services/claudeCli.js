@@ -33,50 +33,26 @@ export function stripCodeFence(text) {
  * shared low-level entry point for every "ask Claude to translate X" call in the
  * backend; callers layer their own validation/parsing on top.
  *
- * The system prompt is passed via --system-prompt-file (for setups where it
- * works) AND embedded at the top of the -p argument (as a fallback, in case
- * --system-prompt-file is silently ignored on certain Windows configurations).
- *
- * @param {string} input the user prompt text
+ * @param {string} input the -p prompt text
  * @param {{systemPromptFile: string, allowRead?: boolean}} opts
  * @returns {Promise<string>} raw stdout, trimmed
  */
 export function runClaudeCli(input, { systemPromptFile, allowRead = false }) {
   return new Promise((resolve, reject) => {
-    // Read the system prompt and embed it at the top of the user input as a
-    // fallback — on some Windows setups --system-prompt-file is silently ignored.
-    let systemPrompt = "";
-    try {
-      systemPrompt = fs.readFileSync(systemPromptFile, "utf8").trim();
-    } catch (err) {
-      console.error(`System prompt file read failed: ${systemPromptFile}`, err.message);
-    }
-
-    // Prepend a copy of the instructions into the user message itself so the
-    // model always receives them even if --system-prompt-file fails.
-    const fullPrompt = systemPrompt
-      ? `[ROL VE TALIMATLAR — asagidakileri kesinlikle takip et]:\n${systemPrompt}\n\n---\n\n${input}`
-      : input;
-
+    const promptExists = fs.existsSync(systemPromptFile);
     console.log(
-      `Claude CLI: system prompt ${systemPrompt ? "OK" : "MISSING"} (${systemPrompt.length} chars), ` +
-      `input ${input.length} chars, total ${fullPrompt.length} chars`,
+      `Claude CLI: prompt file ${promptExists ? "exists" : "MISSING"}: ${systemPromptFile}, ` +
+      `input ${input.length} chars`,
     );
 
     const args = [
       "-p",
-      fullPrompt,
+      input,
       "--system-prompt-file",
       systemPromptFile,
       "--output-format",
       "text",
     ];
-
-    // Limit turns to 1 when no tool use is needed; image flows need at least
-    // 2 turns (Read tool call + response).
-    if (!allowRead) {
-      args.push("--max-turns", "1");
-    }
 
     if (allowRead) {
       args.push("--allowedTools", "Read");
@@ -116,6 +92,7 @@ export function runClaudeCli(input, { systemPromptFile, allowRead = false }) {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      console.error("Claude CLI spawn error:", err.message);
       reject(err);
     });
 
@@ -123,6 +100,14 @@ export function runClaudeCli(input, { systemPromptFile, allowRead = false }) {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+
+      const outTrimmed = stdout.trim();
+      console.log(
+        `Claude CLI exited ${exitCode}, stdout ${outTrimmed.length} chars: ${outTrimmed.slice(0, 200)}`,
+      );
+      if (stderr.trim()) {
+        console.log(`Claude CLI stderr: ${stderr.trim().slice(0, 300)}`);
+      }
 
       if (exitCode !== 0) {
         reject(
@@ -133,12 +118,11 @@ export function runClaudeCli(input, { systemPromptFile, allowRead = false }) {
         return;
       }
 
-      const out = stdout.trim();
-      if (!out) {
+      if (!outTrimmed) {
         reject(new Error("Claude Code CLI returned empty output"));
         return;
       }
-      resolve(out);
+      resolve(outTrimmed);
     });
   });
 }
