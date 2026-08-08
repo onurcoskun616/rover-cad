@@ -14,6 +14,11 @@ import {
 } from "./threadSpec.js";
 import { transformToSinumerik, isSinumerik } from "./sinumerikTransformer.js";
 import { transformToHeidenhain, isHeidenhain } from "./heidenhainTransformer.js";
+import {
+  transformToMeldas, isMitsubishi,
+  transformToMazak, isMazak,
+  transformToOkumaOSP, isOkuma,
+} from "./industrialTransformers.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const promptFile = (name) => path.join(__dirname, "..", "prompts", name);
@@ -329,6 +334,15 @@ function applyControllerTransform(gcodePath, postName, stepPath) {
     } else if (isHeidenhain(postName)) {
       transformed = transformToHeidenhain(raw, partName);
       label = "Heidenhain Klartext";
+    } else if (isMitsubishi(postName)) {
+      transformed = transformToMeldas(raw, partName);
+      label = "Mitsubishi Meldas";
+    } else if (isMazak(postName)) {
+      transformed = transformToMazak(raw, partName);
+      label = "Mazak EIA/ISO";
+    } else if (isOkuma(postName)) {
+      transformed = transformToOkumaOSP(raw, partName);
+      label = "Okuma OSP";
     }
     if (transformed) {
       fs.writeFileSync(gcodePath, transformed, "utf-8");
