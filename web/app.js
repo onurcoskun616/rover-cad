@@ -101,6 +101,7 @@ let camPreviewToken = null;
 let camEstimatedMinutes = null;
 let camSim = null; // active simulation controller
 let camPlan = null;
+let lastDimData = null;
 
 function setMode(next) {
   mode = next;
@@ -166,11 +167,15 @@ function resetResult() {
   lastGeneratedCode = null;
   lastBbox = null;
   lastPrompt = "";
+  lastDimData = null;
   generatedCodeEl.textContent = "";
   camSection.hidden = true;
   camStatus.hidden = true;
   gcodeLink.hidden = true;
   resetCamAssistant();
+  if (viewer) {
+    import("./viewer.js").then(({ clearDimensions }) => clearDimensions(viewer)).catch(() => {});
+  }
   lastStepPath = null;
 }
 
@@ -956,9 +961,105 @@ async function loadStlPreview(stlUrl) {
       viewer = initViewer(viewerContainer);
     }
     loadStl(viewer, stlUrl);
+    if (lastStepPath) {
+      fetchAndShowDimensions();
+    }
   } catch (err) {
     console.error("3D önizleme yüklenemedi:", err);
   }
+}
+
+async function fetchAndShowDimensions() {
+  if (!lastStepPath) return;
+  try {
+    const resp = await fetch(`${API_BASE}/extract-dimensions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
+      body: JSON.stringify({ stepPath: lastStepPath }),
+    });
+    const data = await readJson(resp);
+    if (!resp.ok || !data?.dimensions) return;
+    lastDimData = data;
+    const { initViewer, loadDimensions } = await import("./viewer.js");
+    if (!viewer) viewer = initViewer(viewerContainer);
+    loadDimensions(viewer, data, { onEdit: handleDimensionEdit });
+  } catch (err) {
+    console.error("Ölçü etiketleri yüklenemedi:", err);
+  }
+}
+
+async function handleDimensionEdit(dim, newValue) {
+  const prefix = dim.symbol === "dia" ? "çapı" : "";
+  const label = dim.label.toLowerCase();
+  const countNote = dim.count > 1 ? ` (${dim.count} adet)` : "";
+  let instruction;
+  if (dim.symbol === "dia") {
+    instruction = `${dim.label}${countNote} ${prefix} ${dim.value} mm olan ölçüyü ${newValue} mm yap`;
+  } else {
+    instruction = `${label} ölçüsünü ${dim.value} mm'den ${newValue} mm'ye değiştir`;
+  }
+
+  const previousCode = lastGeneratedCode || buildSyntheticCode();
+  if (!previousCode) {
+    showError("Ölçü düzenlemesi için model kodu gereklidir.");
+    return;
+  }
+
+  const { clearDimensions } = await import("./viewer.js");
+  clearDimensions(viewer);
+  setLoading(true, `Ölçü güncelleniyor: ${dim.label} → ${newValue} mm…`);
+
+  try {
+    const result = await runAsyncJob(
+      `${API_BASE}/revise`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
+        body: JSON.stringify({
+          prompt: instruction,
+          previousCode,
+          basePrompt: lastPrompt,
+        }),
+      },
+      (seconds) => setLoading(true, `Ölçü güncelleniyor… (${seconds} sn)`),
+    );
+
+    if (result.error || !result.ok) {
+      showError(result.error ?? result.body?.error ?? "Ölçü güncellenemedi.");
+      fetchAndShowDimensions();
+      return;
+    }
+    showResult(result.body);
+    lastPrompt = lastPrompt
+      ? `${lastPrompt} ; ${instruction}`
+      : instruction;
+  } catch (err) {
+    showError(`Sunucuya bağlanılamadı: ${err.message}`);
+    fetchAndShowDimensions();
+  } finally {
+    setLoading(false);
+  }
+}
+
+function buildSyntheticCode() {
+  if (!lastStepPath) return null;
+  const lines = [
+    "import FreeCAD as App",
+    "import Part",
+    'doc = App.newDocument("RoverCAD")',
+    `Part.insert(${JSON.stringify(lastStepPath)}, doc.Name)`,
+    "doc.recompute()",
+  ];
+  if (lastDimData?.dimensions?.length) {
+    lines.push("");
+    lines.push("# ROVER_DIMENSIONS: Mevcut olculer");
+    for (const d of lastDimData.dimensions) {
+      const prefix = d.symbol === "dia" ? "Cap " : "";
+      const count = d.count > 1 ? ` (${d.count} adet)` : "";
+      lines.push(`# ${d.label}: ${prefix}${d.value} ${d.unit}${count}`);
+    }
+  }
+  return lines.join("\n");
 }
 
 // 2D contour preview (DXF without thickness): draw the contour as lines.

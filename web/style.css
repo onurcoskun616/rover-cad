@@ -802,6 +802,58 @@ main.sim-expanded {
   border-radius: 3px;
 }
 
+/* --- Dimension labels (CSS2DObject) --- */
+
+.dim-label {
+  background: rgba(0, 12, 24, 0.88);
+  border: 1px solid rgba(0, 204, 255, 0.5);
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-family: "Courier New", Courier, monospace;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #00ccff;
+  white-space: nowrap;
+  user-select: none;
+  pointer-events: none;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.dim-label.dim-editable {
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.dim-label.dim-editable:hover {
+  background: rgba(0, 30, 60, 0.95);
+  border-color: #00eeff;
+  color: #00eeff;
+  box-shadow: 0 0 8px rgba(0, 204, 255, 0.35);
+}
+
+.dim-label .dim-input {
+  width: 70px;
+  background: rgba(0, 20, 40, 0.95);
+  border: 1px solid #00ccff;
+  border-radius: 3px;
+  color: #00eeff;
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  padding: 1px 4px;
+  outline: none;
+  pointer-events: auto;
+}
+
+.dim-label .dim-input:focus {
+  box-shadow: 0 0 6px rgba(0, 204, 255, 0.5);
+}
+
+.dim-updating {
+  opacity: 0.5;
+  pointer-events: none !important;
+}
+
 @media (max-width: 760px) {
   .sim-workspace.sim-active {
     flex-direction: column;

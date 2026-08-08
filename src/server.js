@@ -11,6 +11,7 @@ import reviseRouter from "./routes/revise.js";
 import generatePdfRouter from "./routes/generatePdf.js";
 import jobsRouter from "./routes/jobs.js";
 import camAssistantRouter from "./routes/camAssistant.js";
+import dimensionsRouter from "./routes/dimensions.js";
 import { machinesRouter, toolsRouter } from "./routes/inventory.js";
 import { callFreecadTool, disconnectFreecad } from "./services/freecadMcpClient.js";
 
@@ -36,6 +37,8 @@ app.use("/revise", reviseRouter);
 app.use("/generate-pdf", generatePdfRouter);
 // Poll async job status started by the routes above.
 app.use("/jobs", jobsRouter);
+// Extract interactive 3D dimension labels from a STEP file.
+app.use("/extract-dimensions", dimensionsRouter);
 // Machine/tool inventory (profiles reused across CAM jobs).
 app.use("/machines", machinesRouter);
 app.use("/tools", toolsRouter);

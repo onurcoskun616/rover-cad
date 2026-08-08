@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { STLLoader } from "three/addons/loaders/STLLoader.js";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { CSS2DRenderer, CSS2DObject } from "three/addons/renderers/CSS2DRenderer.js";
 
 export function initViewer(container) {
   const width = container.clientWidth;
@@ -17,6 +18,15 @@ export function initViewer(container) {
   renderer.setPixelRatio(window.devicePixelRatio);
   container.replaceChildren(renderer.domElement);
 
+  const labelRenderer = new CSS2DRenderer();
+  labelRenderer.setSize(width, height);
+  labelRenderer.domElement.style.position = "absolute";
+  labelRenderer.domElement.style.top = "0";
+  labelRenderer.domElement.style.left = "0";
+  labelRenderer.domElement.style.pointerEvents = "none";
+  container.style.position = "relative";
+  container.appendChild(labelRenderer.domElement);
+
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
 
@@ -30,6 +40,7 @@ export function initViewer(container) {
 
   let currentMesh = null;
   let currentToolpath = null;
+  let currentDimGroup = null;
   let frameCb = null;
   let lastT = performance.now();
 
@@ -41,6 +52,7 @@ export function initViewer(container) {
     if (frameCb) frameCb(dt);
     controls.update();
     renderer.render(scene, camera);
+    labelRenderer.render(scene, camera);
   }
   animate();
 
@@ -50,6 +62,7 @@ export function initViewer(container) {
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
     renderer.setSize(w, h);
+    labelRenderer.setSize(w, h);
   });
 
   return {
@@ -63,6 +76,10 @@ export function initViewer(container) {
     getToolpath: () => currentToolpath,
     setToolpath: (t) => {
       currentToolpath = t;
+    },
+    getDimGroup: () => currentDimGroup,
+    setDimGroup: (g) => {
+      currentDimGroup = g;
     },
     setFrameCb: (cb) => {
       frameCb = cb;
@@ -418,6 +435,160 @@ export function loadToolpath(viewer, data) {
   viewer.camera.lookAt(0, 0, 0);
   viewer.controls.target.set(0, 0, 0);
   viewer.controls.update();
+}
+
+// --- Dimension labels (CSS2DObject) with engineering dimension lines ---
+
+function createArrowCone(color) {
+  const geo = new THREE.ConeGeometry(0.6, 2.0, 8);
+  const mat = new THREE.MeshBasicMaterial({ color });
+  return new THREE.Mesh(geo, mat);
+}
+
+function buildDimLine(p1, p2, ext1, ext2, color) {
+  const group = new THREE.Group();
+  const lineMat = new THREE.LineBasicMaterial({ color, linewidth: 1 });
+
+  const dimGeo = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(...p1),
+    new THREE.Vector3(...p2),
+  ]);
+  group.add(new THREE.Line(dimGeo, lineMat));
+
+  if (ext1 && ext2) {
+    const e1Geo = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(...ext1),
+      new THREE.Vector3(...p1),
+    ]);
+    group.add(new THREE.Line(e1Geo, lineMat));
+    const e2Geo = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(...ext2),
+      new THREE.Vector3(...p2),
+    ]);
+    group.add(new THREE.Line(e2Geo, lineMat));
+  }
+
+  const dir = new THREE.Vector3(...p2).sub(new THREE.Vector3(...p1)).normalize();
+
+  const arrow1 = createArrowCone(color);
+  arrow1.position.set(...p1);
+  arrow1.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+  group.add(arrow1);
+
+  const arrow2 = createArrowCone(color);
+  arrow2.position.set(...p2);
+  arrow2.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.clone().negate());
+  group.add(arrow2);
+
+  return group;
+}
+
+/**
+ * Display interactive dimension labels on the 3D model.
+ * @param {object} viewer - viewer instance from initViewer
+ * @param {{dimensions: object[], center: number[]}} dimData - from /extract-dimensions
+ * @param {{onEdit?: (dim, newValue) => void}} opts - callback when a dimension is edited
+ */
+export function loadDimensions(viewer, dimData, { onEdit } = {}) {
+  clearDimensions(viewer);
+
+  const { dimensions, center } = dimData;
+  if (!dimensions || !dimensions.length) return;
+
+  const group = new THREE.Group();
+  const offset = new THREE.Vector3(...center);
+  const dimColor = 0x00ccff;
+
+  for (const dim of dimensions) {
+    const p1 = dim.p1.map((v, i) => v - center[i]);
+    const p2 = dim.p2.map((v, i) => v - center[i]);
+    const ext1 = dim.ext1 ? dim.ext1.map((v, i) => v - center[i]) : null;
+    const ext2 = dim.ext2 ? dim.ext2.map((v, i) => v - center[i]) : null;
+
+    const line = buildDimLine(p1, p2, ext1, ext2, dimColor);
+    group.add(line);
+
+    const midX = (p1[0] + p2[0]) / 2;
+    const midY = (p1[1] + p2[1]) / 2;
+    const midZ = (p1[2] + p2[2]) / 2;
+
+    const prefix = dim.symbol === "dia" ? "Ø " : "";
+    const countSuffix = dim.count > 1 ? ` (${dim.count}x)` : "";
+    const displayText = `${prefix}${dim.value} ${dim.unit}${countSuffix}`;
+
+    const el = document.createElement("div");
+    el.className = "dim-label";
+    if (dim.editable) el.classList.add("dim-editable");
+    el.dataset.dimId = dim.id;
+
+    const textSpan = document.createElement("span");
+    textSpan.className = "dim-text";
+    textSpan.textContent = displayText;
+    el.appendChild(textSpan);
+
+    if (dim.editable && onEdit) {
+      el.style.pointerEvents = "auto";
+      el.addEventListener("click", (e) => {
+        e.stopPropagation();
+        if (el.querySelector(".dim-input")) return;
+
+        const input = document.createElement("input");
+        input.type = "number";
+        input.className = "dim-input";
+        input.value = dim.value;
+        input.step = "any";
+        textSpan.hidden = true;
+        el.appendChild(input);
+        input.focus();
+        input.select();
+
+        function commit() {
+          const newVal = parseFloat(input.value);
+          if (Number.isFinite(newVal) && newVal > 0 && newVal !== dim.value) {
+            onEdit(dim, newVal);
+          }
+          input.remove();
+          textSpan.hidden = false;
+        }
+
+        input.addEventListener("keydown", (ke) => {
+          if (ke.key === "Enter") commit();
+          if (ke.key === "Escape") {
+            input.remove();
+            textSpan.hidden = false;
+          }
+        });
+        input.addEventListener("blur", () => {
+          if (el.contains(input)) {
+            input.remove();
+            textSpan.hidden = false;
+          }
+        });
+      });
+    }
+
+    const labelObj = new CSS2DObject(el);
+    labelObj.position.set(midX, midY, midZ);
+    group.add(labelObj);
+  }
+
+  viewer.scene.add(group);
+  viewer.setDimGroup(group);
+}
+
+export function clearDimensions(viewer) {
+  const prev = viewer.getDimGroup();
+  if (prev) {
+    prev.traverse((o) => {
+      if (o.isCSS2DObject && o.element) {
+        o.element.remove();
+      }
+      if (o.geometry) o.geometry.dispose();
+      if (o.material) o.material.dispose();
+    });
+    viewer.scene.remove(prev);
+    viewer.setDimGroup(null);
+  }
 }
 
 export function loadStl(viewer, url) {
