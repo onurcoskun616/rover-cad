@@ -207,9 +207,17 @@ export function validateCamCode(code) {
 function postModuleCandidates(postName) {
   const p = String(postName || "").toLowerCase();
   let list;
-  if (p.includes("mach")) list = ["mach3_mach4", "mach3", "mach4"];
+  if (p.includes("mach4")) list = ["mach3_mach4", "mach4", "mach3"];
+  else if (p.includes("mach")) list = ["mach3_mach4", "mach3", "mach4"];
   else if (p.includes("linux")) list = ["linuxcnc", "linuxcnc_post"];
-  else if (p.includes("fanuc")) list = ["fanuc", "fanuc_post", "refactored_grbl"];
+  else if (p.includes("fanuc")) list = ["fanuc", "fanuc_post", "refactored_fanuc"];
+  else if (p.includes("siemens") || p.includes("sinumerik")) list = ["sinumerik", "siemens", "fanuc"];
+  else if (p.includes("heidenhain")) list = ["heidenhain", "klartext", "fanuc"];
+  else if (p.includes("haas")) list = ["haas", "fanuc", "refactored_fanuc"];
+  else if (p.includes("mitsubishi") || p.includes("meldas")) list = ["mitsubishi", "meldas", "fanuc"];
+  else if (p.includes("mazak")) list = ["mazak", "mazatrol", "fanuc"];
+  else if (p.includes("okuma") || p.includes("osp")) list = ["okuma", "osp", "fanuc"];
+  else if (p.includes("doosan")) list = ["doosan", "fanuc", "refactored_fanuc"];
   else list = ["grbl_post", "grbl"];
   if (!list.includes("grbl_post")) list.push("grbl_post");
   return list;
