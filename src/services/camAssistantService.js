@@ -422,8 +422,12 @@ async function generateAndRunPathCode({ abs, geometry, answers, plan, threadGuid
       }
     } catch (err) {
       lastError = err.message;
+      const isTimeout = /timed?\s*out|timeout|-32001/i.test(err.message);
       previousCode = code;
-      problem = `FreeCAD Path kodunu calistirirken hata olustu:\n${err.message}`;
+      problem = isTimeout
+        ? "FreeCAD zaman asimina ugradi — kod cok yavas. DAHA BASIT operasyonlar kullan: Adaptive KULLANMA, Surface KULLANMA. Sadece Pocket ve Profile kullan. Operasyon sayisini minimize et. Her sey tek doc.recompute() ile bitsin."
+        : `FreeCAD Path kodunu calistirirken hata olustu:\n${err.message}`;
+      console.warn(`FreeCAD ${isTimeout ? "TIMEOUT" : "error"} (attempt ${attempt}): ${err.message.slice(0, 200)}`);
       continue;
     }
 

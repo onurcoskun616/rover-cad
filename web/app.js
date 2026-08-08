@@ -209,7 +209,7 @@ async function readJson(response) {
 }
 
 const POLL_INTERVAL_MS = 1500;
-const POLL_TIMEOUT_MS = 5 * 60 * 1000;
+const POLL_TIMEOUT_MS = 7 * 60 * 1000;
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
