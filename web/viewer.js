@@ -75,10 +75,34 @@ export function initViewer(container) {
 // the ordered points. Returns a controller: play/pause/setSpeed/seek + an
 // onUpdate({progress, op}) callback for the timeline and operation label.
 // `data` is { toolpaths: [{ op, points: [[x,y,z,rapid], ...] }, ...] }.
+
+function generateGcode(data) {
+  const lines = [];
+  const seqToLine = [];
+  lines.push("G90 G21");
+  const paths = (data && data.toolpaths) || [];
+  for (const p of paths) {
+    lines.push(`(--- ${(p.op || "OP").toUpperCase()} ---)`);
+    const pts = p.points || [];
+    for (let i = 0; i < pts.length; i++) {
+      const pt = pts[i];
+      const rapid = pt[3] === 1;
+      const cmd = rapid ? "G0" : "G1";
+      const feed = rapid ? "" : " F500";
+      lines.push(`${cmd} X${pt[0].toFixed(3)} Y${pt[1].toFixed(3)} Z${pt[2].toFixed(3)}${feed}`);
+      seqToLine.push(lines.length - 1);
+    }
+  }
+  lines.push("M30");
+  return { lines, seqToLine };
+}
+
 export function loadSimulation(viewer, data, { onUpdate } = {}) {
   // Reuse the static path rendering, then overlay a moving tool.
   loadToolpath(viewer, data);
   const group = viewer.getToolpath();
+
+  const { lines: gcodeLines, seqToLine } = generateGcode(data);
 
   // Flatten all operations, in order, into one point sequence carrying the op
   // name and cumulative distance so we can interpolate at any progress value.
@@ -88,7 +112,7 @@ export function loadSimulation(viewer, data, { onUpdate } = {}) {
   const paths = (data && data.toolpaths) || [];
   for (const p of paths) {
     for (const pt of p.points || []) {
-      seq.push({ v: new THREE.Vector3(pt[0], pt[1], pt[2]), op: p.op });
+      seq.push({ v: new THREE.Vector3(pt[0], pt[1], pt[2]), op: p.op, rapid: pt[3] === 1 });
     }
   }
 
@@ -120,9 +144,9 @@ export function loadSimulation(viewer, data, { onUpdate } = {}) {
   const baseMmPerSec = span / 15; // ~15s for a full pass at 1x
 
   function posAt(d) {
-    if (seq.length === 0) return { v: new THREE.Vector3(), op: "" };
-    if (d <= 0) return { v: seq[0].v, op: seq[0].op };
-    if (d >= total) return { v: seq[seq.length - 1].v, op: seq[seq.length - 1].op };
+    if (seq.length === 0) return { v: new THREE.Vector3(), op: "", idx: 0 };
+    if (d <= 0) return { v: seq[0].v, op: seq[0].op, idx: 0 };
+    if (d >= total) return { v: seq[seq.length - 1].v, op: seq[seq.length - 1].op, idx: seq.length - 1 };
     let lo = 0;
     let hi = cum.length - 1;
     while (lo < hi - 1) {
@@ -133,13 +157,21 @@ export function loadSimulation(viewer, data, { onUpdate } = {}) {
     const segLen = cum[hi] - cum[lo] || 1;
     const t = (d - cum[lo]) / segLen;
     const v = seq[lo].v.clone().lerp(seq[hi].v, t);
-    return { v, op: seq[hi].op };
+    return { v, op: seq[hi].op, idx: hi };
   }
 
   function apply() {
-    const { v, op } = posAt(distance);
+    const { v, op, idx } = posAt(distance);
     tool.position.copy(v);
-    if (onUpdate) onUpdate({ progress: total > 0 ? distance / total : 0, op });
+    const lineIndex = (seqToLine && seqToLine[idx]) ?? 0;
+    const rapid = seq[idx]?.rapid ?? false;
+    if (onUpdate) onUpdate({
+      progress: total > 0 ? distance / total : 0,
+      op,
+      x: v.x, y: v.y, z: v.z,
+      f: rapid ? 9999 : 500,
+      lineIndex,
+    });
   }
   apply();
 
@@ -169,6 +201,7 @@ export function loadSimulation(viewer, data, { onUpdate } = {}) {
       distance = Math.max(0, Math.min(1, t01)) * total;
       apply();
     },
+    gcodeLines,
   };
 }
 

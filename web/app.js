@@ -79,6 +79,14 @@ const camQuoteSubmit = document.getElementById("cam-quote-submit");
 const camQuoteResult = document.getElementById("cam-quote-result");
 const camQuoteBreakdown = document.getElementById("cam-quote-breakdown");
 const camQuotePdf = document.getElementById("cam-quote-pdf");
+const simWorkspace = document.getElementById("sim-workspace");
+const coordDisplay = document.getElementById("coord-display");
+const coordX = document.getElementById("coord-x");
+const coordY = document.getElementById("coord-y");
+const coordZ = document.getElementById("coord-z");
+const coordF = document.getElementById("coord-f");
+const gcodePanel = document.getElementById("gcode-panel");
+const gcodeLinesEl = document.getElementById("gcode-lines");
 
 let viewer = null;
 let mode = "text"; // "text" | "image" | "step"
@@ -358,6 +366,7 @@ async function handleGenerate() {
 }
 
 function showResult(data) {
+  resetSimLayout();
   resultSection.hidden = false;
 
   if (data.warning) {
@@ -712,6 +721,17 @@ async function handleCamPreview() {
   }
 }
 
+function escapeHtml(s) {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function resetSimLayout() {
+  if (simWorkspace) simWorkspace.classList.remove("sim-active");
+  if (gcodePanel) gcodePanel.hidden = true;
+  if (coordDisplay) coordDisplay.hidden = true;
+  document.querySelector("main").classList.remove("sim-expanded");
+}
+
 function setSimSpeed(mult) {
   if (camSim) camSim.setSpeed(mult);
   Object.entries(camSimSpeedBtns).forEach(([m, btn]) => {
@@ -724,24 +744,70 @@ async function setupSimulation(simulationUrl) {
   const data = await readJson(response);
   const { initViewer, loadSimulation } = await import("./viewer.js");
   if (!viewer) viewer = initViewer(viewerContainer);
+
+  let lastLineIdx = -1;
+  let gcodeLineEls = [];
+
   camSim = loadSimulation(viewer, data ?? { toolpaths: [] }, {
-    onUpdate: ({ progress, op }) => {
+    onUpdate: ({ progress, op, x, y, z, f, lineIndex }) => {
       camSimProgress.value = String(Math.round(progress * 1000));
       camSimOp.textContent = `Operasyon: ${op || "—"}`;
       if (camSim && !camSim.isPlaying()) camSimPlay.textContent = "Oynat";
       if (progress >= 1) camSimPlay.textContent = "Tekrar Oynat";
+
+      if (coordX) {
+        coordX.textContent = x != null ? x.toFixed(3) : "0.000";
+        coordY.textContent = y != null ? y.toFixed(3) : "0.000";
+        coordZ.textContent = z != null ? z.toFixed(3) : "0.000";
+        coordF.textContent = f != null ? String(Math.round(f)) : "0";
+      }
+
+      if (lineIndex !== lastLineIdx && gcodeLineEls.length > 0) {
+        if (lastLineIdx >= 0 && lastLineIdx < gcodeLineEls.length) {
+          gcodeLineEls[lastLineIdx].classList.remove("active");
+        }
+        if (lineIndex >= 0 && lineIndex < gcodeLineEls.length) {
+          gcodeLineEls[lineIndex].classList.add("active");
+          const el = gcodeLineEls[lineIndex];
+          const panel = gcodeLinesEl;
+          if (panel) {
+            const elTop = el.offsetTop - panel.offsetTop;
+            panel.scrollTop = elTop - panel.clientHeight / 2 + el.clientHeight / 2;
+          }
+        }
+        lastLineIdx = lineIndex;
+      }
     },
   });
+
+  if (camSim.gcodeLines && gcodeLinesEl) {
+    gcodeLinesEl.innerHTML = "";
+    gcodeLineEls = camSim.gcodeLines.map((text, i) => {
+      const div = document.createElement("div");
+      div.className = "gcode-line";
+      div.innerHTML = `<span class="line-num">${i + 1}</span>${escapeHtml(text)}`;
+      gcodeLinesEl.appendChild(div);
+      return div;
+    });
+  }
+
+  if (simWorkspace) simWorkspace.classList.add("sim-active");
+  if (gcodePanel) gcodePanel.hidden = false;
+  if (coordDisplay) coordDisplay.hidden = false;
+  document.querySelector("main").classList.add("sim-expanded");
+  requestAnimationFrame(() => window.dispatchEvent(new Event("resize")));
+
   camSimProgress.value = "0";
   camSimPlay.textContent = "Oynat";
   setSimSpeed(1);
 }
 
 function handleCamReject() {
-  // Reject the previewed toolpath: return to the plan so it can be revised.
   if (camSim) camSim.pause();
   camPreviewView.hidden = true;
   camPreviewToken = null;
+  resetSimLayout();
+  requestAnimationFrame(() => window.dispatchEvent(new Event("resize")));
   setCamStatus("Takım yolu reddedildi. Planı değiştirip tekrar simüle edin.", false);
 }
 

@@ -153,7 +153,21 @@
             >Teknik çizim (PDF)</a
           >
         </div>
-        <div id="viewer-container" class="viewer-container"></div>
+        <div id="sim-workspace" class="sim-workspace">
+          <div class="sim-viewer-wrap">
+            <div id="viewer-container" class="viewer-container"></div>
+            <div id="coord-display" class="coord-display" hidden>
+              <div class="coord-row"><span class="coord-label">X</span><span id="coord-x" class="coord-val">0.000</span></div>
+              <div class="coord-row"><span class="coord-label">Y</span><span id="coord-y" class="coord-val">0.000</span></div>
+              <div class="coord-row"><span class="coord-label">Z</span><span id="coord-z" class="coord-val">0.000</span></div>
+              <div class="coord-row coord-feed"><span class="coord-label">F</span><span id="coord-f" class="coord-val">0</span></div>
+            </div>
+          </div>
+          <div id="gcode-panel" class="gcode-panel" hidden>
+            <div class="gcode-header">G-Code</div>
+            <div id="gcode-lines" class="gcode-lines"></div>
+          </div>
+        </div>
 
         <div id="revise-section" class="revise-section" hidden>
           <label for="revise-input" class="revise-label"

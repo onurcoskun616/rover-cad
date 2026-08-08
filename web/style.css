@@ -672,3 +672,146 @@ button.secondary:hover:not(:disabled) {
   color: var(--text-muted);
   font-size: 0.85rem;
 }
+
+main.sim-expanded {
+  max-width: 72rem;
+  transition: max-width 0.3s ease;
+}
+
+.sim-workspace {
+  display: block;
+}
+
+.sim-workspace.sim-active {
+  display: flex;
+  gap: 2px;
+}
+
+.sim-viewer-wrap {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+
+.sim-workspace.sim-active .viewer-container {
+  height: 450px;
+}
+
+.coord-display {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  background: rgba(0, 0, 0, 0.82);
+  border: 1px solid rgba(74, 141, 255, 0.25);
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-family: "Courier New", Courier, monospace;
+  font-size: 0.85rem;
+  z-index: 10;
+  pointer-events: none;
+}
+
+.coord-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  line-height: 1.55;
+}
+
+.coord-label {
+  color: #8899aa;
+  font-weight: 700;
+  width: 1em;
+}
+
+.coord-val {
+  color: #00ff88;
+  font-weight: 600;
+  text-align: right;
+  min-width: 7em;
+}
+
+.coord-feed .coord-val {
+  color: #ffaa00;
+}
+
+.gcode-panel {
+  width: 300px;
+  flex-shrink: 0;
+  background: #0a1018;
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) - 4px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.gcode-header {
+  padding: 0.55rem 0.75rem;
+  font-weight: 700;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.03);
+  border-bottom: 1px solid var(--border);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.gcode-lines {
+  flex: 1;
+  overflow-y: auto;
+  font-family: "Courier New", Courier, monospace;
+  font-size: 0.76rem;
+  line-height: 1.65;
+  padding: 0.3rem 0;
+  max-height: 450px;
+}
+
+.gcode-line {
+  padding: 1px 0.75rem;
+  white-space: nowrap;
+  color: #6b7b8d;
+  transition: background 0.08s, color 0.08s;
+}
+
+.gcode-line.active {
+  background: rgba(34, 211, 238, 0.15);
+  color: #22d3ee;
+  font-weight: 600;
+}
+
+.gcode-line .line-num {
+  display: inline-block;
+  width: 2.8em;
+  text-align: right;
+  margin-right: 0.8em;
+  color: #3a4a5c;
+  user-select: none;
+}
+
+.gcode-lines::-webkit-scrollbar {
+  width: 6px;
+}
+
+.gcode-lines::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.gcode-lines::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+
+@media (max-width: 760px) {
+  .sim-workspace.sim-active {
+    flex-direction: column;
+  }
+
+  .gcode-panel {
+    width: 100%;
+  }
+
+  .gcode-lines {
+    max-height: 200px;
+  }
+}
