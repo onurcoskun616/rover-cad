@@ -13,7 +13,7 @@ import {
   threadGuidanceBlock,
 } from "./threadSpec.js";
 import { transformToSinumerik, isSinumerik } from "./sinumerikTransformer.js";
-import { transformToHeidenhain, isHeidenhain } from "./heidenhainTransformer.js";
+import { transformToHeidenhain, isHeidenhain, heidenhainVersion } from "./heidenhainTransformer.js";
 import {
   transformToMeldas, isMitsubishi,
   transformToMazak, isMazak,
@@ -322,7 +322,7 @@ function postEpiloguePy(gcodePath, postName) {
  * Heidenhain Klartext, …), read the generated Fanuc G-code, transform it, and
  * overwrite the file.
  */
-function applyControllerTransform(gcodePath, postName, stepPath) {
+function applyControllerTransform(gcodePath, postName, stepPath, answers) {
   const partName = path.basename(stepPath || "PART", path.extname(stepPath || ""));
   let label;
   let transformed;
@@ -332,7 +332,14 @@ function applyControllerTransform(gcodePath, postName, stepPath) {
       transformed = transformToSinumerik(raw, partName);
       label = "Sinumerik";
     } else if (isHeidenhain(postName)) {
-      transformed = transformToHeidenhain(raw, partName);
+      const version = heidenhainVersion(postName);
+      transformed = transformToHeidenhain(raw, partName, {
+        stockX: Number(answers?.stockX) || 0,
+        stockY: Number(answers?.stockY) || 0,
+        stockZ: Number(answers?.stockZ) || 0,
+        wcs: answers?.wcs || "",
+        version,
+      });
       label = "Heidenhain Klartext";
     } else if (isMitsubishi(postName)) {
       transformed = transformToMeldas(raw, partName);
@@ -534,7 +541,7 @@ export async function generateCamGcodeFromPlan(stepPath, answers, plan, context 
       throw new Error("G-code uretilemedi: " + (text || "bilinmeyen hata"));
     }
     if (!fs.existsSync(gcodePath)) throw new Error("G-code dosyasi olusmadi");
-    applyControllerTransform(gcodePath, postName, abs);
+    applyControllerTransform(gcodePath, postName, abs, answers);
     return { gcodePath };
   }
 
@@ -550,6 +557,6 @@ export async function generateCamGcodeFromPlan(stepPath, answers, plan, context 
     successMarker: "GCODE_PATH=",
   });
   if (!fs.existsSync(gcodePath)) throw new Error("G-code dosyasi olusmadi");
-  applyControllerTransform(gcodePath, postName, abs);
+  applyControllerTransform(gcodePath, postName, abs, answers);
   return { gcodePath };
 }
