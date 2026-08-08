@@ -185,6 +185,106 @@ export function loadSimulation(viewer, data, { onUpdate } = {}) {
   if (group) group.add(tool);
   else viewer.scene.add(tool);
 
+  // --- Material removal simulation (heightmap columns) ---
+  let stockMesh = null;
+  let stockHeights = null;
+  let stockGX = 0, stockGY = 0;
+  let stkMinX = 0, stkMinY = 0, stkColW = 1, stkColD = 1;
+  let stkBaseZ = 0, stkTopZ = 0;
+  const stkTmp = new THREE.Object3D();
+
+  if (seq.length > 1) {
+    const sb = new THREE.Box3();
+    let fMinZ = Infinity, fMaxZ = -Infinity;
+    for (const s of seq) {
+      sb.expandByPoint(s.v);
+      if (!s.rapid) { fMinZ = Math.min(fMinZ, s.v.z); fMaxZ = Math.max(fMaxZ, s.v.z); }
+    }
+    if (!isFinite(fMinZ)) { fMinZ = sb.min.z; fMaxZ = sb.max.z; }
+
+    if (fMaxZ - fMinZ >= 0.1) {
+      const pad = Math.max(1, (sb.max.x - sb.min.x) * 0.08);
+      stkMinX = sb.min.x - pad;
+      stkMinY = sb.min.y - pad;
+      const stkMaxX = sb.max.x + pad;
+      const stkMaxY = sb.max.y + pad;
+      stkTopZ = fMaxZ + pad * 0.15;
+      stkBaseZ = fMinZ - pad * 0.3;
+      if (stkBaseZ >= stkTopZ) stkBaseZ = stkTopZ - 1;
+
+      const stkW = stkMaxX - stkMinX;
+      const stkD = stkMaxY - stkMinY;
+      const cellTarget = Math.max(cR * 0.6, 0.5);
+      stockGX = Math.min(80, Math.max(10, Math.round(stkW / cellTarget)));
+      stockGY = Math.min(80, Math.max(10, Math.round(stkD / cellTarget)));
+      stkColW = stkW / stockGX;
+      stkColD = stkD / stockGY;
+
+      stockHeights = new Float32Array(stockGX * stockGY);
+      const initH = stkTopZ - stkBaseZ;
+      stockHeights.fill(initH);
+
+      const sGeo = new THREE.BoxGeometry(stkColW * 0.97, stkColD * 0.97, 1);
+      const sMat = new THREE.MeshStandardMaterial({ color: 0x8899aa, metalness: 0.45, roughness: 0.5 });
+      stockMesh = new THREE.InstancedMesh(sGeo, sMat, stockGX * stockGY);
+
+      for (let gy = 0; gy < stockGY; gy++)
+        for (let gx = 0; gx < stockGX; gx++) setStockCol(gx, gy, initH);
+      stockMesh.instanceMatrix.needsUpdate = true;
+
+      if (group) group.add(stockMesh);
+      else viewer.scene.add(stockMesh);
+    }
+  }
+
+  function setStockCol(ix, iy, h) {
+    if (h < 0.01) h = 0.01;
+    stkTmp.position.set(
+      stkMinX + (ix + 0.5) * stkColW,
+      stkMinY + (iy + 0.5) * stkColD,
+      stkBaseZ + h / 2,
+    );
+    stkTmp.scale.set(1, 1, h);
+    stkTmp.updateMatrix();
+    stockMesh.setMatrixAt(iy * stockGX + ix, stkTmp.matrix);
+  }
+
+  function cutStock(tx, ty, tz) {
+    if (!stockMesh || tz >= stkTopZ) return;
+    const ch = Math.max(0.01, tz - stkBaseZ);
+    const r = cR;
+    const x0 = Math.max(0, Math.floor((tx - r - stkMinX) / stkColW));
+    const x1 = Math.min(stockGX - 1, Math.floor((tx + r - stkMinX) / stkColW));
+    const y0 = Math.max(0, Math.floor((ty - r - stkMinY) / stkColD));
+    const y1 = Math.min(stockGY - 1, Math.floor((ty + r - stkMinY) / stkColD));
+    let dirty = false;
+    for (let iy = y0; iy <= y1; iy++) {
+      for (let ix = x0; ix <= x1; ix++) {
+        const cx = stkMinX + (ix + 0.5) * stkColW;
+        const cy = stkMinY + (iy + 0.5) * stkColD;
+        const dx = cx - tx, dy = cy - ty;
+        if (dx * dx + dy * dy <= r * r) {
+          const idx = iy * stockGX + ix;
+          if (ch < stockHeights[idx]) {
+            stockHeights[idx] = ch;
+            setStockCol(ix, iy, ch);
+            dirty = true;
+          }
+        }
+      }
+    }
+    if (dirty) stockMesh.instanceMatrix.needsUpdate = true;
+  }
+
+  function resetStock() {
+    if (!stockMesh) return;
+    const initH = stkTopZ - stkBaseZ;
+    stockHeights.fill(initH);
+    for (let gy = 0; gy < stockGY; gy++)
+      for (let gx = 0; gx < stockGX; gx++) setStockCol(gx, gy, initH);
+    stockMesh.instanceMatrix.needsUpdate = true;
+  }
+
   let distance = 0;
   let playing = false;
   let speed = 1;
@@ -212,6 +312,7 @@ export function loadSimulation(viewer, data, { onUpdate } = {}) {
     tool.position.copy(v);
     const lineIndex = (seqToLine && seqToLine[idx]) ?? 0;
     const rapid = seq[idx]?.rapid ?? false;
+    if (!rapid) cutStock(v.x, v.y, v.z);
     if (onUpdate) onUpdate({
       progress: total > 0 ? distance / total : 0,
       op,
@@ -235,7 +336,7 @@ export function loadSimulation(viewer, data, { onUpdate } = {}) {
 
   return {
     play() {
-      if (distance >= total) distance = 0;
+      if (distance >= total) { distance = 0; resetStock(); }
       playing = true;
     },
     pause() {
