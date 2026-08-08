@@ -123,18 +123,65 @@ export function loadSimulation(viewer, data, { onUpdate } = {}) {
     cum.push(total);
   }
 
-  // Tool marker: a small cone pointing down (-Z), sized to the scene.
+  // Realistic CNC end mill tool model with holder, shank, and fluted cutter.
   const span = total > 0 ? total : 10;
   const toolLen = Math.max(4, span * 0.02);
   const toolR = toolLen * 0.35;
-  const tool = new THREE.Mesh(
-    new THREE.ConeGeometry(toolR, toolLen, 20),
-    new THREE.MeshStandardMaterial({ color: 0xff4d4d, metalness: 0.2, roughness: 0.5 }),
-  );
-  tool.rotation.x = Math.PI; // point tip toward -Z (into the work)
+
+  const tool = new THREE.Group();
+  const spindle = new THREE.Group();
+  tool.add(spindle);
+
+  const darkMetal = new THREE.MeshStandardMaterial({ color: 0x2a2a2a, metalness: 0.85, roughness: 0.25 });
+  const midMetal = new THREE.MeshStandardMaterial({ color: 0x555555, metalness: 0.7, roughness: 0.3 });
+  const shankMetal = new THREE.MeshStandardMaterial({ color: 0x999999, metalness: 0.6, roughness: 0.3 });
+  const cutterMetal = new THREE.MeshStandardMaterial({ color: 0xaabbcc, metalness: 0.9, roughness: 0.12 });
+  const fluteMat = new THREE.MeshStandardMaterial({ color: 0xddeeff, metalness: 0.95, roughness: 0.08, side: THREE.DoubleSide });
+
+  const hR = toolR * 1.6;
+  const sR = toolR * 0.55;
+  const cR = sR;
+  const hH = toolLen * 0.22;
+  const tH = toolLen * 0.10;
+  const sH = toolLen * 0.28;
+  const cH = toolLen * 0.35;
+  const tipH = toolLen * 0.05;
+
+  let yOff = toolLen / 2;
+
+  const holder = new THREE.Mesh(new THREE.CylinderGeometry(hR, hR, hH, 24), darkMetal);
+  holder.position.y = yOff - hH / 2; yOff -= hH;
+  spindle.add(holder);
+
+  const taper = new THREE.Mesh(new THREE.CylinderGeometry(hR * 0.85, sR, tH, 24), midMetal);
+  taper.position.y = yOff - tH / 2; yOff -= tH;
+  spindle.add(taper);
+
+  const shankMesh = new THREE.Mesh(new THREE.CylinderGeometry(sR, sR, sH, 20), shankMetal);
+  shankMesh.position.y = yOff - sH / 2; yOff -= sH;
+  spindle.add(shankMesh);
+
+  const cutter = new THREE.Mesh(new THREE.CylinderGeometry(cR, cR * 0.92, cH, 20), cutterMetal);
+  cutter.position.y = yOff - cH / 2;
+  spindle.add(cutter);
+
+  for (let i = 0; i < 4; i++) {
+    const fin = new THREE.Mesh(
+      new THREE.BoxGeometry(cR * 2.15, cH * 0.92, cR * 0.08),
+      fluteMat,
+    );
+    fin.position.y = cutter.position.y;
+    fin.rotation.y = (i / 4) * Math.PI * 2;
+    spindle.add(fin);
+  }
+  yOff -= cH;
+
+  const tipMesh = new THREE.Mesh(new THREE.CylinderGeometry(cR * 0.92, cR * 0.3, tipH, 20), cutterMetal);
+  tipMesh.position.y = yOff - tipH / 2;
+  spindle.add(tipMesh);
+
+  tool.rotation.x = Math.PI;
   if (seq.length) tool.position.copy(seq[0].v);
-  // Parent to the toolpath group so it shares the group's offset and is
-  // disposed together on the next load.
   if (group) group.add(tool);
   else viewer.scene.add(tool);
 
@@ -176,6 +223,7 @@ export function loadSimulation(viewer, data, { onUpdate } = {}) {
   apply();
 
   viewer.setFrameCb((dt) => {
+    spindle.rotation.y += dt * 15;
     if (!playing || total === 0) return;
     distance += baseMmPerSec * speed * dt;
     if (distance >= total) {
