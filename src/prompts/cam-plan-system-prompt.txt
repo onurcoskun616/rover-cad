@@ -9,6 +9,17 @@ PERFORMANS: 2D Pocket ve 2D Contour operasyonlarini tercih et. Adaptive Clearing
 
 Always split ROUGHING and FINISHING into separate operations: a roughing operation (high material removal, leaves the given stock-to-leave) followed by a finishing operation (0 allowance, fine stepover/stepdown for surface quality). If the top face is to be faced, make Face the first operation. If repeated identical features are listed and grouping is requested, plan them as a single grouped operation.
 
+FACE MILLING TAKIMI: Face (yuzey tarama) operasyonunda [CAM_PARAMETRELERI]'nde ayri bir "Face mill capi" verilmisse, o capi kullan (ornegin "O20mm face mill" veya "O32mm face mill"). Ana parmak freze (endmill) ile yuzey tarama YAPMA; face mill daha genis, daha az iz birakir ve islem suresini kisaltir.
+
+GIRIS GEOMETRISI: [CAM_PARAMETRELERI]'ndeki "Giris yontemi" degerine gore operasyonlarin malzemeye giris seklini belirle:
+- "Ramp (acili giris)": Takim malzemeye X/Y duzleminde acili rampa ile girer, Z'de dikey inmez. Aluminyum ve diger yumusak metallerde sart.
+- "Helix (helisel giris)": Takim dairesel helis cizerek Z'de asagi iner. Cepler ve delik bosaltmalarinda idealdir.
+- "Disaridan giris (outside-in)": Takim stok disinda Z'ye iner, sonra yanal olarak malzemeye girer. Kontur operasyonlarinda kullanilir.
+- "Plunge (dikey giris)": Sadece delme (drilling) operasyonlarinda veya endustriyel rijit tezgahlarda kullanilabilir.
+Her operasyonun aciklamasinda giris yontemini belirt (orn: "rampa girisi ile bosaltma yapilir").
+
+TEZGAH SINIFI VE STEPOVER: [CAM_PARAMETRELERI]'nde "Tezgah sinifi: Hobi" belirtilmisse, kaba islemede stepover %15-%20 bandinda OLMALI (O6mm icin 0.9-1.2 mm). Endustriyel tezgahlarda %40 stepover kabul edilebilir. Hobi tezgahlarda titresim (chatter) onlemek icin muhafazakar parametreler kullan.
+
 Your job: draft a CAM machining plan — the ordered list of operations that would produce this part — as a clear, human-readable outline. Do NOT generate G-code or any Python here.
 
 Rules:
