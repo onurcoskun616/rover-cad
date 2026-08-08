@@ -3,15 +3,14 @@ Translate an approved CAM plan into FreeCAD Path Python. Output ONLY raw Python 
 HARD RULES: Never produce G-code/M-code. Never post-process, export, open/write files, or print. Build Path operations into `job` and end with doc.recompute(). A trusted epilogue handles the rest.
 
 Template:
-    import Path
+    import FreeCAD as App
+    import Part, Path
     try:
         from Path.Main import Job as PathJob
         import Path.Op.Profile as PathProfile
         import Path.Op.Pocket as PathPocket
         import Path.Op.Drilling as PathDrilling
-        import Path.Op.Adaptive as PathAdaptive
         import Path.Op.MillFace as PathMillFace
-        import Path.Op.Surface as PathSurface
     except Exception:
         from PathScripts import PathJob, PathProfile, PathPocket, PathDrilling
 
@@ -23,6 +22,16 @@ Template:
     base.Shape = shape
     doc.recompute()
     job = PathJob.Create('RoverJob', [base], None)
+    doc.recompute()
+
+    # Configure stock from [CAM_PARAMETRELERI] stock dimensions
+    stock = job.Stock
+    stock.ExtXneg = 5.0
+    stock.ExtXpos = 5.0
+    stock.ExtYneg = 5.0
+    stock.ExtYpos = 5.0
+    stock.ExtZneg = 0.0
+    stock.ExtZpos = 1.0
 
     # Configure tool — ALWAYS use unit-tagged strings for feeds!
     tc = job.Tools.Group[0]
@@ -30,6 +39,51 @@ Template:
     tc.VertFeed = '180 mm/min'
     tc.SpindleSpeed = 4244.0
     tc.Tool.Diameter = 6.0
+
+CRITICAL — GEOMETRY BINDING (operations MUST have geometry to produce toolpaths):
+
+1. FACE (MillFace): Select the TOP face of the part as Base.
+   face_op = PathMillFace.Create('FaceMill')
+   face_op.Base = [(base, [])]  # empty sub = whole top
+   face_op.StepDown = 1.0
+   doc.recompute()
+
+2. POCKET: Select the face(s) to pocket. For external profile pockets use the top face:
+   pocket = PathPocket.Create('PocketRough')
+   pocket.Base = [(base, ['Face1'])]  # specific face name from geometry
+   pocket.StepDown = 6.0
+   pocket.StepOver = 2.4
+   doc.recompute()
+
+3. PROFILE/CONTOUR: Select the edge(s) or face(s) that define the contour:
+   profile = PathProfile.Create('ProfileFinish')
+   profile.Base = [(base, ['Face3'])]  # cylindrical face for contour
+   profile.StepDown = 1.8
+   profile.Side = 'Outside'
+   doc.recompute()
+
+4. DRILLING: Select cylindrical faces of holes. For each hole:
+   drill = PathDrilling.Create('Drilling1')
+   drill.Base = [(base, ['Face5'])]  # cylindrical hole face
+   doc.recompute()
+
+FACE SELECTION STRATEGY — inspect the geometry to find correct face names:
+    # List all faces and find the right ones:
+    for i, f in enumerate(base.Shape.Faces):
+        print(f"Face{i+1}: type={f.Surface.__class__.__name__}, "
+              f"normal={f.Surface.Axis if hasattr(f.Surface,'Axis') else 'N/A'}, "
+              f"center={f.CenterOfMass}")
+    # Top flat face: Plane type with Axis=(0,0,1) and highest Z center
+    # Cylindrical faces: Cylinder type — outer profile or hole
+    # Use face names like 'Face1', 'Face2', etc. matching Shape.Faces index+1
+    # DO NOT print anything — this is just for understanding; use the logic in code
+
+IMPORTANT: After inspecting faces, iterate base.Shape.Faces to PROGRAMMATICALLY find:
+- Top face: f.Surface is Part.Plane and f.Surface.Axis.z > 0.9 and max Z
+- Outer cylindrical face: f.Surface is Part.Cylinder and largest radius
+- Hole cylindrical faces: f.Surface is Part.Cylinder and smaller radius
+- Bottom face: f.Surface is Part.Plane and lowest Z
+Build face name as f"Face{i+1}" where i is the 0-based index in base.Shape.Faces.
 
 KEY RULES:
 - Separate ROUGHING (stock-to-leave > 0) and FINISHING (stock-to-leave = 0) operations.
@@ -42,3 +96,5 @@ KEY RULES:
 - For stepped parts ("Her kademe ayri operasyon"): one op per level with StartDepth/FinalDepth.
 - For threads ([DIS_ISLEME]): drill at EXACT pilot diameters listed, then thread-mill if specified.
 - Use the EXACT given STEP path.
+- Call doc.recompute() after EACH operation creation, not just at the end.
+- If an operation's toolpath is empty after recompute, try setting StartDepth and FinalDepth explicitly from the bounding box.
