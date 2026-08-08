@@ -32,7 +32,12 @@ export const MATERIAL_OPTIONS = [
   "Diger",
 ];
 const AXIS_OPTIONS = ["3 eksen", "4 eksen", "5 eksen"];
-const POST_OPTIONS = ["GRBL", "Mach3", "LinuxCNC", "Fanuc"];
+const POST_OPTIONS = [
+  "GRBL", "Mach3", "Mach4", "LinuxCNC",
+  "Fanuc", "Siemens (Sinumerik)",
+  "Heidenhain (TNC 640)", "Heidenhain (iTNC 530)", "Heidenhain (TNC 426/430)",
+  "Haas", "Mitsubishi (Meldas)", "Mazak", "Okuma (OSP)", "Doosan",
+];
 const WORKHOLDING_OPTIONS = [
   "Mengene",
   "Vakum tablasi",
