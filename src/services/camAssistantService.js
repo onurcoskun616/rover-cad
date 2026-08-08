@@ -12,6 +12,7 @@ import {
   detectThreadMethod,
   threadGuidanceBlock,
 } from "./threadSpec.js";
+import { transformToSinumerik, isSinumerik } from "./sinumerikTransformer.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const promptFile = (name) => path.join(__dirname, "..", "prompts", name);
@@ -310,6 +311,24 @@ function postEpiloguePy(gcodePath, postName) {
   ].join("\n");
 }
 
+/**
+ * If the selected controller is Sinumerik, read the generated G-code, transform
+ * it into proper Sinumerik format (CYCLE81/83/84/85, tool-change syntax, program
+ * structure), and overwrite the file.
+ */
+function applySinumerikTransform(gcodePath, postName, stepPath) {
+  if (!isSinumerik(postName)) return;
+  try {
+    const raw = fs.readFileSync(gcodePath, "utf-8");
+    const partName = path.basename(stepPath || "PART", path.extname(stepPath || ""));
+    const sinumerik = transformToSinumerik(raw, partName);
+    fs.writeFileSync(gcodePath, sinumerik, "utf-8");
+    console.log("Sinumerik donusumu uygulandi:", path.basename(gcodePath));
+  } catch (err) {
+    console.warn("Sinumerik donusumu uygulanamadi:", err.message);
+  }
+}
+
 // Build the shared prompt input asking the model to translate the plan into Path
 // operations assigned to `job` — with no G-code, no export, no file I/O.
 function buildPathCodeInput(abs, geometry, answers, plan, threadGuidance) {
@@ -491,6 +510,7 @@ export async function generateCamGcodeFromPlan(stepPath, answers, plan, context 
       throw new Error("G-code uretilemedi: " + (text || "bilinmeyen hata"));
     }
     if (!fs.existsSync(gcodePath)) throw new Error("G-code dosyasi olusmadi");
+    applySinumerikTransform(gcodePath, postName, abs);
     return { gcodePath };
   }
 
@@ -506,5 +526,6 @@ export async function generateCamGcodeFromPlan(stepPath, answers, plan, context 
     successMarker: "GCODE_PATH=",
   });
   if (!fs.existsSync(gcodePath)) throw new Error("G-code dosyasi olusmadi");
+  applySinumerikTransform(gcodePath, postName, abs);
   return { gcodePath };
 }
