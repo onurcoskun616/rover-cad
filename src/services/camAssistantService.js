@@ -13,6 +13,7 @@ import {
   threadGuidanceBlock,
 } from "./threadSpec.js";
 import { transformToSinumerik, isSinumerik } from "./sinumerikTransformer.js";
+import { transformToHeidenhain, isHeidenhain } from "./heidenhainTransformer.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const promptFile = (name) => path.join(__dirname, "..", "prompts", name);
@@ -312,20 +313,29 @@ function postEpiloguePy(gcodePath, postName) {
 }
 
 /**
- * If the selected controller is Sinumerik, read the generated G-code, transform
- * it into proper Sinumerik format (CYCLE81/83/84/85, tool-change syntax, program
- * structure), and overwrite the file.
+ * If the selected controller needs a dialect-specific format (Sinumerik cycles,
+ * Heidenhain Klartext, …), read the generated Fanuc G-code, transform it, and
+ * overwrite the file.
  */
-function applySinumerikTransform(gcodePath, postName, stepPath) {
-  if (!isSinumerik(postName)) return;
+function applyControllerTransform(gcodePath, postName, stepPath) {
+  const partName = path.basename(stepPath || "PART", path.extname(stepPath || ""));
+  let label;
+  let transformed;
   try {
     const raw = fs.readFileSync(gcodePath, "utf-8");
-    const partName = path.basename(stepPath || "PART", path.extname(stepPath || ""));
-    const sinumerik = transformToSinumerik(raw, partName);
-    fs.writeFileSync(gcodePath, sinumerik, "utf-8");
-    console.log("Sinumerik donusumu uygulandi:", path.basename(gcodePath));
+    if (isSinumerik(postName)) {
+      transformed = transformToSinumerik(raw, partName);
+      label = "Sinumerik";
+    } else if (isHeidenhain(postName)) {
+      transformed = transformToHeidenhain(raw, partName);
+      label = "Heidenhain Klartext";
+    }
+    if (transformed) {
+      fs.writeFileSync(gcodePath, transformed, "utf-8");
+      console.log(`${label} donusumu uygulandi:`, path.basename(gcodePath));
+    }
   } catch (err) {
-    console.warn("Sinumerik donusumu uygulanamadi:", err.message);
+    console.warn(`${label || "Controller"} donusumu uygulanamadi:`, err.message);
   }
 }
 
@@ -510,7 +520,7 @@ export async function generateCamGcodeFromPlan(stepPath, answers, plan, context 
       throw new Error("G-code uretilemedi: " + (text || "bilinmeyen hata"));
     }
     if (!fs.existsSync(gcodePath)) throw new Error("G-code dosyasi olusmadi");
-    applySinumerikTransform(gcodePath, postName, abs);
+    applyControllerTransform(gcodePath, postName, abs);
     return { gcodePath };
   }
 
@@ -526,6 +536,6 @@ export async function generateCamGcodeFromPlan(stepPath, answers, plan, context 
     successMarker: "GCODE_PATH=",
   });
   if (!fs.existsSync(gcodePath)) throw new Error("G-code dosyasi olusmadi");
-  applySinumerikTransform(gcodePath, postName, abs);
+  applyControllerTransform(gcodePath, postName, abs);
   return { gcodePath };
 }
