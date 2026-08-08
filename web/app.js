@@ -102,6 +102,8 @@ let camEstimatedMinutes = null;
 let camSim = null; // active simulation controller
 let camPlan = null;
 let lastDimData = null;
+let dimEditInProgress = false;
+let dimEditQueue = [];
 
 function setMode(next) {
   mode = next;
@@ -168,6 +170,8 @@ function resetResult() {
   lastBbox = null;
   lastPrompt = "";
   lastDimData = null;
+  dimEditInProgress = false;
+  dimEditQueue = [];
   generatedCodeEl.textContent = "";
   camSection.hidden = true;
   camStatus.hidden = true;
@@ -988,41 +992,97 @@ async function fetchAndShowDimensions() {
   }
 }
 
-async function handleDimensionEdit(dim, newValue) {
-  const prefix = dim.symbol === "dia" ? "çapı" : "";
-  const label = dim.label.toLowerCase();
-  const countNote = dim.count > 1 ? ` (${dim.count} adet)` : "";
-  let instruction;
-  if (dim.symbol === "dia") {
-    instruction = `${dim.label}${countNote} ${prefix} ${dim.value} mm olan ölçüyü ${newValue} mm yap`;
-  } else {
-    instruction = `${label} ölçüsünü ${dim.value} mm'den ${newValue} mm'ye değiştir`;
-  }
+function codeHasParamBlock(code) {
+  return code && code.includes("# ROVER_PARAMS_START") && code.includes("# ROVER_PARAMS_END");
+}
 
-  const previousCode = lastGeneratedCode || buildSyntheticCode();
-  if (!previousCode) {
-    showError("Ölçü düzenlemesi için model kodu gereklidir.");
+function findParamForDim(code, dim) {
+  if (!code) return null;
+  const lines = code.split("\n");
+  let inBlock = false;
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed === "# ROVER_PARAMS_START") { inBlock = true; continue; }
+    if (trimmed === "# ROVER_PARAMS_END") break;
+    if (!inBlock) continue;
+    const m = trimmed.match(/^(\w+)\s*=\s*([\d.eE+-]+)\s*(?:#\s*(.*))?$/);
+    if (m) {
+      const paramValue = parseFloat(m[2]);
+      if (Math.abs(paramValue - dim.value) < 0.01) return m[1];
+    }
+  }
+  return null;
+}
+
+function setDimLock(locked) {
+  document.querySelectorAll(".dim-label").forEach((el) => {
+    if (locked) el.classList.add("dim-updating");
+    else el.classList.remove("dim-updating");
+  });
+}
+
+async function handleDimensionEdit(dim, newValue) {
+  if (dimEditInProgress) {
+    dimEditQueue.push({ dim, newValue });
     return;
   }
+  dimEditInProgress = true;
+  setDimLock(true);
+
+  const code = lastGeneratedCode || buildSyntheticCode();
+  if (!code) {
+    showError("Ölçü düzenlemesi için model kodu gereklidir.");
+    dimEditInProgress = false;
+    setDimLock(false);
+    return;
+  }
+
+  const paramName = codeHasParamBlock(code) ? findParamForDim(code, dim) : null;
+  const useDeterministic = !!paramName;
 
   const { clearDimensions } = await import("./viewer.js");
   clearDimensions(viewer);
   setLoading(true, `Ölçü güncelleniyor: ${dim.label} → ${newValue} mm…`);
 
   try {
-    const result = await runAsyncJob(
-      `${API_BASE}/revise`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
-        body: JSON.stringify({
-          prompt: instruction,
-          previousCode,
-          basePrompt: lastPrompt,
-        }),
-      },
-      (seconds) => setLoading(true, `Ölçü güncelleniyor… (${seconds} sn)`),
-    );
+    let result;
+    if (useDeterministic) {
+      result = await runAsyncJob(
+        `${API_BASE}/param-edit`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
+          body: JSON.stringify({ code, paramName, newValue }),
+        },
+        (seconds) => setLoading(true, `Ölçü güncelleniyor… (${seconds} sn)`),
+      );
+    } else {
+      const prefix = dim.symbol === "dia" ? "çapı" : "";
+      const label = dim.label.toLowerCase();
+      const countNote = dim.count > 1 ? ` (${dim.count} adet)` : "";
+      let instruction;
+      if (dim.symbol === "dia") {
+        instruction = `${dim.label}${countNote} ${prefix} ${dim.value} mm olan ölçüyü ${newValue} mm yap`;
+      } else {
+        instruction = `${label} ölçüsünü ${dim.value} mm'den ${newValue} mm'ye değiştir`;
+      }
+      result = await runAsyncJob(
+        `${API_BASE}/revise`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
+          body: JSON.stringify({
+            prompt: instruction,
+            previousCode: code,
+            basePrompt: lastPrompt,
+          }),
+        },
+        (seconds) => setLoading(true, `Ölçü güncelleniyor… (${seconds} sn)`),
+      );
+      if (result.ok) {
+        lastPrompt = lastPrompt ? `${lastPrompt} ; ${instruction}` : instruction;
+      }
+    }
 
     if (result.error || !result.ok) {
       showError(result.error ?? result.body?.error ?? "Ölçü güncellenemedi.");
@@ -1030,14 +1090,17 @@ async function handleDimensionEdit(dim, newValue) {
       return;
     }
     showResult(result.body);
-    lastPrompt = lastPrompt
-      ? `${lastPrompt} ; ${instruction}`
-      : instruction;
   } catch (err) {
     showError(`Sunucuya bağlanılamadı: ${err.message}`);
     fetchAndShowDimensions();
   } finally {
     setLoading(false);
+    dimEditInProgress = false;
+    setDimLock(false);
+    if (dimEditQueue.length > 0) {
+      const next = dimEditQueue.shift();
+      handleDimensionEdit(next.dim, next.newValue);
+    }
   }
 }
 

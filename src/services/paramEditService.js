@@ -1,0 +1,116 @@
+/**
+ * Deterministic parameter editing for FreeCAD Python code.
+ * Parses the ROVER_PARAMS block, substitutes a value, and re-runs the code
+ * in FreeCAD — no LLM call needed.
+ */
+
+import { runGeneratedCodeAndExport } from "./exportService.js";
+
+const PARAMS_START = "# ROVER_PARAMS_START";
+const PARAMS_END = "# ROVER_PARAMS_END";
+
+/**
+ * Parse the parameter block from generated FreeCAD Python code.
+ * @param {string} code
+ * @returns {{name: string, value: number, unit: string, line: number}[]}
+ */
+export function parseParams(code) {
+  if (!code) return [];
+  const lines = code.split("\n");
+  const params = [];
+  let inBlock = false;
+
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trim();
+    if (trimmed === PARAMS_START) {
+      inBlock = true;
+      continue;
+    }
+    if (trimmed === PARAMS_END) break;
+    if (!inBlock) continue;
+
+    const match = trimmed.match(
+      /^(\w+)\s*=\s*([\d.eE+-]+)\s*(?:#\s*(.*))?$/,
+    );
+    if (match) {
+      params.push({
+        name: match[1],
+        value: parseFloat(match[2]),
+        unit: match[3]?.trim() || "mm",
+        line: i,
+      });
+    }
+  }
+  return params;
+}
+
+/**
+ * Replace a parameter's value in the code string. Returns the modified code.
+ * @param {string} code
+ * @param {string} paramName
+ * @param {number} newValue
+ * @returns {string} modified code
+ */
+export function applyParamChange(code, paramName, newValue) {
+  const lines = code.split("\n");
+  let found = false;
+  let inBlock = false;
+
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trim();
+    if (trimmed === PARAMS_START) {
+      inBlock = true;
+      continue;
+    }
+    if (trimmed === PARAMS_END) break;
+    if (!inBlock) continue;
+
+    const regex = new RegExp(
+      `^(\\s*${paramName}\\s*=\\s*)[\\d.eE+-]+(\\s*#.*)$`,
+    );
+    const match = lines[i].match(regex);
+    if (match) {
+      lines[i] = `${match[1]}${newValue}${match[2]}`;
+      found = true;
+      break;
+    }
+  }
+
+  if (!found) {
+    throw new Error(`Parametre bulunamadi: ${paramName}`);
+  }
+
+  return lines.join("\n");
+}
+
+/**
+ * Edit a parameter and re-run the code in FreeCAD deterministically.
+ * No LLM is involved — the parameter value is substituted directly in the
+ * source code and the modified script is executed.
+ *
+ * @param {string} code current FreeCAD Python code (with ROVER_PARAMS block)
+ * @param {string} paramName parameter variable name to change
+ * @param {number} newValue new numeric value
+ * @returns {Promise<{ok: boolean, error?: string, stepPath?: string,
+ *   stlPath?: string, bbox?: object, generatedCode?: string}>}
+ */
+export async function runParamEdit(code, paramName, newValue) {
+  const updatedCode = applyParamChange(code, paramName, newValue);
+  const result = await runGeneratedCodeAndExport(updatedCode);
+
+  if (!result.ok) {
+    return {
+      ok: false,
+      error: result.error,
+      generatedCode: updatedCode,
+    };
+  }
+
+  return {
+    ok: true,
+    stepPath: result.stepPath,
+    stlPath: result.stlPath,
+    bbox: result.bbox,
+    generatedCode: updatedCode,
+  };
+}

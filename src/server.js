@@ -12,6 +12,7 @@ import generatePdfRouter from "./routes/generatePdf.js";
 import jobsRouter from "./routes/jobs.js";
 import camAssistantRouter from "./routes/camAssistant.js";
 import dimensionsRouter from "./routes/dimensions.js";
+import paramEditRouter from "./routes/paramEdit.js";
 import { machinesRouter, toolsRouter } from "./routes/inventory.js";
 import { callFreecadTool, disconnectFreecad } from "./services/freecadMcpClient.js";
 
@@ -39,6 +40,9 @@ app.use("/generate-pdf", generatePdfRouter);
 app.use("/jobs", jobsRouter);
 // Extract interactive 3D dimension labels from a STEP file.
 app.use("/extract-dimensions", dimensionsRouter);
+// Deterministic parameter edit: substitute a value in the ROVER_PARAMS block
+// and re-run in FreeCAD — no LLM involved.
+app.use("/param-edit", paramEditRouter);
 // Machine/tool inventory (profiles reused across CAM jobs).
 app.use("/machines", machinesRouter);
 app.use("/tools", toolsRouter);
