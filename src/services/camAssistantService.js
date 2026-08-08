@@ -63,7 +63,7 @@ export function parseJsonLoose(raw) {
   }
 }
 
-const JSON_ATTEMPTS = 3;
+const JSON_ATTEMPTS = 2;
 
 // Call the CLI expecting JSON, validating/normalising with `shape`. Retries
 // with increasingly firm reminders if the response doesn't parse.
@@ -72,12 +72,9 @@ async function runClaudeJson(input, systemPromptFile, shape) {
   let lastRaw = "";
   for (let attempt = 1; attempt <= JSON_ATTEMPTS; attempt++) {
     let attemptInput = input;
-    if (attempt === 2) {
+    if (attempt >= 2) {
       attemptInput +=
-        "\n\n[HATIRLATMA]: Onceki cevabin gecerli degildi. SADECE istenen formatta ham JSON dondur, baska hicbir sey yazma.";
-    } else if (attempt >= 3) {
-      attemptInput +=
-        '\n\n[SON UYARI]: Aciklama, yorum, code fence YAZMA. Ciktinin ilk karakteri { olmali. Ornek: {"summary":"...","steps":[...],"notes":"..."}';
+        '\n\n[SON UYARI]: Onceki cevabin gecerli degildi. Aciklama, yorum, code fence YAZMA. Ciktinin ilk karakteri { olmali. SADECE ham JSON dondur.';
     }
     try {
       const raw = await runClaudeCli(attemptInput, {
@@ -107,7 +104,9 @@ function geomBlock(geometry) {
  * @returns {Promise<{summary: string, steps: object[], notes: string, planText: string}>}
  */
 export async function generateCamPlan(stepPath, answers, opts = {}) {
+  const t0 = Date.now();
   const geometry = await describeStepGeometry(stepPath);
+  console.log(`generateCamPlan: geometry in ${Date.now() - t0}ms`);
 
   // Build the input with the INSTRUCTION first, then data. This order is
   // critical: when the input starts with raw geometry JSON, some models treat
@@ -136,7 +135,10 @@ Tum metinler Turkce ve ASCII olmali (aksan karakteri yok).
 
   const input = instruction + data;
 
+  const t1 = Date.now();
+  console.log(`generateCamPlan: calling Claude CLI (input ${input.length} chars)`);
   return runClaudeJson(input, PLAN_PROMPT, (parsed) => {
+    console.log(`generateCamPlan: Claude CLI done in ${Date.now() - t1}ms`);
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
       throw new Error("Plan bir nesne olmali");
     }
@@ -173,7 +175,7 @@ export function planToText(plan) {
   return lines.join("\n");
 }
 
-const GCODE_ATTEMPTS = 3;
+const GCODE_ATTEMPTS = 2;
 
 // Common G-code / M-code command tokens; if any appears as a literal inside the
 // generated Python, the model is hand-writing G-code instead of letting FreeCAD
@@ -383,8 +385,10 @@ async function generateAndRunPathCode({ abs, geometry, answers, plan, threadGuid
   let lastError = "Bilinmeyen hata";
   let previousCode = null;
   let problem = null;
+  const t0 = Date.now();
 
   for (let attempt = 1; attempt <= GCODE_ATTEMPTS; attempt++) {
+    console.log(`Path code attempt ${attempt}/${GCODE_ATTEMPTS} (elapsed ${Math.round((Date.now() - t0) / 1000)}s)`);
     let input = baseInput;
     if (previousCode) {
       input +=
@@ -479,11 +483,13 @@ function threadGuidanceFor(answers, context) {
  * @returns {Promise<{previewPath:string, token:string}>}
  */
 export async function generateCamPreview(stepPath, answers, plan, context = "") {
+  const t0 = Date.now();
   const abs = resolveStepPath(stepPath);
   if (!fs.existsSync(abs)) {
     throw new Error("STEP dosyasi bulunamadi: " + path.basename(abs));
   }
   const geometry = await describeStepGeometry(stepPath);
+  console.log(`generateCamPreview: geometry in ${Date.now() - t0}ms`);
   const previewPath = abs.replace(/\.(step|stp)$/i, "") + "_toolpath.json";
   try {
     fs.unlinkSync(previewPath);
@@ -507,6 +513,7 @@ export async function generateCamPreview(stepPath, answers, plan, context = "") 
   const estMatch = text.match(/EST_MINUTES=([-\d.eE+]+)/);
   const estimatedMinutes = estMatch ? Number(estMatch[1]) : null;
   const token = storePathCode(code);
+  console.log(`generateCamPreview: total ${Math.round((Date.now() - t0) / 1000)}s`);
   return { previewPath, token, estimatedMinutes };
 }
 

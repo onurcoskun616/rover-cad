@@ -60,6 +60,8 @@ export function runClaudeCli(input, { systemPromptFile, allowRead = false }) {
       "text",
     ];
 
+    args.push("--max-turns", "1");
+
     if (allowRead) {
       args.push("--allowedTools", "Read");
       args.push("--disallowedTools", ...BASE_DISALLOWED.filter((t) => t !== "Read"));

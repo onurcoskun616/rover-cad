@@ -208,8 +208,8 @@ async function readJson(response) {
   }
 }
 
-const POLL_INTERVAL_MS = 2500;
-const POLL_TIMEOUT_MS = 8 * 60 * 1000; // give long builds plenty of room
+const POLL_INTERVAL_MS = 1500;
+const POLL_TIMEOUT_MS = 5 * 60 * 1000;
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -263,6 +263,7 @@ async function runAsyncJob(url, options, onTick) {
       continue;
     }
     if (statusData.status === "pending") {
+      if (onTick && statusData.elapsed != null) onTick(statusData.elapsed);
       continue;
     }
     if (statusData.status === "error") {
@@ -694,7 +695,10 @@ async function handleCamPreview() {
           prompt: lastPrompt,
         }),
       },
-      (seconds) => setCamStatus(`Takım yolu simülasyonu hesaplanıyor… (${seconds} sn)`, true),
+      (seconds) => {
+        const phase = seconds < 15 ? "Kod üretiliyor" : seconds < 60 ? "FreeCAD hesaplıyor" : "İşlem devam ediyor";
+        setCamStatus(`${phase}… (${seconds}s)`, true);
+      },
     );
 
     if (result.error || !result.ok || !result.body?.simulationUrl) {
