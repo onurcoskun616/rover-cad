@@ -22,6 +22,6 @@ export const config = {
   claudeCli: {
     command: process.env.CLAUDE_CLI_COMMAND ?? "claude",
     model: process.env.CLAUDE_CLI_MODEL ?? "",
-    timeoutMs: Number(process.env.CLAUDE_CLI_TIMEOUT_MS ?? 120000),
+    timeoutMs: Number(process.env.CLAUDE_CLI_TIMEOUT_MS ?? 180000),
   },
 };

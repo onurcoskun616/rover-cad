@@ -111,13 +111,7 @@ export async function generateCamPlan(stepPath, answers, opts = {}) {
   // Build the input with the INSTRUCTION first, then data. This order is
   // critical: when the input starts with raw geometry JSON, some models treat
   // it as shared data and describe it instead of generating a plan.
-  let instruction = `Sen bir CNC/CAM proses plancisindir. Asagidaki geometri ve parametreleri kullanarak bir CAM isleme plani OLUSTUR.
-CIKTI FORMATI: Yanit olarak SADECE ham JSON nesnesi dondur. Ilk karakter { son karakter } olmali.
-Code fence (\`\`\`), aciklama, yorum, soru YAZMA. Sadece JSON.
-JSON yapisi: {"summary":"<Turkce genel yaklasim>","steps":[{"step":1,"operation":"<islem adi>","tool":"<takim>","description":"<Turkce aciklama>"}],"notes":"<Turkce notlar>"}
-Tum metinler Turkce ve ASCII olmali (aksan karakteri yok).
-
-`;
+  let instruction = `SADECE ham JSON dondur. Ilk karakter { son karakter } olmali. Fence/aciklama YAZMA.\n\n`;
 
   let data = geomBlock(geometry) + camParamsBlock(answers, geometry);
 
@@ -371,7 +365,7 @@ function buildPathCodeInput(abs, geometry, answers, plan, threadGuidance) {
     camParamsBlock(answers, geometry) +
     `\n[ONAYLANAN_PLAN]: ${JSON.stringify(plan)}` +
     threadGuidance +
-    "\n[GOREV]: Bu plani FreeCAD Path (CAM) operasyonlarina cevir ve olusturdugun Path Job'u tam olarak `job` adli degiskene ata. [CAM_PARAMETRELERI]'ndeki takim capi, spindle hizi, ilerlemeler, stepdown, stepover, stock-to-leave, kesme yonu (climb/conventional), WCS ve calisma duzlemini KULLAN. Kaba ve finis AYRI operasyonlar olsun. Post-processor CALISTIRMA, export ETME, dosya ACMA, G-code YAZMA, hicbir sey print ETME — bunlari sistem yapacak."
+    "\n[GOREV]: Plani FreeCAD Path operasyonlarina cevir. `job` degiskenine ata. Parametreleri kullan. Kaba/finis ayri. Export/G-code/print YAPMA."
   );
 }
 
