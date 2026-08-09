@@ -9,10 +9,6 @@ import { createJob, runJob } from "../services/jobStore.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-function makeFileUrl(proto, host, filePath) {
-  if (!filePath) return null;
-  return `${proto}://${host}/files/${path.basename(filePath)}`;
-}
 
 const router = Router();
 
@@ -26,8 +22,6 @@ router.post("/", (req, res) => {
     return res.status(400).json({ error: "code is required" });
   }
 
-  const proto = req.protocol;
-  const host = req.get("host");
   const jobId = createJob();
 
   runJob(
@@ -42,16 +36,23 @@ router.post("/", (req, res) => {
         return { ok: false, body: { error: result.error } };
       }
 
-      const partStlUrls = result.parts.map((p) => ({
+      const partsInline = result.parts.map((p) => ({
         name: p.name,
-        url: makeFileUrl(proto, host, p.stlPath),
+        stlBase64: fs.readFileSync(p.stlPath).toString("base64"),
       }));
+
+      let kinematicsData = null;
+      try {
+        kinematicsData = JSON.parse(fs.readFileSync(result.kinematicsPath, "utf-8"));
+      } catch (e) {
+        console.error("[simulate] kinematics read error:", e.message);
+      }
 
       return {
         ok: true,
         body: {
-          partStlUrls,
-          kinematicsUrl: makeFileUrl(proto, host, result.kinematicsPath),
+          partsInline,
+          kinematicsData,
         },
       };
     },
@@ -70,8 +71,6 @@ router.post("/demo", (req, res) => {
     return res.status(500).json({ error: "Demo script not found on server" });
   }
 
-  const proto = req.protocol;
-  const host = req.get("host");
   const jobId = createJob();
 
   runJob(

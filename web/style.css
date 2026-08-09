@@ -574,6 +574,32 @@ button.secondary:hover:not(:disabled) {
   margin-top: 0.5rem;
 }
 
+.sim-custom-details {
+  margin-top: 1rem;
+}
+.sim-custom-details summary {
+  cursor: pointer;
+  color: var(--accent);
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+}
+#sim-code-input {
+  width: 100%;
+  min-height: 180px;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) - 4px);
+  padding: 0.75rem;
+  font-family: "Fira Code", "Consolas", monospace;
+  font-size: 0.85rem;
+  resize: vertical;
+  margin-bottom: 0.5rem;
+}
+#sim-run-btn {
+  margin-top: 0.25rem;
+}
+
 .cam-quote {
   display: flex;
   flex-direction: column;

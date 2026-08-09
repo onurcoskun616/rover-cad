@@ -90,6 +90,8 @@ const gcodeLinesEl = document.getElementById("gcode-lines");
 const tabSim = document.getElementById("tab-sim");
 const panelSim = document.getElementById("panel-sim");
 const simDemoBtn = document.getElementById("sim-demo-btn");
+const simCodeInput = document.getElementById("sim-code-input");
+const simRunBtn = document.getElementById("sim-run-btn");
 const kinSimView = document.getElementById("kin-sim-view");
 const kinSimStatus = document.getElementById("kin-sim-status");
 const kinSimProgress = document.getElementById("kin-sim-progress");
@@ -1500,6 +1502,98 @@ function setKinSimSpeed(mult) {
 }
 
 simDemoBtn.addEventListener("click", handleSimDemo);
+
+async function handleSimCustom() {
+  const code = simCodeInput.value.trim();
+  if (!code) {
+    showError("Lütfen bir FreeCAD Python scripti yazin.");
+    return;
+  }
+  clearError();
+  resetKinSim();
+  simRunBtn.disabled = true;
+  simRunBtn.textContent = "FreeCAD'de calistiriliyor…";
+  setLoading(true, "Simulasyon scripti FreeCAD'de calistiriliyor…");
+  try {
+    const result = await runAsyncJob(
+      `${API_BASE}/simulate`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
+        body: JSON.stringify({ code }),
+      },
+      (seconds) => {
+        simRunBtn.textContent = `FreeCAD calisiyor… (${seconds} sn)`;
+        setLoading(true, `Simulasyon calistiriliyor… (${seconds} sn)`);
+      },
+    );
+
+    if (result.error || !result.ok) {
+      showError(result.error ?? result.body?.error ?? "Simulasyon basarisiz.");
+      simRunBtn.textContent = "Simulasyonu Calistir";
+      return;
+    }
+
+    const { partsInline, partStlUrls, kinematicsData, kinematicsUrl } = result.body;
+    const parts = partsInline || partStlUrls;
+    if (!parts?.length) {
+      showError("Simulasyon verisi eksik (STL yok).");
+      simRunBtn.textContent = "Simulasyonu Calistir";
+      return;
+    }
+
+    let kinData = kinematicsData;
+    if (!kinData && kinematicsUrl) {
+      simRunBtn.textContent = "Kinematik veri yukleniyor…";
+      const kinResp = await fetch(kinematicsUrl);
+      kinData = await kinResp.json();
+    }
+    if (!kinData) {
+      showError("Kinematik veri alinamadi.");
+      simRunBtn.textContent = "Simulasyonu Calistir";
+      return;
+    }
+
+    simRunBtn.textContent = "3D sahne hazirlaniyor…";
+    resultSection.hidden = false;
+    const { initViewer } = await import("./viewer.js");
+    if (!viewer) viewer = initViewer(viewerContainer);
+
+    simRunBtn.textContent = "STL parcalar yukleniyor…";
+    const { loadKinematicSim } = await import("./kinematicPlayer.js");
+    kinSim = await loadKinematicSim(viewer, parts, kinData, {
+      onUpdate: ({ angle, playing, collided }) => {
+        kinSimProgress.value = String(Math.round(angle * 10) % 3600);
+        kinSimStatus.textContent = collided
+          ? "Durum: Carpma!"
+          : playing
+            ? `Durum: Calisiyor (${Math.round(angle % 360)}°)`
+            : `Durum: Durdu (${Math.round(angle % 360)}°)`;
+        if (!playing) kinSimPlay.textContent = "Oynat";
+      },
+      onCollision: (pairs) => {
+        kinCollisionAlert.hidden = false;
+        kinCollisionAlert.textContent = `Carpma algilandi: ${pairs.map((p) => p.join(" <-> ")).join(", ")}. Simulasyon durduruldu.`;
+        kinSimPlay.textContent = "Oynat";
+      },
+    });
+
+    kinSimView.hidden = false;
+    kinSimPlay.textContent = "Oynat";
+    kinCollisionAlert.hidden = true;
+    setKinSimSpeed(1);
+    simRunBtn.textContent = "Simulasyonu Calistir";
+    window.dispatchEvent(new Event("resize"));
+  } catch (err) {
+    showError(`Simulasyon basarisiz: ${err.message}`);
+    simRunBtn.textContent = "Simulasyonu Calistir";
+  } finally {
+    setLoading(false);
+    simRunBtn.disabled = false;
+  }
+}
+
+simRunBtn.addEventListener("click", handleSimCustom);
 
 kinSimPlay.addEventListener("click", () => {
   if (!kinSim) return;

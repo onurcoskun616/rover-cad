@@ -123,6 +123,22 @@
           <button id="sim-demo-btn" type="button" class="secondary">
             Demo: Krank-Piston Simulasyonu
           </button>
+          <details class="sim-custom-details">
+            <summary>Kendi Simulasyon Scriptinizi Yazin</summary>
+            <p class="panel-hint">
+              FreeCAD Python scripti yazin. Script her parcaryi ayri STL olarak
+              export etmeli ve kinematics.json uretmelidir.
+              <code>_rover_sim_out</code> (cikti klasoru) ve
+              <code>_rover_sim_ts</code> (zaman damgasi) degiskenleri otomatik
+              enjekte edilir.
+            </p>
+            <textarea
+              id="sim-code-input"
+              rows="12"
+              placeholder="import FreeCAD, Part, Mesh, os, json&#10;&#10;doc = FreeCAD.ActiveDocument&#10;# ... parcalari olustur, STL export et, kinematics.json yaz"
+            ></textarea>
+            <button id="sim-run-btn" type="button">Simulasyonu Calistir</button>
+          </details>
         </div>
 
         <button id="generate-btn" type="button">Oluştur</button>

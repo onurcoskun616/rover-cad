@@ -134,7 +134,7 @@ kin = {
             "slider_origin": [crank_radius + conrod_length, 0, 0],
         }
     ],
-    "collision_pairs": [["Piston", "Block"]],
+    "collision_pairs": [["Crank", "Piston"]],
 }
 
 kin_path = os.path.join(out, f"sim_{ts}_kinematics.json")
