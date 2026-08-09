@@ -94,6 +94,8 @@ const simPromptInput = document.getElementById("sim-prompt-input");
 const simGenerateBtn = document.getElementById("sim-generate-btn");
 const simCodeInput = document.getElementById("sim-code-input");
 const simRunBtn = document.getElementById("sim-run-btn");
+const simUndoBtn = document.getElementById("sim-undo-btn");
+const simStepIndicator = document.getElementById("sim-step-indicator");
 const kinSimView = document.getElementById("kin-sim-view");
 const kinSimStatus = document.getElementById("kin-sim-status");
 const kinSimProgress = document.getElementById("kin-sim-progress");
@@ -124,6 +126,9 @@ let dimEditQueue = [];
 let kinSim = null;
 let simCurrentCode = null;
 let simCurrentKinematics = null;
+let simSessionId = null;
+let simStepIndex = -1;
+let simTotalSteps = 0;
 
 function setMode(next) {
   mode = next;
@@ -224,7 +229,11 @@ function resetKinSim(keepContext) {
   if (!keepContext) {
     simCurrentCode = null;
     simCurrentKinematics = null;
+    simSessionId = null;
+    simStepIndex = -1;
+    simTotalSteps = 0;
   }
+  updateSimStepUI();
 }
 
 function resetCamAssistant() {
@@ -1417,9 +1426,90 @@ camQuoteSubmit.addEventListener("click", handleQuoteSubmit);
 
 // --- Kinematic simulation ---------------------------------------------------
 
+function updateSimStepUI() {
+  if (simStepIndex >= 0 && simTotalSteps > 0) {
+    simStepIndicator.textContent = `Adim ${simStepIndex + 1} / ${simTotalSteps}`;
+    simStepIndicator.hidden = false;
+  } else {
+    simStepIndicator.hidden = true;
+  }
+  simUndoBtn.hidden = simStepIndex <= 0;
+}
+
+async function handleSimUndo() {
+  if (!simSessionId || simStepIndex <= 0) return;
+  clearError();
+  simUndoBtn.disabled = true;
+  simUndoBtn.textContent = "Geri aliniyor…";
+  try {
+    const resp = await fetch(`${API_BASE}/simulate/undo`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
+      body: JSON.stringify({ sessionId: simSessionId }),
+    });
+    const data = await readJson(resp);
+    if (!resp.ok || !data?.ok) {
+      showError(data?.error ?? "Geri alma basarisiz.");
+      return;
+    }
+
+    const { partsInline, kinematicsData, generatedCode, stepIndex, totalSteps } = data;
+    simCurrentCode = generatedCode;
+    simCurrentKinematics = kinematicsData;
+    simStepIndex = stepIndex;
+    simTotalSteps = totalSteps;
+    if (generatedCode) simCodeInput.value = generatedCode;
+
+    if (kinSim) kinSim.pause();
+    kinSim = null;
+    kinSimView.hidden = true;
+    kinSimPlay.textContent = "Oynat";
+    kinCollisionAlert.hidden = true;
+
+    resultSection.hidden = false;
+    const { initViewer } = await import("./viewer.js");
+    if (!viewer) viewer = initViewer(viewerContainer);
+
+    const { loadKinematicSim } = await import("./kinematicPlayer.js");
+    kinSim = await loadKinematicSim(viewer, partsInline, kinematicsData, {
+      onUpdate: ({ angle, playing, collided }) => {
+        kinSimProgress.value = String(Math.round(angle * 10) % 3600);
+        kinSimStatus.textContent = collided
+          ? "Durum: Carpma!"
+          : playing
+            ? `Durum: Calisiyor (${Math.round(angle % 360)}°)`
+            : `Durum: Durdu (${Math.round(angle % 360)}°)`;
+        if (!playing) kinSimPlay.textContent = "Oynat";
+      },
+      onCollision: (pairs) => {
+        kinCollisionAlert.hidden = false;
+        kinCollisionAlert.textContent = `Carpma algilandi: ${pairs.map((p) => p.join(" <-> ")).join(", ")}. Simulasyon durduruldu.`;
+        kinSimPlay.textContent = "Oynat";
+      },
+    });
+
+    kinSimView.hidden = false;
+    kinSimPlay.textContent = "Oynat";
+    kinCollisionAlert.hidden = true;
+    setKinSimSpeed(1);
+    updateSimStepUI();
+    simGenerateBtn.textContent = simCurrentCode ? "Parcayi Ekle / Degistir" : "Mekanizma Olustur";
+    simPromptInput.placeholder = simCurrentCode
+      ? "Ornek: Bu diske X ekseninde hareket eden bir biyel kolu bagla"
+      : "Ornek: Merkezde Z ekseninde donen 50mm capinda bir disk olustur";
+    window.dispatchEvent(new Event("resize"));
+  } catch (err) {
+    showError(`Geri alma basarisiz: ${err.message}`);
+  } finally {
+    simUndoBtn.disabled = false;
+    simUndoBtn.textContent = "Geri Al";
+  }
+}
+
 async function handleSimDemo() {
   clearError();
   resetKinSim();
+  simSessionId = crypto.randomUUID();
   simDemoBtn.disabled = true;
   simDemoBtn.textContent = "FreeCAD'de olusturuluyor…";
   setLoading(true, "Simulasyon parcalari FreeCAD'de olusturuluyor…");
@@ -1429,7 +1519,7 @@ async function handleSimDemo() {
       {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
-        body: JSON.stringify({}),
+        body: JSON.stringify({ sessionId: simSessionId }),
       },
       (seconds) => {
         simDemoBtn.textContent = `FreeCAD calisiyor… (${seconds} sn)`;
@@ -1488,10 +1578,16 @@ async function handleSimDemo() {
     });
 
     simCurrentKinematics = kinData;
+    if (result.body.generatedCode) simCurrentCode = result.body.generatedCode;
+    if (result.body.stepIndex != null) {
+      simStepIndex = result.body.stepIndex;
+      simTotalSteps = result.body.totalSteps;
+    }
     kinSimView.hidden = false;
     kinSimPlay.textContent = "Oynat";
     kinCollisionAlert.hidden = true;
     setKinSimSpeed(1);
+    updateSimStepUI();
     simDemoBtn.textContent = "Demo: Krank-Piston Simulasyonu";
     simGenerateBtn.textContent = "Parcayi Ekle / Degistir";
     simPromptInput.placeholder = "Ornek: Pistona bir yay ekle veya krank hizini artir";
@@ -1522,6 +1618,7 @@ async function handleSimGenerate() {
   }
   clearError();
   resetKinSim(true);
+  if (!simSessionId) simSessionId = crypto.randomUUID();
   simGenerateBtn.disabled = true;
   simGenerateBtn.textContent = "Kod uretiliyor…";
   setLoading(true, "Yapay zeka mekanizma kodu uretiyor…");
@@ -1534,6 +1631,8 @@ async function handleSimGenerate() {
         body: JSON.stringify({
           prompt,
           previousCode: simCurrentCode || undefined,
+          previousKinematics: simCurrentKinematics || undefined,
+          sessionId: simSessionId,
         }),
       },
       (seconds) => {
@@ -1592,10 +1691,15 @@ async function handleSimGenerate() {
       },
     });
 
+    if (result.body.stepIndex != null) {
+      simStepIndex = result.body.stepIndex;
+      simTotalSteps = result.body.totalSteps;
+    }
     kinSimView.hidden = false;
     kinSimPlay.textContent = "Oynat";
     kinCollisionAlert.hidden = true;
     setKinSimSpeed(1);
+    updateSimStepUI();
     simGenerateBtn.textContent = simCurrentCode ? "Parcayi Ekle / Degistir" : "Mekanizma Olustur";
     simPromptInput.value = "";
     simPromptInput.placeholder = simCurrentCode
@@ -1612,6 +1716,7 @@ async function handleSimGenerate() {
 }
 
 simGenerateBtn.addEventListener("click", handleSimGenerate);
+simUndoBtn.addEventListener("click", handleSimUndo);
 
 async function handleSimCustom() {
   const code = simCodeInput.value.trim();

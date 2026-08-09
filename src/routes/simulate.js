@@ -7,6 +7,7 @@ import { apiKeyAuth } from "./apiKeyAuth.js";
 import { runSimulationExport } from "../services/simulationExportService.js";
 import { promptToSimCode } from "../services/simulationGenerateService.js";
 import { createJob, runJob } from "../services/jobStore.js";
+import { pushStep, undoStep } from "../services/simHistoryStore.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -64,7 +65,7 @@ router.post("/", (req, res) => {
 });
 
 router.post("/generate", (req, res) => {
-  const { prompt, previousCode } = req.body ?? {};
+  const { prompt, previousCode, previousKinematics, sessionId } = req.body ?? {};
 
   if (typeof prompt !== "string" || !prompt.trim()) {
     return res.status(400).json({ error: "prompt is required" });
@@ -78,7 +79,7 @@ router.post("/generate", (req, res) => {
       console.log("[simulate/generate] generating sim code from prompt…");
       let code;
       try {
-        code = await promptToSimCode(prompt.trim(), previousCode || null);
+        code = await promptToSimCode(prompt.trim(), previousCode || null, previousKinematics || null);
       } catch (err) {
         console.error("[simulate/generate] code generation error:", err.message);
         return { ok: false, body: { error: `Kod uretimi basarisiz: ${err.message}` } };
@@ -105,12 +106,23 @@ router.post("/generate", (req, res) => {
         console.error("[simulate/generate] kinematics read error:", e.message);
       }
 
+      let stepIndex = null;
+      let totalSteps = null;
+      if (sessionId) {
+        const info = pushStep(sessionId, { code, kinematicsData, partsInline });
+        stepIndex = info.stepIndex;
+        totalSteps = info.totalSteps;
+      }
+
       return {
         ok: true,
         body: {
           partsInline,
           kinematicsData,
           generatedCode: code,
+          sessionId: sessionId || null,
+          stepIndex,
+          totalSteps,
         },
       };
     },
@@ -121,6 +133,7 @@ router.post("/generate", (req, res) => {
 });
 
 router.post("/demo", (req, res) => {
+  const { sessionId } = req.body ?? {};
   const demoPath = path.join(__dirname, "..", "..", "examples", "crank_piston_sim.py");
   let code;
   try {
@@ -155,11 +168,23 @@ router.post("/demo", (req, res) => {
         console.error("[simulate/demo] kinematics read error:", e.message);
       }
 
+      let stepIndex = null;
+      let totalSteps = null;
+      if (sessionId) {
+        const info = pushStep(sessionId, { code, kinematicsData, partsInline });
+        stepIndex = info.stepIndex;
+        totalSteps = info.totalSteps;
+      }
+
       return {
         ok: true,
         body: {
           partsInline,
           kinematicsData,
+          generatedCode: code,
+          sessionId: sessionId || null,
+          stepIndex,
+          totalSteps,
         },
       };
     },
@@ -167,6 +192,28 @@ router.post("/demo", (req, res) => {
   );
 
   res.status(202).json({ jobId });
+});
+
+router.post("/undo", (req, res) => {
+  const { sessionId } = req.body ?? {};
+
+  if (!sessionId) {
+    return res.status(400).json({ error: "sessionId is required" });
+  }
+
+  const step = undoStep(sessionId);
+  if (!step) {
+    return res.status(400).json({ error: "Geri alinacak adim yok." });
+  }
+
+  return res.json({
+    ok: true,
+    partsInline: step.partsInline,
+    kinematicsData: step.kinematicsData,
+    generatedCode: step.code,
+    stepIndex: step.stepIndex,
+    totalSteps: step.totalSteps,
+  });
 });
 
 export default router;

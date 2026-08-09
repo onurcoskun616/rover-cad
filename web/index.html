@@ -129,7 +129,11 @@
               rows="3"
               placeholder="Ornek: Merkezde Z ekseninde donen 50mm capinda bir disk olustur&#10;veya: Bu diske X ekseninde hareket eden bir biyel kolu bagla"
             ></textarea>
-            <button id="sim-generate-btn" type="button">Mekanizma Olustur</button>
+            <div class="sim-prompt-actions">
+              <button id="sim-generate-btn" type="button">Mekanizma Olustur</button>
+              <button id="sim-undo-btn" type="button" class="secondary" hidden>Geri Al</button>
+              <span id="sim-step-indicator" class="sim-step-indicator" hidden></span>
+            </div>
           </div>
           <details class="sim-custom-details">
             <summary>Gelismis: Python Scripti Yaz</summary>
