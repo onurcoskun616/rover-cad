@@ -59,6 +59,8 @@ router.post("/", (req, res) => {
           stepUrl: makeFileUrl(proto, host, result.stepPath),
           stlUrl: makeFileUrl(proto, host, result.stlPath),
           bbox: result.bbox,
+          anchors: result.anchors,
+          center: result.center,
           generatedCode: result.generatedCode,
         },
       };

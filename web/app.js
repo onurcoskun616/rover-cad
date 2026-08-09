@@ -412,6 +412,10 @@ function showResult(data) {
   if (lastStepPath) {
     camSection.hidden = false;
   }
+
+  if (data.anchors && data.anchors.length) {
+    showAnchors(data.anchors, data.center);
+  }
 }
 
 async function handleRevise() {
@@ -965,11 +969,41 @@ async function loadStlPreview(stlUrl) {
       viewer = initViewer(viewerContainer);
     }
     loadStl(viewer, stlUrl);
-    if (lastStepPath) {
+    if (lastStepPath && !lastDimData) {
       fetchAndShowDimensions();
     }
   } catch (err) {
     console.error("3D önizleme yüklenemedi:", err);
+  }
+}
+
+async function showAnchors(anchors, center) {
+  if (!anchors || !anchors.length) return;
+  try {
+    const c = center || [0, 0, 0];
+    const dimData = {
+      dimensions: anchors.map((a) => ({
+        id: a.paramName,
+        paramName: a.paramName,
+        label: a.label,
+        value: a.value,
+        unit: a.unit || "mm",
+        editable: a.editable !== false,
+        symbol: a.symbol || null,
+        count: a.count || 1,
+        p1: a.p1,
+        p2: a.p2,
+        ext1: a.ext1 || null,
+        ext2: a.ext2 || null,
+      })),
+      center: c,
+    };
+    lastDimData = dimData;
+    const { initViewer, loadDimensions } = await import("./viewer.js");
+    if (!viewer) viewer = initViewer(viewerContainer);
+    loadDimensions(viewer, dimData, { onEdit: handleDimensionEdit });
+  } catch (err) {
+    console.error("Anchor etiketleri yüklenemedi:", err);
   }
 }
 
@@ -1037,7 +1071,9 @@ async function handleDimensionEdit(dim, newValue) {
     return;
   }
 
-  const paramName = codeHasParamBlock(code) ? findParamForDim(code, dim) : null;
+  const paramName = dim.paramName
+    ? dim.paramName
+    : (codeHasParamBlock(code) ? findParamForDim(code, dim) : null);
   const useDeterministic = !!paramName;
 
   const { clearDimensions } = await import("./viewer.js");

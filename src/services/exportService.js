@@ -68,6 +68,9 @@ function exportEpiloguePy(outputDir, stepPath, stlPath) {
     'print("BBOX_X=" + str(bb.XLength))',
     'print("BBOX_Y=" + str(bb.YLength))',
     'print("BBOX_Z=" + str(bb.ZLength))',
+    'print("BBOX_CX=" + str(bb.Center.x))',
+    'print("BBOX_CY=" + str(bb.Center.y))',
+    'print("BBOX_CZ=" + str(bb.Center.z))',
   ].join("\n");
 }
 
@@ -232,6 +235,14 @@ export async function runGeneratedCodeAndExport(generatedCode) {
   const x = text.match(/BBOX_X=([-\d.eE+]+)/);
   const y = text.match(/BBOX_Y=([-\d.eE+]+)/);
   const z = text.match(/BBOX_Z=([-\d.eE+]+)/);
+  const cx = text.match(/BBOX_CX=([-\d.eE+]+)/);
+  const cy = text.match(/BBOX_CY=([-\d.eE+]+)/);
+  const cz = text.match(/BBOX_CZ=([-\d.eE+]+)/);
+  const anchorsMatch = text.match(/ROVER_ANCHORS_JSON=(.+)/);
+  let anchors = null;
+  if (anchorsMatch) {
+    try { anchors = JSON.parse(anchorsMatch[1]); } catch { /* ignore */ }
+  }
 
   return {
     ok: true,
@@ -243,6 +254,10 @@ export async function runGeneratedCodeAndExport(generatedCode) {
       y: y ? Number(y[1]) : null,
       z: z ? Number(z[1]) : null,
     },
+    center: cx && cy && cz
+      ? [Number(cx[1]), Number(cy[1]), Number(cz[1])]
+      : null,
+    anchors,
   };
 }
 

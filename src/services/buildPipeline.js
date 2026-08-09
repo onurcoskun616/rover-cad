@@ -84,6 +84,8 @@ export async function runBuildPipeline({ generate, verifyPrompt = "" }) {
       stepPath: out.stepPath,
       stlPath: out.stlPath,
       bbox,
+      anchors: out.anchors ?? null,
+      center: out.center ?? null,
       // If we're shipping on the final attempt despite a dimension mismatch,
       // surface it rather than silently returning a wrong-sized part.
       warning: check.ok ? undefined : check.reason,

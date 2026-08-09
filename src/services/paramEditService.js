@@ -111,6 +111,8 @@ export async function runParamEdit(code, paramName, newValue) {
     stepPath: result.stepPath,
     stlPath: result.stlPath,
     bbox: result.bbox,
+    anchors: result.anchors,
+    center: result.center,
     generatedCode: updatedCode,
   };
 }
