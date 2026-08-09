@@ -27,7 +27,10 @@ const app = express();
 app.set("trust proxy", true);
 app.use(
   cors({
-    origin: config.corsOrigin === "*" ? true : config.corsOrigin.split(","),
+    origin: true,
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "x-api-key"],
+    maxAge: 1,
   }),
 );
 app.use(express.json());

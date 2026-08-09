@@ -1410,9 +1410,10 @@ camQuoteSubmit.addEventListener("click", handleQuoteSubmit);
 async function handleSimDemo() {
   clearError();
   resetKinSim();
+  simDemoBtn.disabled = true;
+  simDemoBtn.textContent = "FreeCAD'de olusturuluyor…";
   setLoading(true, "Simulasyon parcalari FreeCAD'de olusturuluyor…");
   try {
-    console.log("[sim] POST /simulate/demo gonderiliyor…");
     const result = await runAsyncJob(
       `${API_BASE}/simulate/demo`,
       {
@@ -1420,41 +1421,43 @@ async function handleSimDemo() {
         headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
         body: JSON.stringify({}),
       },
-      (seconds) =>
-        setLoading(true, `Simulasyon parcalari olusturuluyor… (${seconds} sn)`),
+      (seconds) => {
+        simDemoBtn.textContent = `FreeCAD calisiyor… (${seconds} sn)`;
+        setLoading(true, `Simulasyon parcalari olusturuluyor… (${seconds} sn)`);
+      },
     );
-
-    console.log("[sim] runAsyncJob result:", result);
 
     if (result.error || !result.ok) {
       showError(result.error ?? result.body?.error ?? "Simulasyon basarisiz.");
+      simDemoBtn.textContent = "HATA - tekrar dene";
       return;
     }
 
     const { partStlUrls, kinematicsData, kinematicsUrl } = result.body;
-    console.log("[sim] partStlUrls:", partStlUrls?.length, "kinData:", !!kinematicsData);
     if (!partStlUrls?.length) {
-      showError("Simulasyon verisi eksik.");
+      showError("Simulasyon verisi eksik (STL yok).");
+      simDemoBtn.textContent = "HATA - tekrar dene";
       return;
     }
 
     let kinData = kinematicsData;
     if (!kinData && kinematicsUrl) {
-      setLoading(true, "Kinematik veri yukleniyor…");
+      simDemoBtn.textContent = "Kinematik veri yukleniyor…";
       const kinResp = await fetch(kinematicsUrl);
       kinData = await kinResp.json();
     }
     if (!kinData) {
       showError("Kinematik veri alinamadi.");
+      simDemoBtn.textContent = "HATA - tekrar dene";
       return;
     }
 
-    console.log("[sim] kinData loaded, loading viewer…");
+    simDemoBtn.textContent = "3D sahne hazirlaniyor…";
     const { initViewer } = await import("./viewer.js");
     if (!viewer) viewer = initViewer(viewerContainer);
 
+    simDemoBtn.textContent = "STL parcalar yukleniyor…";
     const { loadKinematicSim } = await import("./kinematicPlayer.js");
-    console.log("[sim] loading kinematic sim with %d parts…", partStlUrls.length);
     kinSim = await loadKinematicSim(viewer, partStlUrls, kinData, {
       onUpdate: ({ angle, playing, collided }) => {
         kinSimProgress.value = String(Math.round(angle * 10) % 3600);
@@ -1476,10 +1479,13 @@ async function handleSimDemo() {
     kinSimPlay.textContent = "Oynat";
     kinCollisionAlert.hidden = true;
     setKinSimSpeed(1);
+    simDemoBtn.textContent = "Demo: Krank-Piston Simulasyonu";
   } catch (err) {
     showError(`Simulasyon basarisiz: ${err.message}`);
+    simDemoBtn.textContent = `HATA: ${err.message}`;
   } finally {
     setLoading(false);
+    simDemoBtn.disabled = false;
   }
 }
 
