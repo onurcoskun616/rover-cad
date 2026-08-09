@@ -1433,8 +1433,9 @@ async function handleSimDemo() {
       return;
     }
 
-    const { partStlUrls, kinematicsData, kinematicsUrl } = result.body;
-    if (!partStlUrls?.length) {
+    const { partsInline, partStlUrls, kinematicsData, kinematicsUrl } = result.body;
+    const parts = partsInline || partStlUrls;
+    if (!parts?.length) {
       showError("Simulasyon verisi eksik (STL yok).");
       simDemoBtn.textContent = "HATA - tekrar dene";
       return;
@@ -1458,7 +1459,7 @@ async function handleSimDemo() {
 
     simDemoBtn.textContent = "STL parcalar yukleniyor…";
     const { loadKinematicSim } = await import("./kinematicPlayer.js");
-    kinSim = await loadKinematicSim(viewer, partStlUrls, kinData, {
+    kinSim = await loadKinematicSim(viewer, parts, kinData, {
       onUpdate: ({ angle, playing, collided }) => {
         kinSimProgress.value = String(Math.round(angle * 10) % 3600);
         kinSimStatus.textContent = collided

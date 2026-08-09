@@ -9,16 +9,23 @@ function loadStlAsync(url) {
   });
 }
 
+function parseStlBase64(base64Str) {
+  const binary = atob(base64Str);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return new STLLoader().parse(bytes.buffer);
+}
+
 /**
  * Load a kinematic simulation into the Three.js viewer.
  *
  * @param {object} viewer        - viewer instance from initViewer
- * @param {{name:string, url:string}[]} partUrls - per-part STL URLs
+ * @param {{name:string, url?:string, stlBase64?:string}[]} parts - per-part STL (URL or inline base64)
  * @param {object} kinData       - parsed kinematics.json
  * @param {{onUpdate?, onCollision?}} opts
  * @returns {Promise<{play,pause,isPlaying,setSpeed,seek,reset}>}
  */
-export async function loadKinematicSim(viewer, partUrls, kinData, opts = {}) {
+export async function loadKinematicSim(viewer, parts, kinData, opts = {}) {
   const { onUpdate, onCollision } = opts;
 
   // --- clear previous scene objects ---
@@ -43,9 +50,9 @@ export async function loadKinematicSim(viewer, partUrls, kinData, opts = {}) {
   const origMaterials = {};
   const box = new THREE.Box3();
 
-  for (let i = 0; i < partUrls.length; i++) {
-    const { name, url } = partUrls[i];
-    const geo = await loadStlAsync(url);
+  for (let i = 0; i < parts.length; i++) {
+    const { name, url, stlBase64 } = parts[i];
+    const geo = stlBase64 ? parseStlBase64(stlBase64) : await loadStlAsync(url);
     geo.computeVertexNormals();
     const mat = new THREE.MeshStandardMaterial({
       color: PART_COLORS[i % PART_COLORS.length],

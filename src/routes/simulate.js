@@ -86,9 +86,9 @@ router.post("/demo", (req, res) => {
         return { ok: false, body: { error: result.error } };
       }
 
-      const partStlUrls = result.parts.map((p) => ({
+      const partsInline = result.parts.map((p) => ({
         name: p.name,
-        url: makeFileUrl(proto, host, p.stlPath),
+        stlBase64: fs.readFileSync(p.stlPath).toString("base64"),
       }));
 
       let kinematicsData = null;
@@ -101,8 +101,7 @@ router.post("/demo", (req, res) => {
       return {
         ok: true,
         body: {
-          partStlUrls,
-          kinematicsUrl: makeFileUrl(proto, host, result.kinematicsPath),
+          partsInline,
           kinematicsData,
         },
       };
