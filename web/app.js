@@ -1454,6 +1454,7 @@ async function handleSimDemo() {
     }
 
     simDemoBtn.textContent = "3D sahne hazirlaniyor…";
+    resultSection.hidden = false;
     const { initViewer } = await import("./viewer.js");
     if (!viewer) viewer = initViewer(viewerContainer);
 
@@ -1481,6 +1482,7 @@ async function handleSimDemo() {
     kinCollisionAlert.hidden = true;
     setKinSimSpeed(1);
     simDemoBtn.textContent = "Demo: Krank-Piston Simulasyonu";
+    window.dispatchEvent(new Event("resize"));
   } catch (err) {
     showError(`Simulasyon basarisiz: ${err.message}`);
     simDemoBtn.textContent = `HATA: ${err.message}`;
