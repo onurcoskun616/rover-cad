@@ -1410,19 +1410,14 @@ camQuoteSubmit.addEventListener("click", handleQuoteSubmit);
 async function handleSimDemo() {
   clearError();
   resetKinSim();
-  setLoading(true, "Demo scripti yukleniyor…");
+  setLoading(true, "Simulasyon parcalari FreeCAD'de olusturuluyor…");
   try {
-    const resp = await fetch(`${API_BASE}/files/crank_piston_sim.py`);
-    if (!resp.ok) throw new Error("Demo scripti indirilemedi.");
-    const code = await resp.text();
-
-    setLoading(true, "Simulasyon parcalari FreeCAD'de olusturuluyor…");
     const result = await runAsyncJob(
-      `${API_BASE}/simulate`,
+      `${API_BASE}/simulate/demo`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
-        body: JSON.stringify({ code }),
+        body: JSON.stringify({}),
       },
       (seconds) =>
         setLoading(true, `Simulasyon parcalari olusturuluyor… (${seconds} sn)`),
