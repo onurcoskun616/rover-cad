@@ -4,6 +4,7 @@ import { config } from "../config.js";
 // secret baked into the (public) frontend — it only keeps casual/automated
 // traffic out, it is not a real authentication boundary.
 export function apiKeyAuth(req, res, next) {
+  if (req.method === "OPTIONS") return next();
   if (!config.apiKey) {
     return res.status(500).json({ error: "Server misconfigured: API_KEY is not set" });
   }
