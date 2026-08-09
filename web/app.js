@@ -401,8 +401,12 @@ function showResult(data) {
 
   lastGeneratedCode = data.generatedCode ?? null;
   lastBbox = data.bbox ?? null;
-  // The PDF is generated on demand to keep /generate fast.
+  // The PDF is generated on demand to keep /generate fast. Reset any stale
+  // PDF link so the user re-generates with the current dimensions.
+  pdfLink.hidden = true;
   pdfBtn.hidden = false;
+  pdfBtn.textContent = "Teknik Resim (PDF)";
+  pdfBtn.disabled = false;
   // Allow iterative editing once we have code to revise.
   reviseSection.hidden = !lastGeneratedCode;
 

@@ -80,7 +80,48 @@ export function applyParamChange(code, paramName, newValue) {
     throw new Error(`Parametre bulunamadi: ${paramName}`);
   }
 
-  return lines.join("\n");
+  return updateRoverDimensions(lines.join("\n"));
+}
+
+const PARAM_LABEL_MAP = {
+  uzunluk: "Uzunluk", genislik: "Genislik", yukseklik: "Yukseklik",
+  derinlik: "Derinlik", kalinlik: "Kalinlik", cap: "Cap",
+  ic_cap: "Ic Cap", dis_cap: "Dis Cap", yaricap: "Yaricap",
+  delik_capi: "Delik Capi", delik_derinlik: "Delik Derinlik",
+  delik_sayisi: "Delik Sayisi", pah: "Pah", radyus: "Radyus",
+  agiz_capi: "Agiz Capi", taban_capi: "Taban Capi",
+  boy: "Boy", en: "En", cikinti: "Cikinti",
+};
+
+function labelForParam(name) {
+  if (PARAM_LABEL_MAP[name]) return PARAM_LABEL_MAP[name];
+  return name.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function updateRoverDimensions(code) {
+  const params = parseParams(code);
+  if (!params.length) return code;
+
+  const dimObj = {};
+  for (const p of params) {
+    const unit = p.unit === "adet" ? "adet" : "mm";
+    dimObj[labelForParam(p.name)] = `${p.value} ${unit}`;
+  }
+  const newDimLine = `# ROVER_DIMENSIONS: ${JSON.stringify(dimObj)}`;
+
+  const dimRegex = /^#\s*ROVER_DIMENSIONS:\s*\{.*\}.*$/m;
+  if (dimRegex.test(code)) {
+    return code.replace(dimRegex, newDimLine);
+  }
+
+  const endIdx = code.indexOf(PARAMS_END);
+  if (endIdx !== -1) {
+    const insertPos = code.indexOf("\n", endIdx);
+    if (insertPos !== -1) {
+      return code.slice(0, insertPos) + "\n" + newDimLine + code.slice(insertPos);
+    }
+  }
+  return code;
 }
 
 /**
