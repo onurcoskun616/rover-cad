@@ -1412,6 +1412,7 @@ async function handleSimDemo() {
   resetKinSim();
   setLoading(true, "Simulasyon parcalari FreeCAD'de olusturuluyor…");
   try {
+    console.log("[sim] POST /simulate/demo gonderiliyor…");
     const result = await runAsyncJob(
       `${API_BASE}/simulate/demo`,
       {
@@ -1423,25 +1424,37 @@ async function handleSimDemo() {
         setLoading(true, `Simulasyon parcalari olusturuluyor… (${seconds} sn)`),
     );
 
+    console.log("[sim] runAsyncJob result:", result);
+
     if (result.error || !result.ok) {
       showError(result.error ?? result.body?.error ?? "Simulasyon basarisiz.");
       return;
     }
 
-    const { partStlUrls, kinematicsUrl } = result.body;
-    if (!partStlUrls?.length || !kinematicsUrl) {
+    const { partStlUrls, kinematicsData, kinematicsUrl } = result.body;
+    console.log("[sim] partStlUrls:", partStlUrls?.length, "kinData:", !!kinematicsData);
+    if (!partStlUrls?.length) {
       showError("Simulasyon verisi eksik.");
       return;
     }
 
-    setLoading(true, "Kinematik veri yukleniyor…");
-    const kinResp = await fetch(kinematicsUrl);
-    const kinData = await kinResp.json();
+    let kinData = kinematicsData;
+    if (!kinData && kinematicsUrl) {
+      setLoading(true, "Kinematik veri yukleniyor…");
+      const kinResp = await fetch(kinematicsUrl);
+      kinData = await kinResp.json();
+    }
+    if (!kinData) {
+      showError("Kinematik veri alinamadi.");
+      return;
+    }
 
+    console.log("[sim] kinData loaded, loading viewer…");
     const { initViewer } = await import("./viewer.js");
     if (!viewer) viewer = initViewer(viewerContainer);
 
     const { loadKinematicSim } = await import("./kinematicPlayer.js");
+    console.log("[sim] loading kinematic sim with %d parts…", partStlUrls.length);
     kinSim = await loadKinematicSim(viewer, partStlUrls, kinData, {
       onUpdate: ({ angle, playing, collided }) => {
         kinSimProgress.value = String(Math.round(angle * 10) % 3600);

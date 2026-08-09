@@ -1,9 +1,11 @@
 import { Router } from "express";
+import cors from "cors";
 import { apiKeyAuth } from "./apiKeyAuth.js";
 import { getJob } from "../services/jobStore.js";
 
 const router = Router();
 
+router.use(cors({ origin: true }));
 router.use(apiKeyAuth);
 
 // Poll a job started by one of the async POST routes. Responses:

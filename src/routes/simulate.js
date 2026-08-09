@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Router } from "express";
+import cors from "cors";
 import { apiKeyAuth } from "./apiKeyAuth.js";
 import { runSimulationExport } from "../services/simulationExportService.js";
 import { createJob, runJob } from "../services/jobStore.js";
@@ -15,6 +16,7 @@ function makeFileUrl(proto, host, filePath) {
 
 const router = Router();
 
+router.use(cors({ origin: true }));
 router.use(apiKeyAuth);
 
 router.post("/", (req, res) => {
@@ -89,11 +91,19 @@ router.post("/demo", (req, res) => {
         url: makeFileUrl(proto, host, p.stlPath),
       }));
 
+      let kinematicsData = null;
+      try {
+        kinematicsData = JSON.parse(fs.readFileSync(result.kinematicsPath, "utf-8"));
+      } catch (e) {
+        console.error("[simulate/demo] kinematics read error:", e.message);
+      }
+
       return {
         ok: true,
         body: {
           partStlUrls,
           kinematicsUrl: makeFileUrl(proto, host, result.kinematicsPath),
+          kinematicsData,
         },
       };
     },
