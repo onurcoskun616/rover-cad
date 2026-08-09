@@ -1,4 +1,6 @@
 import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import express from "express";
 import cors from "cors";
 import { config } from "./config.js";
@@ -54,7 +56,8 @@ app.use("/tools", toolsRouter);
 // public downloads are never intercepted.
 app.use("/files", express.static(config.outputDir));
 // Serve example simulation scripts so the frontend demo can fetch them.
-app.use("/files", express.static(new URL("../examples", import.meta.url).pathname));
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+app.use("/files", express.static(path.join(__dirname, "..", "examples")));
 // CAM assistant (step wizard -> plan -> confirm) for every part:
 // /cam-step, /cam-plan, /cam-confirm.
 // Mounted at "/" (its routes carry their own auth), so keep it last.
