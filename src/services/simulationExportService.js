@@ -31,10 +31,13 @@ export async function runSimulationExport(code) {
   ].join("\n");
 
   try {
+    console.log("[simExport] calling FreeCAD MCP…");
     const result = await callFreecadTool(config.freecadMcp.toolName, {
       [config.freecadMcp.toolParam]: fullCode,
     });
     const text = extractResultText(result);
+    console.log("[simExport] FreeCAD returned, isError=%s, text length=%d", result?.isError, text?.length ?? 0);
+    if (text) console.log("[simExport] output:\n%s", text.slice(0, 2000));
 
     if (result?.isError) {
       return { ok: false, error: text || "Simulation script failed" };

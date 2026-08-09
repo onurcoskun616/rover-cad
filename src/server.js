@@ -54,7 +54,7 @@ app.use("/tools", toolsRouter);
 // public downloads are never intercepted.
 app.use("/files", express.static(config.outputDir));
 // Serve example simulation scripts so the frontend demo can fetch them.
-app.use("/files", express.static("examples"));
+app.use("/files", express.static(new URL("../examples", import.meta.url).pathname));
 // CAM assistant (step wizard -> plan -> confirm) for every part:
 // /cam-step, /cam-plan, /cam-confirm.
 // Mounted at "/" (its routes carry their own auth), so keep it last.

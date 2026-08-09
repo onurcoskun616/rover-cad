@@ -27,9 +27,12 @@ router.post("/", (req, res) => {
   runJob(
     jobId,
     async () => {
+      console.log("[simulate] starting FreeCAD export…");
       const result = await runSimulationExport(code);
+      console.log("[simulate] export finished, ok=%s parts=%d", result.ok, result.parts?.length ?? 0);
 
       if (!result.ok) {
+        console.error("[simulate] export error:", result.error);
         return { ok: false, body: { error: result.error } };
       }
 
