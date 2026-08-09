@@ -87,6 +87,19 @@ const coordZ = document.getElementById("coord-z");
 const coordF = document.getElementById("coord-f");
 const gcodePanel = document.getElementById("gcode-panel");
 const gcodeLinesEl = document.getElementById("gcode-lines");
+const tabSim = document.getElementById("tab-sim");
+const panelSim = document.getElementById("panel-sim");
+const simDemoBtn = document.getElementById("sim-demo-btn");
+const kinSimView = document.getElementById("kin-sim-view");
+const kinSimStatus = document.getElementById("kin-sim-status");
+const kinSimProgress = document.getElementById("kin-sim-progress");
+const kinSimPlay = document.getElementById("kin-sim-play");
+const kinSimSpeedBtns = {
+  1: document.getElementById("kin-sim-1x"),
+  2: document.getElementById("kin-sim-2x"),
+  5: document.getElementById("kin-sim-5x"),
+};
+const kinCollisionAlert = document.getElementById("kin-collision-alert");
 
 let viewer = null;
 let mode = "text"; // "text" | "image" | "step"
@@ -104,6 +117,7 @@ let camPlan = null;
 let lastDimData = null;
 let dimEditInProgress = false;
 let dimEditQueue = [];
+let kinSim = null;
 
 function setMode(next) {
   mode = next;
@@ -111,6 +125,7 @@ function setMode(next) {
     [tabText, panelText, "text"],
     [tabImage, panelImage, "image"],
     [tabStep, panelStep, "step"],
+    [tabSim, panelSim, "sim"],
   ];
   for (const [tab, panel, name] of tabs) {
     const active = name === next;
@@ -118,12 +133,18 @@ function setMode(next) {
     tab.setAttribute("aria-selected", String(active));
     panel.hidden = !active;
   }
-  generateBtn.textContent = next === "step" ? "Yükle ve Önizle" : "Oluştur";
+  if (next === "sim") {
+    generateBtn.hidden = true;
+  } else {
+    generateBtn.hidden = false;
+    generateBtn.textContent = next === "step" ? "Yükle ve Önizle" : "Oluştur";
+  }
 }
 
 tabText.addEventListener("click", () => setMode("text"));
 tabImage.addEventListener("click", () => setMode("image"));
 tabStep.addEventListener("click", () => setMode("step"));
+tabSim.addEventListener("click", () => setMode("sim"));
 
 imageInput.addEventListener("change", () => {
   const file = imageInput.files?.[0];
@@ -177,10 +198,23 @@ function resetResult() {
   camStatus.hidden = true;
   gcodeLink.hidden = true;
   resetCamAssistant();
+  resetKinSim();
   if (viewer) {
     import("./viewer.js").then(({ clearDimensions }) => clearDimensions(viewer)).catch(() => {});
   }
   lastStepPath = null;
+}
+
+function resetKinSim() {
+  if (kinSim) kinSim.pause();
+  kinSim = null;
+  kinSimView.hidden = true;
+  kinSimPlay.textContent = "Oynat";
+  kinSimProgress.value = "0";
+  kinSimStatus.textContent = "Durum: Hazir";
+  kinCollisionAlert.hidden = true;
+  Object.values(kinSimSpeedBtns).forEach((b) => b.classList.remove("active"));
+  if (kinSimSpeedBtns[1]) kinSimSpeedBtns[1].classList.add("active");
 }
 
 function resetCamAssistant() {
@@ -1370,6 +1404,112 @@ camQuoteForm.querySelectorAll('input[name="quote-mode"]').forEach((radio) => {
   radio.addEventListener("change", () => setQuoteMode(radio.value));
 });
 camQuoteSubmit.addEventListener("click", handleQuoteSubmit);
+
+// --- Kinematic simulation ---------------------------------------------------
+
+async function handleSimDemo() {
+  clearError();
+  resetKinSim();
+  setLoading(true, "Demo scripti yukleniyor…");
+  try {
+    const resp = await fetch(`${API_BASE}/files/crank_piston_sim.py`);
+    if (!resp.ok) throw new Error("Demo scripti indirilemedi.");
+    const code = await resp.text();
+
+    setLoading(true, "Simulasyon parcalari FreeCAD'de olusturuluyor…");
+    const result = await runAsyncJob(
+      `${API_BASE}/simulate`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
+        body: JSON.stringify({ code }),
+      },
+      (seconds) =>
+        setLoading(true, `Simulasyon parcalari olusturuluyor… (${seconds} sn)`),
+    );
+
+    if (result.error || !result.ok) {
+      showError(result.error ?? result.body?.error ?? "Simulasyon basarisiz.");
+      return;
+    }
+
+    const { partStlUrls, kinematicsUrl } = result.body;
+    if (!partStlUrls?.length || !kinematicsUrl) {
+      showError("Simulasyon verisi eksik.");
+      return;
+    }
+
+    setLoading(true, "Kinematik veri yukleniyor…");
+    const kinResp = await fetch(kinematicsUrl);
+    const kinData = await kinResp.json();
+
+    const { initViewer } = await import("./viewer.js");
+    if (!viewer) viewer = initViewer(viewerContainer);
+
+    const { loadKinematicSim } = await import("./kinematicPlayer.js");
+    kinSim = await loadKinematicSim(viewer, partStlUrls, kinData, {
+      onUpdate: ({ angle, playing, collided }) => {
+        kinSimProgress.value = String(Math.round(angle * 10) % 3600);
+        kinSimStatus.textContent = collided
+          ? "Durum: Carpma!"
+          : playing
+            ? `Durum: Calisiyor (${Math.round(angle % 360)}°)`
+            : `Durum: Durdu (${Math.round(angle % 360)}°)`;
+        if (!playing) kinSimPlay.textContent = "Oynat";
+      },
+      onCollision: (pairs) => {
+        kinCollisionAlert.hidden = false;
+        kinCollisionAlert.textContent = `Carpma algilandi: ${pairs.map((p) => p.join(" <-> ")).join(", ")}. Simulasyon durduruldu.`;
+        kinSimPlay.textContent = "Oynat";
+      },
+    });
+
+    kinSimView.hidden = false;
+    kinSimPlay.textContent = "Oynat";
+    kinCollisionAlert.hidden = true;
+    setKinSimSpeed(1);
+  } catch (err) {
+    showError(`Simulasyon basarisiz: ${err.message}`);
+  } finally {
+    setLoading(false);
+  }
+}
+
+function setKinSimSpeed(mult) {
+  if (kinSim) kinSim.setSpeed(mult);
+  Object.entries(kinSimSpeedBtns).forEach(([m, btn]) => {
+    btn.classList.toggle("active", Number(m) === mult);
+  });
+}
+
+simDemoBtn.addEventListener("click", handleSimDemo);
+
+kinSimPlay.addEventListener("click", () => {
+  if (!kinSim) return;
+  if (kinSim.isPlaying()) {
+    kinSim.pause();
+    kinSimPlay.textContent = "Oynat";
+  } else {
+    if (!kinCollisionAlert.hidden) {
+      kinSim.reset();
+      kinCollisionAlert.hidden = true;
+    }
+    kinSim.play();
+    kinSimPlay.textContent = "Duraklat";
+  }
+});
+
+kinSimProgress.addEventListener("input", () => {
+  if (!kinSim) return;
+  kinSim.pause();
+  kinSimPlay.textContent = "Oynat";
+  kinSim.seek(Number(kinSimProgress.value) / 10);
+});
+
+Object.entries(kinSimSpeedBtns).forEach(([m, btn]) => {
+  btn.addEventListener("click", () => setKinSimSpeed(Number(m)));
+});
+
 promptInput.addEventListener("keydown", (event) => {
   if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
     handleGenerate();

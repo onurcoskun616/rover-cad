@@ -74,7 +74,7 @@ function exportEpiloguePy(outputDir, stepPath, stlPath) {
   ].join("\n");
 }
 
-function freshDocPy() {
+export function freshDocPy() {
   return [
     "import FreeCAD",
     "if FreeCAD.ActiveDocument is not None:",

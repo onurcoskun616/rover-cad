@@ -13,6 +13,7 @@ import jobsRouter from "./routes/jobs.js";
 import camAssistantRouter from "./routes/camAssistant.js";
 import dimensionsRouter from "./routes/dimensions.js";
 import paramEditRouter from "./routes/paramEdit.js";
+import simulateRouter from "./routes/simulate.js";
 import { machinesRouter, toolsRouter } from "./routes/inventory.js";
 import { callFreecadTool, disconnectFreecad } from "./services/freecadMcpClient.js";
 
@@ -43,6 +44,8 @@ app.use("/extract-dimensions", dimensionsRouter);
 // Deterministic parameter edit: substitute a value in the ROVER_PARAMS block
 // and re-run in FreeCAD — no LLM involved.
 app.use("/param-edit", paramEditRouter);
+// Kinematic simulation: run a FreeCAD script that produces per-part STLs + kinematics.json.
+app.use("/simulate", simulateRouter);
 // Machine/tool inventory (profiles reused across CAM jobs).
 app.use("/machines", machinesRouter);
 app.use("/tools", toolsRouter);
@@ -50,6 +53,8 @@ app.use("/tools", toolsRouter);
 // preview them. Registered before the "/"-mounted CAM assistant router so these
 // public downloads are never intercepted.
 app.use("/files", express.static(config.outputDir));
+// Serve example simulation scripts so the frontend demo can fetch them.
+app.use("/files", express.static("examples"));
 // CAM assistant (step wizard -> plan -> confirm) for every part:
 // /cam-step, /cam-plan, /cam-confirm.
 // Mounted at "/" (its routes carry their own auth), so keep it last.

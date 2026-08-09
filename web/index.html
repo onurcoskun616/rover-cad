@@ -61,6 +61,15 @@
           >
             STEP/IGES/DXF ile
           </button>
+          <button
+            id="tab-sim"
+            class="tab"
+            type="button"
+            role="tab"
+            aria-selected="false"
+          >
+            Simulasyon
+          </button>
         </div>
 
         <div id="panel-text" class="tab-panel">
@@ -104,6 +113,16 @@
             </label>
             <input id="dxf-thickness" type="number" step="any" placeholder="Örn: 5 (boş = 2D kesim)" />
           </div>
+        </div>
+
+        <div id="panel-sim" class="tab-panel" hidden>
+          <p class="panel-hint">
+            Kinematik simulasyon: FreeCAD scripti ile mekanizma parcalarini
+            olusturun ve hareket simulasyonunu izleyin.
+          </p>
+          <button id="sim-demo-btn" type="button" class="secondary">
+            Demo: Krank-Piston Simulasyonu
+          </button>
         </div>
 
         <button id="generate-btn" type="button">Oluştur</button>
@@ -166,6 +185,52 @@
           <div id="gcode-panel" class="gcode-panel" hidden>
             <div class="gcode-header">G-Code</div>
             <div id="gcode-lines" class="gcode-lines"></div>
+          </div>
+        </div>
+
+        <div id="kin-sim-view" class="cam-preview-view" hidden>
+          <p class="cam-preview-note">
+            Kinematik simulasyon yuklendi. Mekanizmayi calistirmak icin
+            Oynat'a basin.
+          </p>
+          <div class="cam-sim-controls">
+            <p id="kin-sim-status" class="cam-sim-op">Durum: Hazir</p>
+            <input
+              id="kin-sim-progress"
+              class="cam-sim-progress"
+              type="range"
+              min="0"
+              max="3600"
+              value="0"
+            />
+            <div class="cam-sim-buttons">
+              <button id="kin-sim-play" type="button">Oynat</button>
+              <span class="cam-sim-speed-label">Hiz:</span>
+              <button
+                id="kin-sim-1x"
+                type="button"
+                class="secondary sim-speed active"
+              >
+                1x
+              </button>
+              <button
+                id="kin-sim-2x"
+                type="button"
+                class="secondary sim-speed"
+              >
+                2x
+              </button>
+              <button
+                id="kin-sim-5x"
+                type="button"
+                class="secondary sim-speed"
+              >
+                5x
+              </button>
+            </div>
+          </div>
+          <div id="kin-collision-alert" class="collision-alert" hidden>
+            Carpma algilandi! Simulasyon durduruldu.
           </div>
         </div>
 

@@ -564,6 +564,16 @@ button.secondary:hover:not(:disabled) {
   border-color: var(--accent);
 }
 
+.collision-alert {
+  padding: 0.75rem 1rem;
+  background: var(--error-bg);
+  border: 1px solid var(--error-border);
+  color: var(--error-text);
+  border-radius: calc(var(--radius) - 4px);
+  font-weight: 600;
+  margin-top: 0.5rem;
+}
+
 .cam-quote {
   display: flex;
   flex-direction: column;
