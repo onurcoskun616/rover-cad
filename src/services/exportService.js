@@ -354,10 +354,10 @@ export async function runImportDxfAndExport(uploadedPath, thickness = 0) {
 }
 
 // The model is asked to emit a `# ROVER_DIMENSIONS: {"Cap": "30 mm", ...}` JSON
-// comment describing the part's key dimensions. We can't draw real TechDraw
-// dimension lines on arbitrary generated geometry (they need stable edge
-// references we don't have), so instead we render this dict as a plain text
-// table in the corner of the drawing. Returns [] if no valid comment is present.
+// comment describing the part's key dimensions. The TechDraw PDF uses proper
+// dimension lines (DistanceX/DistanceY/Diameter) placed via projected vertex
+// enumeration, with a text-table fallback when vertex access fails.
+// Returns [] if no valid comment is present.
 export function parseRoverDimensions(code) {
   if (typeof code !== "string") return [];
   const match = code.match(/#\s*ROVER_DIMENSIONS:\s*(\{.*\})/);
@@ -414,7 +414,8 @@ function computeScale(bbox) {
 }
 
 function buildTechDrawCode(pdfPath, bbox, dimensions) {
-  const scale = computeScale(bbox);
+  // Scale down 15% to leave room for dimension lines and arrows outside views.
+  const scale = Number((computeScale(bbox) * 0.85).toFixed(3));
   const x = Math.max(bbox.x || 1, 1);
   const y = Math.max(bbox.y || 1, 1);
   const z = Math.max(bbox.z || 1, 1);
@@ -483,15 +484,104 @@ function buildTechDrawCode(pdfPath, bbox, dimensions) {
     "",
   ];
 
+  // First recompute to project geometry onto views before dimension creation.
+  lines.push(
+    "doc.recompute()",
+    "import time",
+    "time.sleep(1)",
+    "front.recompute()",
+    "top.recompute()",
+    "right.recompute()",
+    "doc.recompute()",
+    "",
+    "def get_view_vertices(view):",
+    "    verts = []",
+    "    for i in range(500):",
+    "        try:",
+    "            v = view.getVertexByIndex(i)",
+    "            verts.append((i, v.X, v.Y))",
+    "        except Exception:",
+    "            break",
+    "    return verts",
+    "",
+    "def get_circular_edges(view):",
+    "    circles = []",
+    "    for i in range(500):",
+    "        try:",
+    "            e = view.getEdgeByIndex(i)",
+    "            if hasattr(e, 'Curve') and hasattr(e.Curve, 'Radius'):",
+    "                circles.append((i, e.Curve.Radius))",
+    "        except Exception:",
+    "            break",
+    "    return circles",
+    "",
+    "dim_ok = False",
+    "try:",
+    "    fverts = get_view_vertices(front)",
+    "    if len(fverts) >= 2:",
+    "        by_x = sorted(fverts, key=lambda v: v[1])",
+    "        by_y = sorted(fverts, key=lambda v: v[2])",
+    "        x_span = by_x[-1][1] - by_x[0][1]",
+    "        y_span = by_y[-1][2] - by_y[0][2]",
+    "        if x_span > 0.1:",
+    '            d = doc.addObject("TechDraw::DrawViewDimension", "DimW")',
+    '            d.Type = "DistanceX"',
+    "            d.References2D = [(front, ('Vertex' + str(by_x[0][0]), 'Vertex' + str(by_x[-1][0])))]",
+    '            d.FormatSpec = "%.2f"',
+    "            page.addView(d)",
+    "            dim_ok = True",
+    "        if y_span > 0.1:",
+    '            d = doc.addObject("TechDraw::DrawViewDimension", "DimH")',
+    '            d.Type = "DistanceY"',
+    "            d.References2D = [(front, ('Vertex' + str(by_y[0][0]), 'Vertex' + str(by_y[-1][0])))]",
+    '            d.FormatSpec = "%.2f"',
+    "            page.addView(d)",
+    "            dim_ok = True",
+    "",
+    "    tverts = get_view_vertices(top)",
+    "    if len(tverts) >= 2:",
+    "        by_y = sorted(tverts, key=lambda v: v[2])",
+    "        y_span = by_y[-1][2] - by_y[0][2]",
+    "        if y_span > 0.1:",
+    '            d = doc.addObject("TechDraw::DrawViewDimension", "DimD")',
+    '            d.Type = "DistanceY"',
+    "            d.References2D = [(top, ('Vertex' + str(by_y[0][0]), 'Vertex' + str(by_y[-1][0])))]",
+    '            d.FormatSpec = "%.2f"',
+    "            page.addView(d)",
+    "            dim_ok = True",
+    "",
+    "    circles = get_circular_edges(front)",
+    "    seen = set()",
+    "    ci = 0",
+    "    for edge_idx, radius in circles:",
+    "        rk = round(radius, 1)",
+    "        if rk in seen or ci >= 3:",
+    "            continue",
+    "        seen.add(rk)",
+    '        d = doc.addObject("TechDraw::DrawViewDimension", "DimDia" + str(ci))',
+    '        d.Type = "Diameter"',
+    "        d.References2D = [(front, ('Edge' + str(edge_idx),))]",
+    '        d.FormatSpec = "%.2f"',
+    "        page.addView(d)",
+    "        dim_ok = True",
+    "        ci += 1",
+    "",
+    "except Exception as dim_err:",
+    '    print("DIM_WARN: " + str(dim_err))',
+    "",
+  );
+
+  // Fallback: text annotation if dimension lines could not be created.
   if (dimLines.length) {
     const pyList = "[" + dimLines.map((l) => pyStr(l)).join(", ") + "]";
     lines.push(
-      'ann = doc.addObject("TechDraw::DrawViewAnnotation", "DimTable")',
-      "page.addView(ann)",
-      `ann.Text = ${pyList}`,
-      "ann.TextSize = 3.0",
-      `ann.X = ${(PAGE_W - 45).toFixed(2)}`,
-      `ann.Y = ${(PAGE_H - 25).toFixed(2)}`,
+      "if not dim_ok:",
+      '    ann = doc.addObject("TechDraw::DrawViewAnnotation", "DimTable")',
+      "    page.addView(ann)",
+      `    ann.Text = ${pyList}`,
+      "    ann.TextSize = 3.0",
+      `    ann.X = ${(PAGE_W - 45).toFixed(2)}`,
+      `    ann.Y = ${(PAGE_H - 25).toFixed(2)}`,
       "",
     );
   }
