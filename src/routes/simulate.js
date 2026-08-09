@@ -5,6 +5,7 @@ import { Router } from "express";
 import cors from "cors";
 import { apiKeyAuth } from "./apiKeyAuth.js";
 import { runSimulationExport } from "../services/simulationExportService.js";
+import { promptToSimCode } from "../services/simulationGenerateService.js";
 import { createJob, runJob } from "../services/jobStore.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -53,6 +54,63 @@ router.post("/", (req, res) => {
         body: {
           partsInline,
           kinematicsData,
+        },
+      };
+    },
+    { exclusive: true },
+  );
+
+  res.status(202).json({ jobId });
+});
+
+router.post("/generate", (req, res) => {
+  const { prompt, previousCode } = req.body ?? {};
+
+  if (typeof prompt !== "string" || !prompt.trim()) {
+    return res.status(400).json({ error: "prompt is required" });
+  }
+
+  const jobId = createJob();
+
+  runJob(
+    jobId,
+    async () => {
+      console.log("[simulate/generate] generating sim code from prompt…");
+      let code;
+      try {
+        code = await promptToSimCode(prompt.trim(), previousCode || null);
+      } catch (err) {
+        console.error("[simulate/generate] code generation error:", err.message);
+        return { ok: false, body: { error: `Kod uretimi basarisiz: ${err.message}` } };
+      }
+
+      console.log("[simulate/generate] running generated code in FreeCAD…");
+      const result = await runSimulationExport(code);
+      console.log("[simulate/generate] export finished, ok=%s parts=%d", result.ok, result.parts?.length ?? 0);
+
+      if (!result.ok) {
+        console.error("[simulate/generate] export error:", result.error);
+        return { ok: false, body: { error: result.error, generatedCode: code } };
+      }
+
+      const partsInline = result.parts.map((p) => ({
+        name: p.name,
+        stlBase64: fs.readFileSync(p.stlPath).toString("base64"),
+      }));
+
+      let kinematicsData = null;
+      try {
+        kinematicsData = JSON.parse(fs.readFileSync(result.kinematicsPath, "utf-8"));
+      } catch (e) {
+        console.error("[simulate/generate] kinematics read error:", e.message);
+      }
+
+      return {
+        ok: true,
+        body: {
+          partsInline,
+          kinematicsData,
+          generatedCode: code,
         },
       };
     },

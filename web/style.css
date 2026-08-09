@@ -574,6 +574,26 @@ button.secondary:hover:not(:disabled) {
   margin-top: 0.5rem;
 }
 
+.sim-prompt-section {
+  margin-top: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+#sim-prompt-input {
+  width: 100%;
+  min-height: 70px;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) - 4px);
+  padding: 0.75rem;
+  font-size: 0.95rem;
+  resize: vertical;
+}
+#sim-generate-btn {
+  align-self: flex-start;
+}
 .sim-custom-details {
   margin-top: 1rem;
 }

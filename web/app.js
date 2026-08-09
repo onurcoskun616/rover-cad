@@ -90,6 +90,8 @@ const gcodeLinesEl = document.getElementById("gcode-lines");
 const tabSim = document.getElementById("tab-sim");
 const panelSim = document.getElementById("panel-sim");
 const simDemoBtn = document.getElementById("sim-demo-btn");
+const simPromptInput = document.getElementById("sim-prompt-input");
+const simGenerateBtn = document.getElementById("sim-generate-btn");
 const simCodeInput = document.getElementById("sim-code-input");
 const simRunBtn = document.getElementById("sim-run-btn");
 const kinSimView = document.getElementById("kin-sim-view");
@@ -120,6 +122,8 @@ let lastDimData = null;
 let dimEditInProgress = false;
 let dimEditQueue = [];
 let kinSim = null;
+let simCurrentCode = null;
+let simCurrentKinematics = null;
 
 function setMode(next) {
   mode = next;
@@ -207,7 +211,7 @@ function resetResult() {
   lastStepPath = null;
 }
 
-function resetKinSim() {
+function resetKinSim(keepContext) {
   if (kinSim) kinSim.pause();
   kinSim = null;
   kinSimView.hidden = true;
@@ -217,6 +221,10 @@ function resetKinSim() {
   kinCollisionAlert.hidden = true;
   Object.values(kinSimSpeedBtns).forEach((b) => b.classList.remove("active"));
   if (kinSimSpeedBtns[1]) kinSimSpeedBtns[1].classList.add("active");
+  if (!keepContext) {
+    simCurrentCode = null;
+    simCurrentKinematics = null;
+  }
 }
 
 function resetCamAssistant() {
@@ -1479,11 +1487,14 @@ async function handleSimDemo() {
       },
     });
 
+    simCurrentKinematics = kinData;
     kinSimView.hidden = false;
     kinSimPlay.textContent = "Oynat";
     kinCollisionAlert.hidden = true;
     setKinSimSpeed(1);
     simDemoBtn.textContent = "Demo: Krank-Piston Simulasyonu";
+    simGenerateBtn.textContent = "Parcayi Ekle / Degistir";
+    simPromptInput.placeholder = "Ornek: Pistona bir yay ekle veya krank hizini artir";
     window.dispatchEvent(new Event("resize"));
   } catch (err) {
     showError(`Simulasyon basarisiz: ${err.message}`);
@@ -1502,6 +1513,105 @@ function setKinSimSpeed(mult) {
 }
 
 simDemoBtn.addEventListener("click", handleSimDemo);
+
+async function handleSimGenerate() {
+  const prompt = simPromptInput.value.trim();
+  if (!prompt) {
+    showError("Lutfen bir mekanizma tarifi yazin.");
+    return;
+  }
+  clearError();
+  resetKinSim(true);
+  simGenerateBtn.disabled = true;
+  simGenerateBtn.textContent = "Kod uretiliyor…";
+  setLoading(true, "Yapay zeka mekanizma kodu uretiyor…");
+  try {
+    const result = await runAsyncJob(
+      `${API_BASE}/simulate/generate`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
+        body: JSON.stringify({
+          prompt,
+          previousCode: simCurrentCode || undefined,
+        }),
+      },
+      (seconds) => {
+        const phase = seconds < 20 ? "Kod uretiliyor" : seconds < 60 ? "FreeCAD calistiriliyor" : "Islem devam ediyor";
+        simGenerateBtn.textContent = `${phase}… (${seconds} sn)`;
+        setLoading(true, `${phase}… (${seconds} sn)`);
+      },
+    );
+
+    if (result.error || !result.ok) {
+      showError(result.error ?? result.body?.error ?? "Simulasyon basarisiz.");
+      if (result.body?.generatedCode) {
+        simCodeInput.value = result.body.generatedCode;
+      }
+      simGenerateBtn.textContent = "Mekanizma Olustur";
+      return;
+    }
+
+    const { partsInline, kinematicsData, generatedCode } = result.body;
+    if (!partsInline?.length) {
+      showError("Simulasyon verisi eksik (STL yok).");
+      simGenerateBtn.textContent = "Mekanizma Olustur";
+      return;
+    }
+    if (!kinematicsData) {
+      showError("Kinematik veri alinamadi.");
+      simGenerateBtn.textContent = "Mekanizma Olustur";
+      return;
+    }
+
+    simCurrentCode = generatedCode;
+    simCurrentKinematics = kinematicsData;
+    if (generatedCode) simCodeInput.value = generatedCode;
+
+    simGenerateBtn.textContent = "3D sahne hazirlaniyor…";
+    resultSection.hidden = false;
+    const { initViewer } = await import("./viewer.js");
+    if (!viewer) viewer = initViewer(viewerContainer);
+
+    simGenerateBtn.textContent = "STL parcalar yukleniyor…";
+    const { loadKinematicSim } = await import("./kinematicPlayer.js");
+    kinSim = await loadKinematicSim(viewer, partsInline, kinematicsData, {
+      onUpdate: ({ angle, playing, collided }) => {
+        kinSimProgress.value = String(Math.round(angle * 10) % 3600);
+        kinSimStatus.textContent = collided
+          ? "Durum: Carpma!"
+          : playing
+            ? `Durum: Calisiyor (${Math.round(angle % 360)}°)`
+            : `Durum: Durdu (${Math.round(angle % 360)}°)`;
+        if (!playing) kinSimPlay.textContent = "Oynat";
+      },
+      onCollision: (pairs) => {
+        kinCollisionAlert.hidden = false;
+        kinCollisionAlert.textContent = `Carpma algilandi: ${pairs.map((p) => p.join(" <-> ")).join(", ")}. Simulasyon durduruldu.`;
+        kinSimPlay.textContent = "Oynat";
+      },
+    });
+
+    kinSimView.hidden = false;
+    kinSimPlay.textContent = "Oynat";
+    kinCollisionAlert.hidden = true;
+    setKinSimSpeed(1);
+    simGenerateBtn.textContent = simCurrentCode ? "Parcayi Ekle / Degistir" : "Mekanizma Olustur";
+    simPromptInput.value = "";
+    simPromptInput.placeholder = simCurrentCode
+      ? "Ornek: Bu diske X ekseninde hareket eden bir biyel kolu bagla"
+      : simPromptInput.placeholder;
+    window.dispatchEvent(new Event("resize"));
+  } catch (err) {
+    showError(`Simulasyon basarisiz: ${err.message}`);
+    simGenerateBtn.textContent = "Mekanizma Olustur";
+  } finally {
+    setLoading(false);
+    simGenerateBtn.disabled = false;
+  }
+}
+
+simGenerateBtn.addEventListener("click", handleSimGenerate);
 
 async function handleSimCustom() {
   const code = simCodeInput.value.trim();
