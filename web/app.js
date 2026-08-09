@@ -96,6 +96,9 @@ const simCodeInput = document.getElementById("sim-code-input");
 const simRunBtn = document.getElementById("sim-run-btn");
 const simUndoBtn = document.getElementById("sim-undo-btn");
 const simStepIndicator = document.getElementById("sim-step-indicator");
+const simDownloads = document.getElementById("sim-downloads");
+const simDownloadParts = document.getElementById("sim-download-parts");
+const simDownloadAssembly = document.getElementById("sim-download-assembly");
 const kinSimView = document.getElementById("kin-sim-view");
 const kinSimStatus = document.getElementById("kin-sim-status");
 const kinSimProgress = document.getElementById("kin-sim-progress");
@@ -126,6 +129,9 @@ let dimEditQueue = [];
 let kinSim = null;
 let simCurrentCode = null;
 let simCurrentKinematics = null;
+let simCurrentPartsInline = null;
+let simCurrentPartSteps = null;
+let simCurrentAssemblyStep = null;
 let simSessionId = null;
 let simStepIndex = -1;
 let simTotalSteps = 0;
@@ -226,9 +232,15 @@ function resetKinSim(keepContext) {
   kinCollisionAlert.hidden = true;
   Object.values(kinSimSpeedBtns).forEach((b) => b.classList.remove("active"));
   if (kinSimSpeedBtns[1]) kinSimSpeedBtns[1].classList.add("active");
+  simDownloads.hidden = true;
+  simDownloadParts.innerHTML = "";
+  simDownloadAssembly.hidden = true;
   if (!keepContext) {
     simCurrentCode = null;
     simCurrentKinematics = null;
+    simCurrentPartsInline = null;
+    simCurrentPartSteps = null;
+    simCurrentAssemblyStep = null;
     simSessionId = null;
     simStepIndex = -1;
     simTotalSteps = 0;
@@ -1426,6 +1438,82 @@ camQuoteSubmit.addEventListener("click", handleQuoteSubmit);
 
 // --- Kinematic simulation ---------------------------------------------------
 
+function downloadBase64(filename, base64Data, mime) {
+  const bin = atob(base64Data);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  const blob = new Blob([bytes], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function showSimDownloads(partsInline, partSteps, assemblyStepBase64) {
+  simCurrentPartsInline = partsInline;
+  simCurrentPartSteps = partSteps || [];
+  simCurrentAssemblyStep = assemblyStepBase64 || null;
+
+  simDownloadParts.innerHTML = "";
+  if (!partsInline?.length) {
+    simDownloads.hidden = true;
+    return;
+  }
+
+  const stepMap = {};
+  for (const ps of simCurrentPartSteps) {
+    stepMap[ps.name] = ps.stepBase64;
+  }
+
+  for (const part of partsInline) {
+    const group = document.createElement("div");
+    group.className = "sim-part-group";
+
+    const nameEl = document.createElement("span");
+    nameEl.className = "sim-part-name";
+    nameEl.textContent = part.name;
+    group.appendChild(nameEl);
+
+    const btns = document.createElement("div");
+    btns.className = "sim-part-btns";
+
+    const stlBtn = document.createElement("button");
+    stlBtn.type = "button";
+    stlBtn.className = "secondary";
+    stlBtn.textContent = "STL";
+    stlBtn.addEventListener("click", () => {
+      downloadBase64(`${part.name}.stl`, part.stlBase64, "model/stl");
+    });
+    btns.appendChild(stlBtn);
+
+    if (stepMap[part.name]) {
+      const stepBtn = document.createElement("button");
+      stepBtn.type = "button";
+      stepBtn.className = "secondary";
+      stepBtn.textContent = "STEP";
+      stepBtn.addEventListener("click", () => {
+        downloadBase64(`${part.name}.step`, stepMap[part.name], "model/step");
+      });
+      btns.appendChild(stepBtn);
+    }
+
+    group.appendChild(btns);
+    simDownloadParts.appendChild(group);
+  }
+
+  if (simCurrentAssemblyStep) {
+    simDownloadAssembly.hidden = false;
+  } else {
+    simDownloadAssembly.hidden = true;
+  }
+
+  simDownloads.hidden = false;
+}
+
 function updateSimStepUI() {
   if (simStepIndex >= 0 && simTotalSteps > 0) {
     simStepIndicator.textContent = `Adim ${simStepIndex + 1} / ${simTotalSteps}`;
@@ -1492,6 +1580,7 @@ async function handleSimUndo() {
     kinSimPlay.textContent = "Oynat";
     kinCollisionAlert.hidden = true;
     setKinSimSpeed(1);
+    showSimDownloads(partsInline, data.partSteps, data.assemblyStepBase64);
     updateSimStepUI();
     simGenerateBtn.textContent = simCurrentCode ? "Parcayi Ekle / Degistir" : "Mekanizma Olustur";
     simPromptInput.placeholder = simCurrentCode
@@ -1587,6 +1676,7 @@ async function handleSimDemo() {
     kinSimPlay.textContent = "Oynat";
     kinCollisionAlert.hidden = true;
     setKinSimSpeed(1);
+    showSimDownloads(parts, result.body.partSteps, result.body.assemblyStepBase64);
     updateSimStepUI();
     simDemoBtn.textContent = "Demo: Krank-Piston Simulasyonu";
     simGenerateBtn.textContent = "Parcayi Ekle / Degistir";
@@ -1699,6 +1789,7 @@ async function handleSimGenerate() {
     kinSimPlay.textContent = "Oynat";
     kinCollisionAlert.hidden = true;
     setKinSimSpeed(1);
+    showSimDownloads(partsInline, result.body.partSteps, result.body.assemblyStepBase64);
     updateSimStepUI();
     simGenerateBtn.textContent = simCurrentCode ? "Parcayi Ekle / Degistir" : "Mekanizma Olustur";
     simPromptInput.value = "";
@@ -1717,6 +1808,11 @@ async function handleSimGenerate() {
 
 simGenerateBtn.addEventListener("click", handleSimGenerate);
 simUndoBtn.addEventListener("click", handleSimUndo);
+simDownloadAssembly.addEventListener("click", () => {
+  if (simCurrentAssemblyStep) {
+    downloadBase64("assembly.step", simCurrentAssemblyStep, "model/step");
+  }
+});
 
 async function handleSimCustom() {
   const code = simCodeInput.value.trim();
@@ -1797,6 +1893,7 @@ async function handleSimCustom() {
     kinSimPlay.textContent = "Oynat";
     kinCollisionAlert.hidden = true;
     setKinSimSpeed(1);
+    showSimDownloads(parts, result.body.partSteps, result.body.assemblyStepBase64);
     simRunBtn.textContent = "Simulasyonu Calistir";
     window.dispatchEvent(new Event("resize"));
   } catch (err) {

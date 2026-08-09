@@ -574,6 +574,50 @@ button.secondary:hover:not(:disabled) {
   margin-top: 0.5rem;
 }
 
+.sim-downloads {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
+  margin-top: 0.5rem;
+}
+.sim-downloads-title {
+  margin: 0;
+  font-size: 0.95rem;
+}
+.sim-download-parts {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.sim-download-parts .sim-part-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) - 4px);
+  padding: 0.4rem 0.6rem;
+}
+.sim-part-group .sim-part-name {
+  font-weight: 600;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+.sim-part-group .sim-part-btns {
+  display: flex;
+  gap: 0.4rem;
+}
+.sim-part-group button {
+  width: auto;
+  padding: 0.25rem 0.6rem;
+  font-size: 0.78rem;
+}
+#sim-download-assembly {
+  align-self: flex-start;
+}
+
 .sim-prompt-section {
   margin-top: 1rem;
   display: flex;

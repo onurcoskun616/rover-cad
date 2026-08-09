@@ -11,11 +11,42 @@ import { pushStep, undoStep } from "../services/simHistoryStore.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-
 const router = Router();
 
 router.use(cors({ origin: true }));
 router.use(apiKeyAuth);
+
+function readBase64(filePath) {
+  try {
+    return fs.readFileSync(filePath).toString("base64");
+  } catch {
+    return null;
+  }
+}
+
+function buildSimResult(result, code) {
+  const partsInline = result.parts.map((p) => ({
+    name: p.name,
+    stlBase64: readBase64(p.stlPath),
+  }));
+
+  const partSteps = result.partSteps
+    .map((p) => ({ name: p.name, stepBase64: readBase64(p.stepPath) }))
+    .filter((p) => p.stepBase64);
+
+  const assemblyStepBase64 = result.assemblyStepPath
+    ? readBase64(result.assemblyStepPath)
+    : null;
+
+  let kinematicsData = null;
+  try {
+    kinematicsData = JSON.parse(fs.readFileSync(result.kinematicsPath, "utf-8"));
+  } catch (e) {
+    console.error("[simulate] kinematics read error:", e.message);
+  }
+
+  return { partsInline, partSteps, assemblyStepBase64, kinematicsData, generatedCode: code };
+}
 
 router.post("/", (req, res) => {
   const { code } = req.body ?? {};
@@ -38,25 +69,8 @@ router.post("/", (req, res) => {
         return { ok: false, body: { error: result.error } };
       }
 
-      const partsInline = result.parts.map((p) => ({
-        name: p.name,
-        stlBase64: fs.readFileSync(p.stlPath).toString("base64"),
-      }));
-
-      let kinematicsData = null;
-      try {
-        kinematicsData = JSON.parse(fs.readFileSync(result.kinematicsPath, "utf-8"));
-      } catch (e) {
-        console.error("[simulate] kinematics read error:", e.message);
-      }
-
-      return {
-        ok: true,
-        body: {
-          partsInline,
-          kinematicsData,
-        },
-      };
+      const simResult = buildSimResult(result, null);
+      return { ok: true, body: simResult };
     },
     { exclusive: true },
   );
@@ -94,36 +108,25 @@ router.post("/generate", (req, res) => {
         return { ok: false, body: { error: result.error, generatedCode: code } };
       }
 
-      const partsInline = result.parts.map((p) => ({
-        name: p.name,
-        stlBase64: fs.readFileSync(p.stlPath).toString("base64"),
-      }));
-
-      let kinematicsData = null;
-      try {
-        kinematicsData = JSON.parse(fs.readFileSync(result.kinematicsPath, "utf-8"));
-      } catch (e) {
-        console.error("[simulate/generate] kinematics read error:", e.message);
-      }
+      const simResult = buildSimResult(result, code);
 
       let stepIndex = null;
       let totalSteps = null;
       if (sessionId) {
-        const info = pushStep(sessionId, { code, kinematicsData, partsInline });
+        const info = pushStep(sessionId, {
+          code,
+          kinematicsData: simResult.kinematicsData,
+          partsInline: simResult.partsInline,
+          partSteps: simResult.partSteps,
+          assemblyStepBase64: simResult.assemblyStepBase64,
+        });
         stepIndex = info.stepIndex;
         totalSteps = info.totalSteps;
       }
 
       return {
         ok: true,
-        body: {
-          partsInline,
-          kinematicsData,
-          generatedCode: code,
-          sessionId: sessionId || null,
-          stepIndex,
-          totalSteps,
-        },
+        body: { ...simResult, sessionId: sessionId || null, stepIndex, totalSteps },
       };
     },
     { exclusive: true },
@@ -156,36 +159,25 @@ router.post("/demo", (req, res) => {
         return { ok: false, body: { error: result.error } };
       }
 
-      const partsInline = result.parts.map((p) => ({
-        name: p.name,
-        stlBase64: fs.readFileSync(p.stlPath).toString("base64"),
-      }));
-
-      let kinematicsData = null;
-      try {
-        kinematicsData = JSON.parse(fs.readFileSync(result.kinematicsPath, "utf-8"));
-      } catch (e) {
-        console.error("[simulate/demo] kinematics read error:", e.message);
-      }
+      const simResult = buildSimResult(result, code);
 
       let stepIndex = null;
       let totalSteps = null;
       if (sessionId) {
-        const info = pushStep(sessionId, { code, kinematicsData, partsInline });
+        const info = pushStep(sessionId, {
+          code,
+          kinematicsData: simResult.kinematicsData,
+          partsInline: simResult.partsInline,
+          partSteps: simResult.partSteps,
+          assemblyStepBase64: simResult.assemblyStepBase64,
+        });
         stepIndex = info.stepIndex;
         totalSteps = info.totalSteps;
       }
 
       return {
         ok: true,
-        body: {
-          partsInline,
-          kinematicsData,
-          generatedCode: code,
-          sessionId: sessionId || null,
-          stepIndex,
-          totalSteps,
-        },
+        body: { ...simResult, sessionId: sessionId || null, stepIndex, totalSteps },
       };
     },
     { exclusive: true },
@@ -209,6 +201,8 @@ router.post("/undo", (req, res) => {
   return res.json({
     ok: true,
     partsInline: step.partsInline,
+    partSteps: step.partSteps || [],
+    assemblyStepBase64: step.assemblyStepBase64 || null,
     kinematicsData: step.kinematicsData,
     generatedCode: step.code,
     stepIndex: step.stepIndex,
