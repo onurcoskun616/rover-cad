@@ -110,6 +110,19 @@ Now use these classified faces for each operation:
    CORRECT (each distinct hole face listed once):
        drill.Base = [(base, ['Face5', 'Face8', 'Face11', 'Face14'])]
 
+=== TYPE SAFETY (FreeCAD is strict about types!) ===
+- SpindleSpeed must be float: tc.SpindleSpeed = 4244.0
+- Tool.Diameter must be float: tc.Tool.Diameter = 6.0
+- Feeds MUST be unit-tagged strings: tc.HorizFeed = '600 mm/min' (bare float = mm/SECOND, WRONG!)
+- StepDown must be float: op.StepDown = 1.0
+- Array/list indexing must use int: job.Tools.Group[0] NOT job.Tools.Group[0.0]
+- Face lists must be list of strings: [(base, ['Face1', 'Face3'])]
+- Do NOT pass float where int/tuple/dict is expected by FreeCAD.
+- For StartDepth/FinalDepth use float: op.StartDepth = float(bb.ZMax), op.FinalDepth = float(bb.ZMin)
+- PathJob.Create takes (str, list, None): PathJob.Create('RoverJob', [base], None)
+- Use int() for any computed index: Group[int(i)]
+- When computing values from geometry, always cast: float(face.BoundBox.ZMax), int(count)
+
 === KEY RULES ===
 - Separate ROUGHING (stock-to-leave > 0) and FINISHING (stock-to-leave = 0) operations.
 - Set Direction/Side for climb/conventional per [CAM_PARAMETRELERI].

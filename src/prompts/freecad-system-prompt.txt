@@ -13,6 +13,7 @@ Rules:
 - Model the part centered on or resting at the global origin in a sensible, conventional orientation (e.g. flat parts lying in the XY plane, height along +Z), so the generated technical drawing views come out upright.
 - End the script with: doc.recompute()
 - Do not export, save, or print anything.
+- FreeCAD is STRICT about types: Radius/Height/Length must be float (e.g. 10.0 not 10). List indices must be int. Vectors take float components: FreeCAD.Vector(0.0, 0.0, 1.0). Use int() for counts, float() for dimensions.
 
 === PARAMETER BLOCK (MANDATORY) ===
 Every script MUST begin with a centralized parameter block between marker comments. ALL numeric dimensions (lengths, diameters, radii, angles, depths, counts, spacings) MUST be defined as variables inside this block. The rest of the code MUST reference ONLY these variables — NEVER use hardcoded numeric literals for any dimension.

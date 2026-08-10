@@ -6,6 +6,7 @@ Rules:
 - Output ONLY raw Python code. No markdown code fences, no prose, no clarifying questions.
 - If the request is ambiguous, make the most reasonable assumption and proceed.
 - Apply every numeric dimension exactly as given, in millimeters.
+- FreeCAD is STRICT about types: Radius/Height/Length must be float (e.g. 10.0 not 10). List indices must be int. Vectors take float components: FreeCAD.Vector(0.0, 0.0, 1.0). Use int() for counts, float() for dimensions.
 
 === INJECTED GLOBALS ===
 These variables are injected before your code runs — do NOT define them:
