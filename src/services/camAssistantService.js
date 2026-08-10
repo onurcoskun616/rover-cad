@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { runLlm, stripCodeFence } from "./claudeCli.js";
 import { callFreecadTool, extractResultText } from "./freecadMcpClient.js";
 import { config } from "../config.js";
+import { typeSafetyPreamblePy } from "./exportService.js";
 import { resolveStepPath, describeStepGeometry } from "./camService.js";
 import { camParamsBlock } from "./camWizardService.js";
 import {
@@ -413,7 +414,7 @@ async function generateAndRunPathCode({ abs, geometry, answers, plan, threadGuid
     let text = "";
     try {
       const result = await callFreecadTool(config.freecadMcp.toolName, {
-        [config.freecadMcp.toolParam]: code + "\n" + epiloguePy,
+        [config.freecadMcp.toolParam]: typeSafetyPreamblePy() + "\n" + code + "\n" + epiloguePy,
       });
       text = extractResultText(result);
       if (result?.isError || text.startsWith("Failed to execute code")) {
@@ -538,7 +539,7 @@ export async function generateCamGcodeFromPlan(stepPath, answers, plan, context 
   if (stored) {
     // Reuse the approved toolpaths verbatim: run the stored code + post epilogue.
     const result = await callFreecadTool(config.freecadMcp.toolName, {
-      [config.freecadMcp.toolParam]: stored + "\n" + epiloguePy,
+      [config.freecadMcp.toolParam]: typeSafetyPreamblePy() + "\n" + stored + "\n" + epiloguePy,
     });
     const text = extractResultText(result);
     if ((result?.isError || !text.includes("GCODE_PATH=")) && !fs.existsSync(gcodePath)) {

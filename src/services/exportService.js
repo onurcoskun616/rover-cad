@@ -74,8 +74,38 @@ function exportEpiloguePy(outputDir, stepPath, stlPath) {
   ].join("\n");
 }
 
+/**
+ * Python preamble that patches common type-safety issues in LLM-generated
+ * FreeCAD code. GPT-4o in particular passes float values where FreeCAD
+ * expects int (range args, list indices, tessellate segments, ToolNumber).
+ * Injected automatically before all generated code.
+ */
+export function typeSafetyPreamblePy() {
+  return [
+    "# --- type safety preamble (auto-injected) ---",
+    "import builtins as _BI",
+    "_BI_range = _BI.range",
+    "def _safe_range(*_a):",
+    "    return _BI_range(*[int(_x) for _x in _a])",
+    "_BI.range = _safe_range",
+    "",
+    "# Patch Shape.tessellate to cast 2nd arg (segment count) to int",
+    "import Part as _PartPatch",
+    "if hasattr(_PartPatch.Shape, 'tessellate'):",
+    "    _orig_tess = _PartPatch.Shape.tessellate",
+    "    def _safe_tess(self, *_a):",
+    "        _a = list(_a)",
+    "        if len(_a) >= 2:",
+    "            _a[1] = int(_a[1])",
+    "        return _orig_tess(self, *_a)",
+    "    _PartPatch.Shape.tessellate = _safe_tess",
+    "",
+  ].join("\n");
+}
+
 export function freshDocPy() {
   return [
+    typeSafetyPreamblePy(),
     "import FreeCAD",
     "if FreeCAD.ActiveDocument is not None:",
     "    try:",
