@@ -79,8 +79,8 @@ const server = app.listen(config.port, () => {
   callFreecadTool(config.freecadMcp.toolName, {
     [config.freecadMcp.toolParam]: "print('warm')",
   })
-    .then(() => console.log("FreeCAD pre-warmed"))
-    .catch((err) => console.warn("FreeCAD pre-warm skipped:", err.message));
+    .then(() => console.log("TopkapiAl CAD engine pre-warmed"))
+    .catch((err) => console.warn("TopkapiAl CAD engine pre-warm skipped:", err.message));
 });
 
 async function shutdown() {
