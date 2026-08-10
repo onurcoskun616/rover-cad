@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { config } from "../config.js";
-import { freshDocPy } from "./exportService.js";
+import { freshDocPy, sanitizeFreeCADCode } from "./exportService.js";
 import {
   callFreecadTool,
   extractResultText,
@@ -44,7 +44,7 @@ export async function runSimulationExport(code) {
     `_rover_sim_out = ${JSON.stringify(outDir)}`,
     `_rover_sim_ts = "${ts}"`,
     "",
-    code,
+    sanitizeFreeCADCode(code),
     STEP_EXPORT_SUFFIX,
   ].join("\n");
 

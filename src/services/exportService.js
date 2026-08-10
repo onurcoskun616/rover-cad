@@ -75,28 +75,42 @@ function exportEpiloguePy(outputDir, stepPath, stlPath) {
 }
 
 /**
- * Python preamble that patches common type-safety issues in LLM-generated
- * FreeCAD code. GPT-4o in particular passes float values where FreeCAD
- * expects int (range args, list indices, tessellate segments, ToolNumber).
- * Injected automatically before all generated code.
+ * Fix common type errors in LLM-generated FreeCAD Python before execution.
+ * GPT-4o passes float values where FreeCAD expects int (range args, list
+ * indices, tessellate segments). Operates on the code string — no runtime
+ * monkey-patching needed.
  */
-export function typeSafetyPreamblePy() {
-  return [
-    "# --- type safety preamble (auto-injected, idempotent) ---",
-    "import builtins as _BI",
-    "if not hasattr(_BI, '_ROVER_PATCHED'):",
-    "    _BI._ROVER_PATCHED = True",
-    "    _BI._orig_range = _BI.range",
-    "    def _safe_range(*_a):",
-    "        return _BI._orig_range(*[int(_x) for _x in _a])",
-    "    _BI.range = _safe_range",
-    "",
-  ].join("\n");
+export function sanitizeFreeCADCode(code) {
+  let result = code;
+
+  // Restore builtins.range if a prior preamble corrupted it
+  result = "import builtins as _BI\nif hasattr(_BI, '_ROVER_orig_range'):\n    _BI.range = _BI._ROVER_orig_range\n    del _BI._ROVER_orig_range\nif hasattr(_BI, '_ROVER_PATCHED'):\n    del _BI._ROVER_PATCHED\n\n" + result;
+
+  // range() with float args: range(10.0) → range(10), range(n) → range(int(n))
+  result = result.replace(
+    /\brange\s*\(([^)]+)\)/g,
+    (_match, inner) => {
+      const args = inner.split(",").map((a) => {
+        const t = a.trim();
+        if (!t) return a;
+        if (/^\d+$/.test(t)) return a;
+        if (/^int\s*\(/.test(t)) return a;
+        const fm = t.match(/^(\d+)\.0*$/);
+        if (fm) return a.replace(t, fm[1]);
+        return a.replace(t, `int(${t})`);
+      }).join(",");
+      return `range(${args})`;
+    },
+  );
+
+  // list/group indexing with float literal: Group[0.0] → Group[0]
+  result = result.replace(/\[(\d+)\.0*\]/g, (_m, n) => `[${n}]`);
+
+  return result;
 }
 
 export function freshDocPy() {
   return [
-    typeSafetyPreamblePy(),
     "import FreeCAD",
     "if FreeCAD.ActiveDocument is not None:",
     "    try:",
@@ -115,7 +129,7 @@ function buildRunExportCode(outputDir, baseName, generatedCode) {
     freshDocPy(),
     "",
     "# --- generated model code ---",
-    generatedCode,
+    sanitizeFreeCADCode(generatedCode),
     "",
     "# --- export + measure epilogue (single round-trip) ---",
     exportEpiloguePy(outputDir, stepPath, stlPath),
