@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { runClaudeCli, stripCodeFence } from "./claudeCli.js";
+import { runLlm, stripCodeFence } from "./claudeCli.js";
 import { callFreecadTool, extractResultText } from "./freecadMcpClient.js";
 import { config } from "../config.js";
 import { resolveStepPath, describeStepGeometry } from "./camService.js";
@@ -77,9 +77,8 @@ async function runClaudeJson(input, systemPromptFile, shape) {
         '\n\n[SON UYARI]: Onceki cevabin gecerli degildi. Aciklama, yorum, code fence YAZMA. Ciktinin ilk karakteri { olmali. SADECE ham JSON dondur.';
     }
     try {
-      const raw = await runClaudeCli(attemptInput, {
+      const raw = await runLlm(attemptInput, {
         systemPromptFile,
-        allowRead: false,
       });
       lastRaw = raw;
       const parsed = parseJsonLoose(raw);
@@ -393,7 +392,7 @@ async function generateAndRunPathCode({ abs, geometry, answers, plan, threadGuid
 
     let code;
     try {
-      const raw = await runClaudeCli(input, { systemPromptFile: CODE_PROMPT, allowRead: false });
+      const raw = await runLlm(input, { systemPromptFile: CODE_PROMPT });
       code = stripCodeFence(raw);
       if (!code) throw new Error("Bos kod dondu");
     } catch (err) {

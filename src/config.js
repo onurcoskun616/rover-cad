@@ -12,6 +12,8 @@ export const config = {
   dataDir: path.resolve(process.env.DATA_DIR ?? "data"),
   corsOrigin: process.env.CORS_ORIGIN ?? "*",
   apiKey: process.env.API_KEY ?? "",
+  // "openai" | "claude" — which LLM backend to use for code generation.
+  llmProvider: (process.env.LLM_PROVIDER ?? "claude").toLowerCase(),
   freecadMcp: {
     command: process.env.FREECAD_MCP_COMMAND ?? "uvx",
     args: freecadArgs,
@@ -23,5 +25,11 @@ export const config = {
     command: process.env.CLAUDE_CLI_COMMAND ?? "claude",
     model: process.env.CLAUDE_CLI_MODEL ?? "",
     timeoutMs: Number(process.env.CLAUDE_CLI_TIMEOUT_MS ?? 180000),
+  },
+  openai: {
+    apiKey: process.env.OPENAI_API_KEY ?? "",
+    model: process.env.OPENAI_MODEL ?? "gpt-4o",
+    baseUrl: process.env.OPENAI_BASE_URL ?? "https://api.openai.com/v1",
+    timeoutMs: Number(process.env.OPENAI_TIMEOUT_MS ?? 180000),
   },
 };

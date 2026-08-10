@@ -2,6 +2,7 @@ import spawn from "cross-spawn";
 import fs from "node:fs";
 import os from "node:os";
 import { config } from "../config.js";
+import { runOpenAI } from "./openaiClient.js";
 
 // Every tool a one-shot translation call has no business using. For flows that
 // must read an uploaded file, "Read" is removed from this list by the caller.
@@ -138,4 +139,20 @@ export function runClaudeCli(input, { systemPromptFile, allowRead = false }) {
       resolve(outTrimmed);
     });
   });
+}
+
+/**
+ * Unified LLM entry point. Delegates to OpenAI or Claude CLI based on
+ * config.llmProvider. All callers should use this instead of runClaudeCli
+ * directly.
+ *
+ * @param {string} input the prompt text
+ * @param {{systemPromptFile: string, allowRead?: boolean, imagePath?: string}} opts
+ * @returns {Promise<string>} raw LLM output, trimmed
+ */
+export async function runLlm(input, { systemPromptFile, allowRead = false, imagePath }) {
+  if (config.llmProvider === "openai") {
+    return runOpenAI(input, { systemPromptFile, imagePath });
+  }
+  return runClaudeCli(input, { systemPromptFile, allowRead });
 }

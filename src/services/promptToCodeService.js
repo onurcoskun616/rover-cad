@@ -1,6 +1,6 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { runClaudeCli, stripCodeFence } from "./claudeCli.js";
+import { runLlm, stripCodeFence } from "./claudeCli.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const TEXT_PROMPT_FILE = path.join(__dirname, "..", "prompts", "freecad-system-prompt.txt");
@@ -55,9 +55,8 @@ function validatePython(raw) {
  */
 export async function promptToFreecadCode(prompt, correction) {
   const input = `[MEVCUT_ISTEK]: ${prompt}` + correctionSuffix(correction);
-  const raw = await runClaudeCli(input, {
+  const raw = await runLlm(input, {
     systemPromptFile: TEXT_PROMPT_FILE,
-    allowRead: false,
   });
   return validatePython(raw);
 }
@@ -79,9 +78,8 @@ export async function promptToFreecadCodeRevision(previousCode, instruction, bas
     "[GOREV]: Yukaridaki mevcut tasarimi degisiklik istegine gore GUNCELLE. " +
     "Degistirilmeyen kisimlari oldugu gibi koru. Hicbir soru sorma, hicbir aciklama yazma. " +
     "SADECE guncellenmis tam Python kodunu dondur.";
-  const raw = await runClaudeCli(input, {
+  const raw = await runLlm(input, {
     systemPromptFile: TEXT_PROMPT_FILE,
-    allowRead: false,
   });
   return validatePython(raw);
 }
@@ -99,9 +97,10 @@ export async function promptToFreecadCodeFromImage(imagePath, prompt, correction
     input += ` Ek talimat: ${prompt.trim()}`;
   }
   input += correctionSuffix(correction);
-  const raw = await runClaudeCli(input, {
+  const raw = await runLlm(input, {
     systemPromptFile: IMAGE_PROMPT_FILE,
     allowRead: true,
+    imagePath,
   });
   return validatePython(raw);
 }

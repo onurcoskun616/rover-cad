@@ -1,6 +1,6 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { runClaudeCli, stripCodeFence } from "./claudeCli.js";
+import { runLlm, stripCodeFence } from "./claudeCli.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SIM_PROMPT_FILE = path.join(__dirname, "..", "prompts", "sim-system-prompt.txt");
@@ -32,9 +32,8 @@ export async function promptToSimCode(prompt, previousCode, previousKinematics) 
     input = `[ISTEK]: ${prompt}`;
   }
 
-  const raw = await runClaudeCli(input, {
+  const raw = await runLlm(input, {
     systemPromptFile: SIM_PROMPT_FILE,
-    allowRead: false,
   });
 
   const code = stripCodeFence(raw);
