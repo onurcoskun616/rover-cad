@@ -18,17 +18,30 @@ router.use(apiKeyAuth);
 
 function readBase64(filePath) {
   try {
-    return fs.readFileSync(filePath).toString("base64");
+    const buf = fs.readFileSync(filePath);
+    if (buf.length === 0) return null;
+    return buf.toString("base64");
   } catch {
     return null;
   }
 }
 
 function buildSimResult(result, code) {
-  const partsInline = result.parts.map((p) => ({
-    name: p.name,
-    stlBase64: readBase64(p.stlPath),
-  }));
+  const partsInline = [];
+  for (const p of result.parts) {
+    const stlBase64 = readBase64(p.stlPath);
+    if (!stlBase64) {
+      console.warn("[simulate] part %s: STL empty or unreadable at %s", p.name, p.stlPath);
+      continue;
+    }
+    const sizeKB = Math.round((stlBase64.length * 3) / 4 / 1024);
+    console.log("[simulate] part %s: STL OK (%d KB)", p.name, sizeKB);
+    partsInline.push({ name: p.name, stlBase64 });
+  }
+
+  if (!partsInline.length) {
+    console.error("[simulate] no valid STL parts to send");
+  }
 
   const partSteps = result.partSteps
     .map((p) => ({ name: p.name, stepBase64: readBase64(p.stepPath) }))
@@ -70,6 +83,9 @@ router.post("/", (req, res) => {
       }
 
       const simResult = buildSimResult(result, null);
+      if (!simResult.partsInline.length) {
+        return { ok: false, body: { error: "STL dosyalari okunamadi (dosyalar bos veya bozuk)" } };
+      }
       return { ok: true, body: simResult };
     },
     { exclusive: true },
@@ -109,6 +125,9 @@ router.post("/generate", (req, res) => {
       }
 
       const simResult = buildSimResult(result, code);
+      if (!simResult.partsInline.length) {
+        return { ok: false, body: { error: "STL dosyalari okunamadi (dosyalar bos veya bozuk)", generatedCode: code } };
+      }
 
       let stepIndex = null;
       let totalSteps = null;
@@ -160,6 +179,9 @@ router.post("/demo", (req, res) => {
       }
 
       const simResult = buildSimResult(result, code);
+      if (!simResult.partsInline.length) {
+        return { ok: false, body: { error: "STL dosyalari okunamadi (dosyalar bos veya bozuk)" } };
+      }
 
       let stepIndex = null;
       let totalSteps = null;

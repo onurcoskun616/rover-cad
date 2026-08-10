@@ -10,10 +10,8 @@ function loadStlAsync(url) {
 }
 
 function parseStlBase64(base64Str) {
-  const binary = atob(base64Str);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return new STLLoader().parse(bytes.buffer);
+  const raw = Uint8Array.from(atob(base64Str), (c) => c.charCodeAt(0));
+  return new STLLoader().parse(raw.buffer);
 }
 
 /**
@@ -50,23 +48,48 @@ export async function loadKinematicSim(viewer, parts, kinData, opts = {}) {
   const origMaterials = {};
   const box = new THREE.Box3();
 
+  let loadedCount = 0;
   for (let i = 0; i < parts.length; i++) {
     const { name, url, stlBase64 } = parts[i];
-    const geo = stlBase64 ? parseStlBase64(stlBase64) : await loadStlAsync(url);
-    geo.computeVertexNormals();
-    const mat = new THREE.MeshStandardMaterial({
-      color: PART_COLORS[i % PART_COLORS.length],
-      metalness: 0.15,
-      roughness: 0.55,
-      transparent: name === "Block",
-      opacity: name === "Block" ? 0.3 : 1.0,
-    });
-    const mesh = new THREE.Mesh(geo, mat);
-    mesh.name = name;
-    origMaterials[name] = mat;
-    meshes[name] = mesh;
-    rootGroup.add(mesh);
-    box.expandByObject(mesh);
+    try {
+      if (!stlBase64 && !url) {
+        console.warn(`[kinPlayer] part "${name}": no stlBase64 and no url, skipping`);
+        continue;
+      }
+      let geo;
+      if (stlBase64 && stlBase64.length > 0) {
+        geo = parseStlBase64(stlBase64);
+      } else if (url) {
+        geo = await loadStlAsync(url);
+      } else {
+        continue;
+      }
+      if (!geo || !geo.attributes.position || geo.attributes.position.count === 0) {
+        console.warn(`[kinPlayer] part "${name}": geometry has 0 vertices, skipping`);
+        continue;
+      }
+      geo.computeVertexNormals();
+      const mat = new THREE.MeshStandardMaterial({
+        color: PART_COLORS[i % PART_COLORS.length],
+        metalness: 0.15,
+        roughness: 0.55,
+        transparent: name === "Block",
+        opacity: name === "Block" ? 0.3 : 1.0,
+      });
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.name = name;
+      origMaterials[name] = mat;
+      meshes[name] = mesh;
+      rootGroup.add(mesh);
+      box.expandByObject(mesh);
+      loadedCount++;
+    } catch (partErr) {
+      console.error(`[kinPlayer] part "${name}" load failed:`, partErr);
+    }
+  }
+
+  if (loadedCount === 0) {
+    throw new Error("Hicbir parca yuklenemedi (STL verisi bos veya bozuk).");
   }
 
   viewer.scene.add(rootGroup);

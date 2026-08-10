@@ -67,7 +67,15 @@ export async function runSimulationExport(code) {
     while ((m = partRe.exec(text)) !== null) {
       const stlPath = m[2].trim();
       if (fs.existsSync(stlPath)) {
-        parts.push({ name: m[1], stlPath });
+        const stat = fs.statSync(stlPath);
+        console.log("[simExport] found PART_STL:%s size=%d bytes path=%s", m[1], stat.size, stlPath);
+        if (stat.size > 0) {
+          parts.push({ name: m[1], stlPath });
+        } else {
+          console.warn("[simExport] PART_STL:%s is 0 bytes, skipping", m[1]);
+        }
+      } else {
+        console.warn("[simExport] PART_STL:%s file missing: %s", m[1], stlPath);
       }
     }
 

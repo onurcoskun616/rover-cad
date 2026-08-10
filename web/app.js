@@ -1623,9 +1623,15 @@ async function handleSimDemo() {
     }
 
     const { partsInline, partStlUrls, kinematicsData, kinematicsUrl } = result.body;
-    const parts = partsInline || partStlUrls;
+    let parts = partsInline || partStlUrls;
     if (!parts?.length) {
       showError("Simulasyon verisi eksik (STL yok).");
+      simDemoBtn.textContent = "HATA - tekrar dene";
+      return;
+    }
+    parts = parts.filter((p) => (p.stlBase64 && p.stlBase64.length > 0) || p.url);
+    if (!parts.length) {
+      showError("STL dosyalari bos veya bozuk.");
       simDemoBtn.textContent = "HATA - tekrar dene";
       return;
     }
@@ -1741,9 +1747,15 @@ async function handleSimGenerate() {
       return;
     }
 
-    const { partsInline, kinematicsData, generatedCode } = result.body;
+    let { partsInline, kinematicsData, generatedCode } = result.body;
     if (!partsInline?.length) {
       showError("Simulasyon verisi eksik (STL yok).");
+      simGenerateBtn.textContent = "Mekanizma Olustur";
+      return;
+    }
+    partsInline = partsInline.filter((p) => p.stlBase64 && p.stlBase64.length > 0);
+    if (!partsInline.length) {
+      showError("STL dosyalari bos veya bozuk.");
       simGenerateBtn.textContent = "Mekanizma Olustur";
       return;
     }
@@ -1846,9 +1858,15 @@ async function handleSimCustom() {
     }
 
     const { partsInline, partStlUrls, kinematicsData, kinematicsUrl } = result.body;
-    const parts = partsInline || partStlUrls;
+    let parts = partsInline || partStlUrls;
     if (!parts?.length) {
       showError("Simulasyon verisi eksik (STL yok).");
+      simRunBtn.textContent = "Simulasyonu Calistir";
+      return;
+    }
+    parts = parts.filter((p) => (p.stlBase64 && p.stlBase64.length > 0) || p.url);
+    if (!parts.length) {
+      showError("STL dosyalari bos veya bozuk.");
       simRunBtn.textContent = "Simulasyonu Calistir";
       return;
     }
