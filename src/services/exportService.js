@@ -82,12 +82,14 @@ function exportEpiloguePy(outputDir, stepPath, stlPath) {
  */
 export function typeSafetyPreamblePy() {
   return [
-    "# --- type safety preamble (auto-injected) ---",
+    "# --- type safety preamble (auto-injected, idempotent) ---",
     "import builtins as _BI",
-    "_BI_range = _BI.range",
-    "def _safe_range(*_a):",
-    "    return _BI_range(*[int(_x) for _x in _a])",
-    "_BI.range = _safe_range",
+    "if not hasattr(_BI, '_ROVER_PATCHED'):",
+    "    _BI._ROVER_PATCHED = True",
+    "    _BI._orig_range = _BI.range",
+    "    def _safe_range(*_a):",
+    "        return _BI._orig_range(*[int(_x) for _x in _a])",
+    "    _BI.range = _safe_range",
     "",
   ].join("\n");
 }
