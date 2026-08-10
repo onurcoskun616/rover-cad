@@ -778,7 +778,7 @@ async function handleCamPreview() {
         }),
       },
       (seconds) => {
-        const phase = seconds < 15 ? "Kod üretiliyor" : seconds < 60 ? "FreeCAD hesaplıyor" : "İşlem devam ediyor";
+        const phase = seconds < 15 ? "Kod üretiliyor" : seconds < 60 ? "TopkapiAl hesaplıyor" : "İşlem devam ediyor";
         setCamStatus(`${phase}… (${seconds}s)`, true);
       },
     );
@@ -1600,8 +1600,8 @@ async function handleSimDemo() {
   resetKinSim();
   simSessionId = crypto.randomUUID();
   simDemoBtn.disabled = true;
-  simDemoBtn.textContent = "FreeCAD'de olusturuluyor…";
-  setLoading(true, "Simulasyon parcalari FreeCAD'de olusturuluyor…");
+  simDemoBtn.textContent = "TopkapiAl'de olusturuluyor…";
+  setLoading(true, "Simulasyon parcalari TopkapiAl'de olusturuluyor…");
   try {
     const result = await runAsyncJob(
       `${API_BASE}/simulate/demo`,
@@ -1611,7 +1611,7 @@ async function handleSimDemo() {
         body: JSON.stringify({ sessionId: simSessionId }),
       },
       (seconds) => {
-        simDemoBtn.textContent = `FreeCAD calisiyor… (${seconds} sn)`;
+        simDemoBtn.textContent = `TopkapiAl calisiyor… (${seconds} sn)`;
         setLoading(true, `Simulasyon parcalari olusturuluyor… (${seconds} sn)`);
       },
     );
@@ -1726,7 +1726,7 @@ async function handleSimGenerate() {
         }),
       },
       (seconds) => {
-        const phase = seconds < 20 ? "Kod uretiliyor" : seconds < 60 ? "FreeCAD calistiriliyor" : "Islem devam ediyor";
+        const phase = seconds < 20 ? "Kod uretiliyor" : seconds < 60 ? "TopkapiAl calistiriliyor" : "Islem devam ediyor";
         simGenerateBtn.textContent = `${phase}… (${seconds} sn)`;
         setLoading(true, `${phase}… (${seconds} sn)`);
       },
@@ -1817,14 +1817,14 @@ simDownloadAssembly.addEventListener("click", () => {
 async function handleSimCustom() {
   const code = simCodeInput.value.trim();
   if (!code) {
-    showError("Lütfen bir FreeCAD Python scripti yazin.");
+    showError("Lutfen bir TopkapiAl Python scripti yazin.");
     return;
   }
   clearError();
   resetKinSim();
   simRunBtn.disabled = true;
-  simRunBtn.textContent = "FreeCAD'de calistiriliyor…";
-  setLoading(true, "Simulasyon scripti FreeCAD'de calistiriliyor…");
+  simRunBtn.textContent = "TopkapiAl'de calistiriliyor…";
+  setLoading(true, "Simulasyon scripti TopkapiAl'de calistiriliyor…");
   try {
     const result = await runAsyncJob(
       `${API_BASE}/simulate`,
@@ -1834,7 +1834,7 @@ async function handleSimCustom() {
         body: JSON.stringify({ code }),
       },
       (seconds) => {
-        simRunBtn.textContent = `FreeCAD calisiyor… (${seconds} sn)`;
+        simRunBtn.textContent = `TopkapiAl calisiyor… (${seconds} sn)`;
         setLoading(true, `Simulasyon calistiriliyor… (${seconds} sn)`);
       },
     );

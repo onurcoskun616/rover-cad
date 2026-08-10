@@ -117,7 +117,7 @@
 
         <div id="panel-sim" class="tab-panel" hidden>
           <p class="panel-hint">
-            Kinematik simulasyon: FreeCAD scripti ile mekanizma parcalarini
+            Kinematik simulasyon: kod yazarak mekanizma parcalarini
             olusturun ve hareket simulasyonunu izleyin.
           </p>
           <button id="sim-demo-btn" type="button" class="secondary">
@@ -138,13 +138,13 @@
           <details class="sim-custom-details">
             <summary>Gelismis: Python Scripti Yaz</summary>
             <p class="panel-hint">
-              FreeCAD Python scripti yazin. <code>_rover_sim_out</code> ve
+              TopkapiAl Python scripti yazin. <code>_rover_sim_out</code> ve
               <code>_rover_sim_ts</code> degiskenleri otomatik enjekte edilir.
             </p>
             <textarea
               id="sim-code-input"
               rows="12"
-              placeholder="import FreeCAD, Part, Mesh, os, json&#10;doc = FreeCAD.ActiveDocument&#10;# ... parcalari olustur, STL export et, kinematics.json yaz"
+              placeholder="# TopkapiAl Python scripti&#10;# Parcalari olustur, export et, kinematics.json yaz"
             ></textarea>
             <button id="sim-run-btn" type="button">Scripti Calistir</button>
           </details>
