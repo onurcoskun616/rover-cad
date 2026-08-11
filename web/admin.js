@@ -5,6 +5,11 @@ const byId = (id) => document.getElementById(id);
 
 const demoData = {
   stats: { users: 1284, activeUsers: 1168, monthlyTokensUsed: 1846250, files: 7432 },
+  usage: [
+    { feature: "POST /generate", provider: "claude", model: "sonnet", calls: 184, inputTokens: 428000, outputTokens: 196000, cacheReadTokens: 82000, cacheWriteTokens: 12000, totalTokens: 718000, costUsd: 8.42 },
+    { feature: "POST /cam-confirm", provider: "claude", model: "sonnet", calls: 96, inputTokens: 241000, outputTokens: 132000, cacheReadTokens: 45000, cacheWriteTokens: 8000, totalTokens: 426000, costUsd: 5.13 },
+    { feature: "POST /simulate/generate", provider: "openai", model: "gpt-4o", calls: 72, inputTokens: 181000, outputTokens: 94000, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: 275000, costUsd: 3.67 }
+  ],
   users: [
     { id: "1", name: "Tahir Fırat", email: "tahir@topkapikoleji.org", plan: "pro", usedTokens: 38240, monthlyTokens: 100000, status: "active", initials: "TF" },
     { id: "2", name: "Ecem Şuekinci", email: "ecem@topkapikoleji.org", plan: "free", usedTokens: 7650, monthlyTokens: 50000, status: "active", initials: "EŞ" },
@@ -35,6 +40,14 @@ function renderStats(stats) {
     ["Oluşturulan dosya", fmt.format(stats.files || 0), "+342 bu ay", "files"]
   ];
   byId("stats").innerHTML = items.map(([label, value, note, tone]) => `<article><div class="admin-metric-icon ${tone}">${tone === "users" ? "◎" : tone === "active" ? "✓" : tone === "tokens" ? "↗" : "▤"}</div><div><span>${label}</span><strong>${value}</strong><small>${note}</small></div></article>`).join("");
+}
+
+function renderUsage(items = []) {
+  const featureNames = { "/generate": "CAD model üretimi", "/generate-from-image": "Resimden CAD", "/revise": "CAD revizyonu", "/cam-confirm": "CAM / CNC üretimi", "/simulate/generate": "Simülasyon üretimi" };
+  byId("llm-usage-list").innerHTML = items.length ? items.map((item) => {
+    const path = String(item.feature).replace(/^POST\s+/, "");
+    return `<tr><td><strong>${safeText(featureNames[path] || path)}</strong><small>${safeText(item.provider)}</small></td><td>${safeText(item.model)}</td><td>${fmt.format(item.calls)}</td><td>${fmt.format(item.inputTokens)}</td><td>${fmt.format(item.outputTokens)}</td><td>${fmt.format((item.cacheReadTokens || 0) + (item.cacheWriteTokens || 0))}</td><td><b>${fmt.format(item.totalTokens)}</b></td><td>$${Number(item.costUsd || 0).toFixed(2)}</td></tr>`;
+  }).join("") : '<tr><td colspan="8">Henüz ölçülmüş LLM kullanımı bulunmuyor.</td></tr>';
 }
 
 function filteredUsers() {
@@ -69,6 +82,7 @@ function render(data, isPreview) {
   previewMode = isPreview;
   allUsers = data.users;
   renderStats(data.stats);
+  renderUsage(data.usage);
   renderUsers();
   renderActivity(data.activity || demoData.activity);
   byId("preview-banner").hidden = !isPreview;
@@ -78,12 +92,13 @@ async function loadAdmin() {
   if (!sessionToken) { render(demoData, true); return; }
   try {
     const headers = { Authorization: `Bearer ${sessionToken}` };
-    const [statsResponse, usersResponse] = await Promise.all([fetch(`${API_BASE}/admin/stats`, { headers }), fetch(`${API_BASE}/admin/users`, { headers })]);
+    const [statsResponse, usersResponse, usageResponse] = await Promise.all([fetch(`${API_BASE}/admin/stats`, { headers }), fetch(`${API_BASE}/admin/users`, { headers }), fetch(`${API_BASE}/admin/usage-summary?days=31`, { headers })]);
     if (statsResponse.status === 403) throw new Error("Bu hesapta yönetici yetkisi bulunmuyor.");
     if (!statsResponse.ok || !usersResponse.ok) throw new Error("Yönetim verileri alınamadı.");
     const stats = await statsResponse.json();
     const usersPayload = await usersResponse.json();
-    render({ stats, users: usersPayload.users, activity: [] }, false);
+    const usagePayload = usageResponse.ok ? await usageResponse.json() : { usage: [] };
+    render({ stats, users: usersPayload.users, usage: usagePayload.usage, activity: [] }, false);
   } catch (error) {
     render(demoData, true);
     byId("admin-notice").textContent = `${error.message} Örnek verilerle önizleme açıldı.`;

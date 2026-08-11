@@ -114,6 +114,7 @@ let lastStepPath = null;
 let lastGeneratedCode = null;
 let lastBbox = null;
 let lastPrompt = "";
+let lastProjectId = null;
 let camAnswers = {};
 let camStepIndex = 0;
 let camStepFieldNames = [];
@@ -205,6 +206,7 @@ function resetResult() {
   lastGeneratedCode = null;
   lastBbox = null;
   lastPrompt = "";
+  lastProjectId = null;
   lastDimData = null;
   dimEditInProgress = false;
   dimEditQueue = [];
@@ -463,6 +465,7 @@ function showResult(data) {
   }
 
   lastGeneratedCode = data.generatedCode ?? null;
+  if (data.projectId) lastProjectId = data.projectId;
   lastBbox = data.bbox ?? null;
   // The PDF is generated on demand to keep /generate fast. Reset any stale
   // PDF link so the user re-generates with the current dimensions.
@@ -503,7 +506,12 @@ async function handleRevise() {
       {
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeaders() },
-        body: JSON.stringify({ prompt: instruction, previousCode, basePrompt: base }),
+        body: JSON.stringify({
+          prompt: instruction,
+          previousCode,
+          basePrompt: base,
+          projectId: lastProjectId,
+        }),
       },
       (seconds) => setLoading(true, `Tasarım güncelleniyor… (${seconds} sn)`),
     );
@@ -1155,7 +1163,13 @@ async function handleDimensionEdit(dim, newValue) {
         {
           method: "POST",
           headers: { "Content-Type": "application/json", ...authHeaders() },
-          body: JSON.stringify({ code, paramName, newValue }),
+          body: JSON.stringify({
+            code,
+            paramName,
+            newValue,
+            projectId: lastProjectId,
+            basePrompt: lastPrompt,
+          }),
         },
         (seconds) => setLoading(true, `Ölçü güncelleniyor… (${seconds} sn)`),
       );
@@ -1178,6 +1192,7 @@ async function handleDimensionEdit(dim, newValue) {
             prompt: instruction,
             previousCode: code,
             basePrompt: lastPrompt,
+            projectId: lastProjectId,
           }),
         },
         (seconds) => setLoading(true, `Ölçü güncelleniyor… (${seconds} sn)`),

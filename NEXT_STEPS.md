@@ -66,3 +66,24 @@ Tamamlanan maddeler silinmeyecek, `[x]` olarak işaretlenecektir.
 - [ ] Güvenlik ve oran sınırlama kontrollerini tamamla.
 - [ ] GitHub Pages frontend'i ve API sürümünü birlikte yayınla.
 - [ ] Canlı yayından sonra giriş, dashboard, admin ve birer CAD/CAM/simülasyon işlemini tekrar doğrula.
+
+## 8. Yerel proje arşivi ve doğrulanmış cache
+
+- [x] Cache anahtarını teknik noktalama, ölçü birimi, sağlayıcı/model, sistem promptu, pipeline ve FreeCAD sürümüne bağla.
+- [x] Tek büyük JSON yerine anahtar başına atomik ve eşzamanlı yazmaya dayanıklı cache dosyaları kullan.
+- [x] Cache'i varsayılan olarak `observe` modunda çalıştır; bu modda LLM çağrısını atlama.
+- [x] Yalnızca FreeCAD'de başarıyla çalışıp dışa aktarılmış kodu doğrulanmış cache'e yaz.
+- [x] Revizyonları ve adım adım simülasyon geliştirmelerini ortak cache dışında bırak.
+- [x] Kullanıcı cache'lerini birbirinden ayır.
+- [x] Başarılı CAD üretimlerini kullanıcı/proje/sürüm klasörlerine otomatik arşivle.
+- [x] STEP, STL ve FreeCAD Python kodunu `v001`, `v002` şeklinde sürümle.
+- [x] Proje manifesti ve kullanıcı proje indeksini atomik JSON olarak tut.
+- [x] Cache veya arşiv hatasında mevcut üretim akışının devam etmesini sağla.
+- [ ] Gözlem telemetrisini gerçek kullanımda incele ve yanlış eşleşme olmadığını doğrula.
+- [ ] Yeterli gözlemden sonra `PROMPT_CACHE_MODE=read` geçişini kontrollü yap.
+- [ ] Yönetici onaylı ortak parça kütüphanesini özel kullanıcı cache'inden ayrı kur.
+- [ ] Parametrik standart parçaları LLM'siz üreten şablon katmanını ekle.
+- [ ] PDF, G-code ve simülasyon çıktılarını mevcut proje sürümüne ekle.
+- [ ] `Projelerim` ve `Dosyalarım` ekranlarını yerel proje indeksini okuyan sahiplik kontrollü API'ye bağla.
+- [ ] Herkese açık `/files` sunumunu kullanıcı sahipliği kontrolü yapan indirme endpoint'iyle değiştir.
+- [ ] Uzak FreeCAD PC için günlük yedekleme, disk alanı ve sağlık uyarılarını kur.

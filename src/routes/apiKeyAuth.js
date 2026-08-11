@@ -1,19 +1,22 @@
-import { consumeTokens, verifySession } from "../services/accountStore.js";
+import { ensureProfile } from "../services/accountStore.js";
+import { runWithLlmContext } from "../services/llmRequestContext.js";
+import { getSupabaseUser } from "../services/supabaseAuth.js";
 
 // User session gate and monthly usage reservation for protected endpoints.
-export function apiKeyAuth(req, res, next) {
+export async function apiKeyAuth(req, res, next) {
   if (req.method === "OPTIONS") return next();
   const token = req.get("authorization")?.replace(/^Bearer\s+/i, "");
-  const user = verifySession(token);
-  if (!user) return res.status(401).json({ error: "Oturum açmanız gerekiyor" });
-  req.user = user;
-  // Reserve a transparent fixed token amount for AI-producing operations.
-  const path = req.originalUrl.split("?")[0];
-  const costs = { "/generate": 2500, "/generate-from-image": 3500, "/revise": 1800,
-    "/cam-step": 500, "/cam-plan": 1200, "/simulate/generate": 2000 };
-  const cost = req.method === "POST" ? (costs[path] ?? 0) : 0;
-  try { if (cost) req.user = consumeTokens(user.id, cost, path); next(); }
-  catch (e) { res.status(e.status ?? 500).json({ error: e.message }); }
+  try {
+    const authUser = await getSupabaseUser(token);
+    if (!authUser) return res.status(401).json({ error: "Oturum açmanız gerekiyor" });
+    const user = await ensureProfile(authUser);
+    if (user.status !== "active") return res.status(403).json({ error: "Hesabınız kullanıma kapalı" });
+    req.user = user;
+    const feature = `${req.method} ${req.originalUrl.split("?")[0]}`;
+    return runWithLlmContext({ userId: user.id, feature }, next);
+  } catch (error) {
+    return next(error);
+  }
 }
 
 export function requireAdmin(req, res, next) {

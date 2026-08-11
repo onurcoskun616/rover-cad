@@ -1,102 +1,140 @@
-import crypto from "node:crypto";
-import fs from "node:fs";
-import path from "node:path";
 import { config } from "../config.js";
+import { database } from "./database.js";
 
-const filePath = path.join(config.dataDir, "accounts.json");
-const SESSION_MS = 30 * 24 * 60 * 60 * 1000;
-
-function emptyDb() { return { users: [], usage: [], payments: [] }; }
-function load() {
-  fs.mkdirSync(config.dataDir, { recursive: true });
-  if (!fs.existsSync(filePath)) return emptyDb();
-  try { return { ...emptyDb(), ...JSON.parse(fs.readFileSync(filePath, "utf8")) }; }
-  catch { throw new Error("Account database could not be read"); }
-}
-function save(db) {
-  const tmp = `${filePath}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(db, null, 2));
-  fs.renameSync(tmp, filePath);
-}
-function monthKey(date = new Date()) { return date.toISOString().slice(0, 7); }
-function publicUser(user, db) {
-  const used = db.usage.filter((x) => x.userId === user.id && x.month === monthKey())
-    .reduce((sum, x) => sum + x.tokens, 0);
-  const allowance = user.monthlyTokens ?? config.freeMonthlyTokens;
-  return { id: user.id, name: user.name, email: user.email, role: user.role,
-    plan: user.plan ?? "free", status: user.status ?? "active", monthlyTokens: allowance,
-    usedTokens: used, remainingTokens: Math.max(0, allowance - used), createdAt: user.createdAt };
-}
-function hashPassword(password, salt = crypto.randomBytes(16).toString("hex")) {
-  return { salt, hash: crypto.scryptSync(password, salt, 64).toString("hex") };
-}
-function sign(payload) {
-  const body = Buffer.from(JSON.stringify(payload)).toString("base64url");
-  const sig = crypto.createHmac("sha256", config.authSecret).update(body).digest("base64url");
-  return `${body}.${sig}`;
+function number(value) {
+  return Number(value || 0);
 }
 
-export function register({ name, email, password }) {
-  const db = load();
-  email = String(email).trim().toLowerCase();
-  if (!name?.trim() || !/^\S+@\S+\.\S+$/.test(email) || String(password).length < 8)
-    throw Object.assign(new Error("Ad, geçerli e-posta ve en az 8 karakterli parola gereklidir"), { status: 400 });
-  if (db.users.some((u) => u.email === email))
-    throw Object.assign(new Error("Bu e-posta zaten kayıtlı"), { status: 409 });
-  const pass = hashPassword(password);
-  const user = { id: crypto.randomUUID(), name: name.trim(), email, ...pass,
-    role: email === config.adminEmail ? "admin" : "user", plan: "free", status: "active",
-    monthlyTokens: config.freeMonthlyTokens, createdAt: new Date().toISOString() };
-  db.users.push(user); save(db);
-  return { token: sign({ sub: user.id, exp: Date.now() + SESSION_MS }), user: publicUser(user, db) };
+function publicUser(row) {
+  const monthlyTokens = number(row.monthly_token_limit);
+  const usedTokens = number(row.used_tokens);
+  const reservedTokens = number(row.reserved_tokens);
+  return {
+    id: row.id,
+    name: row.name,
+    email: row.email,
+    role: row.role,
+    plan: row.plan,
+    status: row.status,
+    monthlyTokens,
+    usedTokens,
+    reservedTokens,
+    remainingTokens: Math.max(0, monthlyTokens - usedTokens - reservedTokens),
+    usageMonth: row.usage_month,
+    createdAt: row.created_at,
+  };
 }
 
-export function login({ email, password }) {
-  const db = load();
-  const user = db.users.find((u) => u.email === String(email).trim().toLowerCase());
-  if (!user || user.status === "blocked") throw Object.assign(new Error("E-posta veya parola hatalı"), { status: 401 });
-  const check = hashPassword(String(password), user.salt).hash;
-  if (!crypto.timingSafeEqual(Buffer.from(check, "hex"), Buffer.from(user.hash, "hex")))
-    throw Object.assign(new Error("E-posta veya parola hatalı"), { status: 401 });
-  return { token: sign({ sub: user.id, exp: Date.now() + SESSION_MS }), user: publicUser(user, db) };
+export async function ensureProfile(authUser) {
+  if (!authUser?.id) throw Object.assign(new Error("Kullanıcı kimliği alınamadı"), { status: 401 });
+  const email = String(authUser.email ?? "").trim().toLowerCase();
+  const name = String(authUser.user_metadata?.name || authUser.user_metadata?.full_name || "").trim();
+  await database().query(
+    `insert into public.profiles (id, name, email, role, monthly_token_limit)
+     values ($1, $2, $3, $4, $5)
+     on conflict (id) do update set
+       name = case when excluded.name <> '' then excluded.name else public.profiles.name end,
+       email = excluded.email,
+       role = case when excluded.email = $6 then 'admin' else public.profiles.role end,
+       updated_at = now()`,
+    [authUser.id, name, email, email === config.adminEmail ? "admin" : "user", config.freeMonthlyTokens, config.adminEmail],
+  );
+  return getUser(authUser.id);
 }
 
-export function verifySession(token) {
-  const [body, sig] = String(token ?? "").split(".");
-  if (!body || !sig) return null;
-  const expected = crypto.createHmac("sha256", config.authSecret).update(body).digest("base64url");
-  if (sig.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return null;
-  const payload = JSON.parse(Buffer.from(body, "base64url").toString("utf8"));
-  if (payload.exp < Date.now()) return null;
-  const db = load(); const user = db.users.find((u) => u.id === payload.sub && u.status !== "blocked");
-  return user ? publicUser(user, db) : null;
+export async function getUser(id) {
+  await database().query(
+    `update public.profiles set used_tokens = 0, reserved_tokens = 0,
+       usage_month = to_char(now() at time zone 'Europe/Istanbul', 'YYYY-MM'), updated_at = now()
+     where id = $1 and usage_month <> to_char(now() at time zone 'Europe/Istanbul', 'YYYY-MM')`,
+    [id],
+  );
+  const result = await database().query("select * from public.profiles where id = $1", [id]);
+  return result.rows[0] ? publicUser(result.rows[0]) : null;
 }
 
-export function consumeTokens(userId, tokens, action) {
-  const db = load(); const user = db.users.find((u) => u.id === userId);
-  if (!user) throw Object.assign(new Error("Kullanıcı bulunamadı"), { status: 401 });
-  const view = publicUser(user, db);
-  if (view.remainingTokens < tokens) throw Object.assign(new Error("Aylık token bakiyeniz yetersiz. Paket yükseltin."), { status: 402 });
-  db.usage.push({ id: crypto.randomUUID(), userId, month: monthKey(), tokens, action, createdAt: new Date().toISOString() });
-  save(db); return publicUser(user, db);
+export async function listUsage(userId, limit = 50) {
+  const safeLimit = Math.min(200, Math.max(1, Number(limit) || 50));
+  const result = await database().query(
+    `select id, feature as action, provider, model, input_tokens as "inputTokens",
+            output_tokens as "outputTokens", cache_read_tokens as "cacheReadTokens",
+            cache_write_tokens as "cacheWriteTokens", total_tokens as tokens,
+            measured, cost_usd as "costUsd", created_at as "createdAt"
+       from public.llm_usage
+      where user_id = $1 and status = 'completed'
+      order by created_at desc limit $2`,
+    [userId, safeLimit],
+  );
+  return result.rows.map((row) => ({
+    ...row,
+    inputTokens: number(row.inputTokens), outputTokens: number(row.outputTokens),
+    cacheReadTokens: number(row.cacheReadTokens), cacheWriteTokens: number(row.cacheWriteTokens),
+    tokens: number(row.tokens), costUsd: row.costUsd === null ? null : Number(row.costUsd),
+  }));
 }
 
-export function listUsage(userId, limit = 50) {
-  const db = load(); return db.usage.filter((x) => x.userId === userId).slice(-limit).reverse();
+export async function listUsers() {
+  const result = await database().query("select * from public.profiles order by created_at desc");
+  return result.rows.map(publicUser);
 }
-export function listUsers() { const db = load(); return db.users.map((u) => publicUser(u, db)); }
-export function updateUser(id, changes) {
-  const db = load(); const user = db.users.find((u) => u.id === id);
-  if (!user) throw Object.assign(new Error("Kullanıcı bulunamadı"), { status: 404 });
-  if (changes.status) user.status = changes.status;
-  if (changes.role) user.role = changes.role;
-  if (changes.plan) user.plan = changes.plan;
-  if (Number.isFinite(Number(changes.monthlyTokens))) user.monthlyTokens = Math.max(0, Number(changes.monthlyTokens));
-  save(db); return publicUser(user, db);
+
+export async function updateUser(id, changes) {
+  const allowed = {
+    status: ["active", "blocked"].includes(changes.status) ? changes.status : null,
+    role: ["user", "admin"].includes(changes.role) ? changes.role : null,
+    plan: ["free", "pro", "enterprise"].includes(changes.plan) ? changes.plan : null,
+    monthlyTokens: Number.isFinite(Number(changes.monthlyTokens)) ? Math.max(0, Math.floor(Number(changes.monthlyTokens))) : null,
+  };
+  const result = await database().query(
+    `update public.profiles set
+       status = coalesce($2, status), role = coalesce($3, role), plan = coalesce($4, plan),
+       monthly_token_limit = coalesce($5, monthly_token_limit), updated_at = now()
+     where id = $1 returning *`,
+    [id, allowed.status, allowed.role, allowed.plan, allowed.monthlyTokens],
+  );
+  if (!result.rows[0]) throw Object.assign(new Error("Kullanıcı bulunamadı"), { status: 404 });
+  return publicUser(result.rows[0]);
 }
-export function stats() {
-  const db = load(); const month = monthKey();
-  return { users: db.users.length, activeUsers: db.users.filter((u) => u.status !== "blocked").length,
-    monthlyTokensUsed: db.usage.filter((x) => x.month === month).reduce((s, x) => s + x.tokens, 0),
-    payments: db.payments.length };
+
+export async function stats() {
+  const result = await database().query(
+    `select count(*)::bigint as users,
+            count(*) filter (where status = 'active')::bigint as active_users,
+            coalesce(sum(used_tokens) filter (
+              where usage_month = to_char(now() at time zone 'Europe/Istanbul', 'YYYY-MM')
+            ), 0)::bigint as monthly_tokens_used
+       from public.profiles`,
+  );
+  const row = result.rows[0];
+  return {
+    users: number(row.users),
+    activeUsers: number(row.active_users),
+    monthlyTokensUsed: number(row.monthly_tokens_used),
+  };
+}
+
+export async function usageSummary(days = 31) {
+  const safeDays = Math.min(366, Math.max(1, Number(days) || 31));
+  const result = await database().query(
+    `select feature, provider, model,
+            count(*)::bigint as calls,
+            coalesce(sum(input_tokens), 0)::bigint as input_tokens,
+            coalesce(sum(output_tokens), 0)::bigint as output_tokens,
+            coalesce(sum(cache_read_tokens), 0)::bigint as cache_read_tokens,
+            coalesce(sum(cache_write_tokens), 0)::bigint as cache_write_tokens,
+            coalesce(sum(total_tokens), 0)::bigint as total_tokens,
+            coalesce(sum(cost_usd), 0)::numeric as cost_usd
+       from public.llm_usage
+      where status = 'completed' and created_at >= now() - ($1::text || ' days')::interval
+      group by feature, provider, model
+      order by total_tokens desc`,
+    [safeDays],
+  );
+  return result.rows.map((row) => ({
+    feature: row.feature, provider: row.provider, model: row.model,
+    calls: number(row.calls), inputTokens: number(row.input_tokens),
+    outputTokens: number(row.output_tokens), cacheReadTokens: number(row.cache_read_tokens),
+    cacheWriteTokens: number(row.cache_write_tokens), totalTokens: number(row.total_tokens),
+    costUsd: Number(row.cost_usd || 0),
+  }));
 }

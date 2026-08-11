@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { runLlm, stripCodeFence } from "./claudeCli.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const SIM_PROMPT_FILE = path.join(__dirname, "..", "prompts", "sim-system-prompt.txt");
+export const SIM_PROMPT_FILE = path.join(__dirname, "..", "prompts", "sim-system-prompt.txt");
 
 function looksLikeSimCode(text) {
   if (!text) return false;

@@ -5,9 +5,10 @@ import { Router } from "express";
 import cors from "cors";
 import { apiKeyAuth } from "./apiKeyAuth.js";
 import { runSimulationExport } from "../services/simulationExportService.js";
-import { promptToSimCode } from "../services/simulationGenerateService.js";
+import { promptToSimCode, SIM_PROMPT_FILE } from "../services/simulationGenerateService.js";
 import { createJob, runJob } from "../services/jobStore.js";
 import { pushStep, undoStep } from "../services/simHistoryStore.js";
+import { preparePromptCache } from "../services/promptCacheService.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -68,6 +69,7 @@ router.post("/", (req, res) => {
     return res.status(400).json({ error: "code is required" });
   }
 
+  const userId = req.user?.id ?? null;
   const jobId = createJob();
 
   runJob(
@@ -107,9 +109,21 @@ router.post("/generate", (req, res) => {
     jobId,
     async () => {
       console.log("[simulate/generate] generating sim code from prompt…");
+      // Incremental simulations depend on their full previous state and must
+      // never use the from-scratch cache.
+      const promptCache = !previousCode && !previousKinematics
+        ? preparePromptCache({
+            prompt: prompt.trim(),
+            operation: "simulation-text",
+            userId,
+            systemPromptFile: SIM_PROMPT_FILE,
+          })
+        : null;
       let code;
       try {
-        code = await promptToSimCode(prompt.trim(), previousCode || null, previousKinematics || null);
+        code = promptCache?.mayReuse
+          ? promptCache.cachedCode
+          : await promptToSimCode(prompt.trim(), previousCode || null, previousKinematics || null);
       } catch (err) {
         console.error("[simulate/generate] code generation error:", err.message);
         return { ok: false, body: { error: `Kod uretimi basarisiz: ${err.message}` } };
@@ -128,6 +142,15 @@ router.post("/generate", (req, res) => {
       if (!simResult.partsInline.length) {
         return { ok: false, body: { error: "STL dosyalari okunamadi (dosyalar bos veya bozuk)", generatedCode: code } };
       }
+
+      // Only a code path that FreeCAD exported successfully is cacheable.
+      promptCache?.recordValidated({
+        code,
+        metadata: {
+          partCount: simResult.partsInline.length,
+          hasKinematics: Boolean(simResult.kinematicsData),
+        },
+      });
 
       let stepIndex = null;
       let totalSteps = null;

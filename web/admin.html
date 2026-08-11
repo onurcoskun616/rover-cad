@@ -15,6 +15,7 @@
       <nav class="account-nav" aria-label="Yönetim menüsü">
         <a class="is-active" href="#overview"><span>⌂</span> Genel bakış</a>
         <a href="#users"><span>◎</span> Kullanıcılar</a>
+        <a href="#llm-usage"><span>◈</span> LLM tüketimi</a>
         <a href="#activity"><span>↗</span> Hareketler</a>
         <a href="#system"><span>⚙</span> Sistem ayarları</a>
       </nav>
@@ -40,6 +41,16 @@
       </section>
 
       <section id="stats" class="admin-metrics" aria-label="Sistem özeti"></section>
+
+      <section class="account-panel admin-llm-panel" id="llm-usage">
+        <div class="panel-heading"><div><p class="account-kicker">GERÇEK LLM TÜKETİMİ</p><h2>CAD, CAM ve simülasyon kullanımı</h2></div><span class="soft-badge">Son 31 gün</span></div>
+        <div class="admin-table-wrap">
+          <table class="admin-llm-table">
+            <thead><tr><th>İşlem</th><th>Model</th><th>Çağrı</th><th>Giriş</th><th>Çıkış</th><th>Önbellek</th><th>Toplam</th><th>Maliyet</th></tr></thead>
+            <tbody id="llm-usage-list"></tbody>
+          </table>
+        </div>
+      </section>
 
       <section class="account-panel admin-users-panel" id="users">
         <div class="admin-section-head">

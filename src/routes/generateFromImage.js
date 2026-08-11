@@ -8,6 +8,7 @@ import { apiKeyAuth } from "./apiKeyAuth.js";
 import { promptToFreecadCodeFromImage } from "../services/promptToCodeService.js";
 import { runBuildPipeline } from "../services/buildPipeline.js";
 import { createJob, runJob } from "../services/jobStore.js";
+import { archiveProjectBuildFailOpen } from "../services/projectArchiveService.js";
 
 function makeFileUrl(proto, host, filePath) {
   if (!filePath) return null;
@@ -47,8 +48,11 @@ router.post("/", upload.single("image"), (req, res) => {
   }
 
   const extraPrompt = typeof req.body?.prompt === "string" ? req.body.prompt : "";
+  const requestedProjectId = req.body?.projectId;
+  const projectName = req.body?.projectName;
   const proto = req.protocol;
   const host = req.get("host");
+  const userId = req.user?.id ?? null;
   const jobId = createJob();
 
   runJob(
@@ -73,6 +77,18 @@ router.post("/", upload.single("image"), (req, res) => {
           };
         }
 
+        const archived = archiveProjectBuildFailOpen({
+          userId,
+          projectId: requestedProjectId,
+          projectName,
+          operation: "cad-image",
+          prompt: extraPrompt || "Teknik resimden oluşturulan proje",
+          generatedCode: result.generatedCode,
+          stepPath: result.stepPath,
+          stlPath: result.stlPath,
+          bbox: result.bbox,
+        });
+
         return {
           ok: true,
           body: {
@@ -83,6 +99,7 @@ router.post("/", upload.single("image"), (req, res) => {
             bbox: result.bbox,
             warning: result.warning,
             generatedCode: result.generatedCode,
+            ...(archived ?? {}),
           },
         };
       } finally {

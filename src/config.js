@@ -11,9 +11,43 @@ export const config = {
   // Persistent user data (machine/tool inventory). File-based JSON store.
   dataDir: path.resolve(process.env.DATA_DIR ?? "data"),
   corsOrigin: process.env.CORS_ORIGIN ?? "*",
-  authSecret: process.env.AUTH_SECRET ?? "change-me-in-production",
+  promptCache: {
+    // off: disabled, observe: measure hits but still call the LLM,
+    // read: reuse FreeCAD-validated private cache entries.
+    mode: (process.env.PROMPT_CACHE_MODE ?? "observe").toLowerCase(),
+    dir: path.resolve(process.env.PROMPT_CACHE_DIR ?? path.join(process.env.DATA_DIR ?? "data", "prompt-cache")),
+    pipelineVersion: process.env.PROMPT_PIPELINE_VERSION ?? "1",
+    freecadCompatibility: process.env.FREECAD_COMPATIBILITY_VERSION ?? "unspecified",
+  },
+  projectArchive: {
+    enabled: process.env.PROJECT_ARCHIVE_ENABLED !== "false",
+    dir: path.resolve(process.env.PROJECT_ARCHIVE_DIR ?? path.join(process.env.DATA_DIR ?? "data", "user-storage")),
+  },
   freeMonthlyTokens: Number(process.env.FREE_MONTHLY_TOKENS ?? 50000),
   adminEmail: (process.env.ADMIN_EMAIL ?? "").toLowerCase(),
+  databaseUrl: process.env.DATABASE_URL ?? "",
+  databaseSsl: process.env.DATABASE_SSL !== "false",
+  databasePoolSize: Number(process.env.DATABASE_POOL_SIZE ?? 10),
+  supabase: {
+    url: process.env.SUPABASE_URL ?? "",
+    anonKey: process.env.SUPABASE_ANON_KEY ?? "",
+  },
+  quotaCron: {
+    enabled: process.env.QUOTA_CRON_ENABLED !== "false",
+    schedule: process.env.QUOTA_CRON_SCHEDULE ?? "0 0 1 * *",
+    timezone: process.env.QUOTA_CRON_TIMEZONE ?? "Europe/Istanbul",
+  },
+  llmQuota: {
+    enforce: process.env.ENFORCE_LLM_QUOTA !== "false",
+    maxOutputTokens: Number(process.env.LLM_MAX_OUTPUT_TOKENS ?? 12000),
+    tokenEstimateChars: Number(process.env.LLM_TOKEN_ESTIMATE_CHARS ?? 3),
+    prices: {
+      inputPerMillion: Number(process.env.LLM_INPUT_COST_PER_MILLION ?? 0),
+      outputPerMillion: Number(process.env.LLM_OUTPUT_COST_PER_MILLION ?? 0),
+      cacheReadPerMillion: Number(process.env.LLM_CACHE_READ_COST_PER_MILLION ?? 0),
+      cacheWritePerMillion: Number(process.env.LLM_CACHE_WRITE_COST_PER_MILLION ?? 0),
+    },
+  },
   // "openai" | "claude" — which LLM backend to use for code generation.
   llmProvider: (process.env.LLM_PROVIDER ?? "claude").toLowerCase(),
   freecadMcp: {
