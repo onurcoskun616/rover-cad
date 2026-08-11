@@ -1,8 +1,7 @@
 import path from "node:path";
 import { Router } from "express";
 import { apiKeyAuth } from "./apiKeyAuth.js";
-import { promptToFreecadCode } from "../services/promptToCodeService.js";
-import { runBuildPipeline } from "../services/buildPipeline.js";
+import { runParamEdit, parseParams } from "../services/paramEditService.js";
 import { createJob, runJob } from "../services/jobStore.js";
 
 function makeFileUrl(proto, host, filePath) {
@@ -14,16 +13,26 @@ const router = Router();
 
 router.use(apiKeyAuth);
 
-// Starts the model build as an async job and returns a jobId immediately. The
-// build can exceed Cloudflare's 100s edge timeout, so we never hold the HTTP
-// request open for it — the frontend polls GET /jobs/:id instead.
 router.post("/", (req, res) => {
-  const { prompt } = req.body ?? {};
+  const { code, paramName, newValue } = req.body ?? {};
 
-  if (typeof prompt !== "string" || prompt.trim().length === 0) {
-    return res
-      .status(400)
-      .json({ error: "prompt is required and must be a non-empty string" });
+  if (typeof code !== "string" || !code.trim()) {
+    return res.status(400).json({ error: "code is required" });
+  }
+  if (typeof paramName !== "string" || !paramName.trim()) {
+    return res.status(400).json({ error: "paramName is required" });
+  }
+  if (typeof newValue !== "number" || !Number.isFinite(newValue)) {
+    return res.status(400).json({ error: "newValue must be a finite number" });
+  }
+
+  const params = parseParams(code);
+  const param = params.find((p) => p.name === paramName);
+  if (!param) {
+    return res.status(400).json({
+      error: `Parametre bulunamadi: ${paramName}`,
+      availableParams: params.map((p) => p.name),
+    });
   }
 
   const proto = req.protocol;
@@ -33,25 +42,15 @@ router.post("/", (req, res) => {
   runJob(
     jobId,
     async () => {
-      const result = await runBuildPipeline({
-        generate: (correction) => promptToFreecadCode(prompt, correction),
-        verifyPrompt: prompt,
-      });
+      const result = await runParamEdit(code, paramName, newValue);
 
       if (!result.ok) {
         return {
           ok: false,
-          body: {
-            error: result.error,
-            lastError: result.lastError,
-            generatedCode: result.generatedCode,
-          },
+          body: { error: result.error, generatedCode: result.generatedCode },
         };
       }
 
-      // The CAM assistant (/cam-step) and the technical drawing
-      // (/generate-pdf) are produced on demand, so no extra FreeCAD round-trip
-      // here.
       return {
         ok: true,
         body: {
@@ -62,7 +61,6 @@ router.post("/", (req, res) => {
           bbox: result.bbox,
           anchors: result.anchors,
           center: result.center,
-          warning: result.warning,
           generatedCode: result.generatedCode,
         },
       };

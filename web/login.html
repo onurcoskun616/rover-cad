@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TOPKAPIAI · Giriş</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="auth-page">
+  <main class="auth-shell">
+    <section class="auth-intro" aria-label="TOPKAPIAI tanıtımı">
+      <a class="auth-brand" href="index.html" aria-label="TOPKAPIAI ana sayfa">
+        <img src="logo.png" alt="" class="auth-logo">
+        <span><strong>TOPKAPIAI</strong></span>
+      </a>
+
+      <div class="auth-copy">
+        <span class="auth-kicker">YAPAY ZEKA DESTEKLİ ÜRETİM</span>
+        <h1>Fikrinizden<br><em>üretime.</em></h1>
+        <p>Teknik çizimden 3D modele, CAM planından CNC çıktısına kadar tüm üretim süreciniz tek çalışma alanında.</p>
+      </div>
+
+      <div class="auth-capabilities" aria-label="Platform özellikleri">
+        <span><i>01</i> 3D Model</span>
+        <span><i>02</i> Teknik Çizim</span>
+        <span><i>03</i> CAM &amp; CNC</span>
+      </div>
+    </section>
+
+    <section class="auth-panel">
+      <div class="auth-panel-inner">
+        <div class="auth-heading">
+          <h2 id="auth-title">Geleceğe Hoş Geldiniz</h2>
+          <p id="auth-description" hidden></p>
+        </div>
+
+        <div class="auth-tabs" role="tablist" aria-label="Hesap işlemleri">
+          <button id="login-tab" class="auth-tab active" type="button" role="tab" aria-selected="true">Giriş yap</button>
+          <button id="register-tab" class="auth-tab" type="button" role="tab" aria-selected="false">Yeni hesap</button>
+        </div>
+
+        <form id="auth-form" class="auth-form">
+          <label id="name-wrap" class="auth-field" hidden>
+            <span>Ad soyad</span>
+            <input id="name" type="text" autocomplete="name" placeholder="Adınız ve soyadınız">
+          </label>
+
+          <label class="auth-field">
+            <span>E-posta adresi</span>
+            <input id="email" type="email" required autocomplete="email" placeholder="ornek@mail.com">
+          </label>
+
+          <label class="auth-field">
+            <span>Parola</span>
+            <input id="password" type="password" minlength="8" required autocomplete="current-password" placeholder="En az 8 karakter">
+          </label>
+
+          <p id="auth-error" class="auth-error" role="alert" hidden></p>
+          <button id="submit" class="auth-submit" type="submit">
+            <span>Giriş yap</span><b aria-hidden="true">→</b>
+          </button>
+        </form>
+
+        <p class="auth-note"><span aria-hidden="true">✓</span> Yeni hesaplara her ay 50.000 ücretsiz token tanımlanır.</p>
+      </div>
+      <p class="auth-footer">© 2026 TOPKAPIAI</p>
+    </section>
+  </main>
+  <script type="module" src="login.js"></script>
+</body>
+</html>

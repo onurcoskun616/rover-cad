@@ -1,10 +1,25 @@
 import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import express from "express";
 import cors from "cors";
 import { config } from "./config.js";
 import healthRouter from "./routes/health.js";
 import generateRouter from "./routes/generate.js";
-import { disconnectFreecad } from "./services/freecadMcpClient.js";
+import generateFromImageRouter from "./routes/generateFromImage.js";
+import uploadStepRouter from "./routes/uploadStep.js";
+import uploadDxfRouter from "./routes/uploadDxf.js";
+import reviseRouter from "./routes/revise.js";
+import generatePdfRouter from "./routes/generatePdf.js";
+import jobsRouter from "./routes/jobs.js";
+import camAssistantRouter from "./routes/camAssistant.js";
+import dimensionsRouter from "./routes/dimensions.js";
+import paramEditRouter from "./routes/paramEdit.js";
+import simulateRouter from "./routes/simulate.js";
+import { machinesRouter, toolsRouter } from "./routes/inventory.js";
+import { callFreecadTool, disconnectFreecad } from "./services/freecadMcpClient.js";
+import authRouter from "./routes/auth.js";
+import adminRouter from "./routes/admin.js";
 
 fs.mkdirSync(config.outputDir, { recursive: true });
 
@@ -14,24 +29,62 @@ const app = express();
 app.set("trust proxy", true);
 app.use(
   cors({
-    origin: config.corsOrigin === "*" ? true : config.corsOrigin.split(","),
+    origin: true,
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+    maxAge: 1,
   }),
 );
 app.use(express.json());
 
 app.use("/health", healthRouter);
+app.use("/auth", authRouter);
+app.use("/admin", adminRouter);
 app.use("/generate", generateRouter);
-// Serves generated STEP/STL files so the frontend can link to and preview them.
+app.use("/generate-from-image", generateFromImageRouter);
+app.use("/upload-step", uploadStepRouter);
+app.use("/upload-dxf", uploadDxfRouter);
+app.use("/revise", reviseRouter);
+app.use("/generate-pdf", generatePdfRouter);
+// Poll async job status started by the routes above.
+app.use("/jobs", jobsRouter);
+// Extract interactive 3D dimension labels from a STEP file.
+app.use("/extract-dimensions", dimensionsRouter);
+// Deterministic parameter edit: substitute a value in the ROVER_PARAMS block
+// and re-run in FreeCAD — no LLM involved.
+app.use("/param-edit", paramEditRouter);
+// Kinematic simulation: run a FreeCAD script that produces per-part STLs + kinematics.json.
+app.use("/simulate", simulateRouter);
+// Machine/tool inventory (profiles reused across CAM jobs).
+app.use("/machines", machinesRouter);
+app.use("/tools", toolsRouter);
+// Serves generated STEP/STL/PDF/G-code files so the frontend can link to and
+// preview them. Registered before the "/"-mounted CAM assistant router so these
+// public downloads are never intercepted.
 app.use("/files", express.static(config.outputDir));
+// Serve example simulation scripts so the frontend demo can fetch them.
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+app.use("/files", express.static(path.join(__dirname, "..", "examples")));
+// CAM assistant (step wizard -> plan -> confirm) for every part:
+// /cam-step, /cam-plan, /cam-confirm.
+// Mounted at "/" (its routes carry their own auth), so keep it last.
+app.use("/", camAssistantRouter);
 
 // eslint-disable-next-line no-unused-vars
 app.use((err, req, res, next) => {
   console.error(err);
-  res.status(500).json({ error: err.message ?? "Internal server error" });
+  res.status(err.status ?? 500).json({ error: err.message ?? "Internal server error" });
 });
 
 const server = app.listen(config.port, () => {
   console.log(`Rover CAD backend listening on http://localhost:${config.port}`);
+  // Pre-warm FreeCAD: open the MCP connection and launch FreeCAD now so the first
+  // real request doesn't pay the cold-start (uvx resolve + FreeCAD boot) cost.
+  callFreecadTool(config.freecadMcp.toolName, {
+    [config.freecadMcp.toolParam]: "print('warm')",
+  })
+    .then(() => console.log("TopkapiAl CAD engine pre-warmed"))
+    .catch((err) => console.warn("TopkapiAl CAD engine pre-warm skipped:", err.message));
 });
 
 async function shutdown() {
