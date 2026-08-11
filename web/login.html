@@ -1,3 +1,72 @@
-<!doctype html><html lang="tr"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Rover CAD · Giriş</title><link rel="stylesheet" href="style.css"></head>
-<body class="auth-page"><header class="site-header auth-header"><img src="logo.png" class="logo" alt="Topkapı"><h1 class="brand-title">ROVER CAD</h1><p class="brand-subtitle">Yapay Zeka Destekli Üretim Platformu</p><p class="subtitle">3D model, teknik çizim, CAM ve CNC çıktıları için hesabınıza giriş yapın.</p></header>
-<main class="auth-main"><section class="prompt-section auth-card"><div class="tabs"><button id="login-tab" class="tab active">Giriş yap</button><button id="register-tab" class="tab">Üye ol</button></div><form id="auth-form"><label id="name-wrap" hidden>Ad soyad<input id="name" autocomplete="name"></label><label>E-posta<input id="email" type="email" required autocomplete="email"></label><label>Parola<input id="password" type="password" minlength="8" required autocomplete="current-password"></label><button id="submit" type="submit">Giriş yap</button><p id="auth-error" class="form-error" hidden></p></form></section></main><script type="module" src="login.js"></script></body></html>
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Rover CAD · Giriş</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="auth-page">
+  <main class="auth-shell">
+    <section class="auth-intro" aria-label="Rover CAD tanıtımı">
+      <a class="auth-brand" href="index.html" aria-label="Rover CAD ana sayfa">
+        <img src="logo.png" alt="" class="auth-logo">
+        <span>ROVER <strong>CAD</strong></span>
+      </a>
+
+      <div class="auth-copy">
+        <span class="auth-kicker">YAPAY ZEKA DESTEKLİ ÜRETİM</span>
+        <h1>Fikrinizden<br><em>üretime.</em></h1>
+        <p>Teknik çizimden 3D modele, CAM planından CNC çıktısına kadar tüm üretim süreciniz tek çalışma alanında.</p>
+      </div>
+
+      <div class="auth-capabilities" aria-label="Platform özellikleri">
+        <span><i>01</i> 3D Model</span>
+        <span><i>02</i> Teknik Çizim</span>
+        <span><i>03</i> CAM &amp; CNC</span>
+      </div>
+    </section>
+
+    <section class="auth-panel">
+      <div class="auth-panel-inner">
+        <div class="auth-heading">
+          <span class="auth-account-label">TOPKAPIAI HESABI</span>
+          <h2 id="auth-title">Tekrar hoş geldiniz</h2>
+          <p id="auth-description">Projelerinize kaldığınız yerden devam edin.</p>
+        </div>
+
+        <div class="auth-tabs" role="tablist" aria-label="Hesap işlemleri">
+          <button id="login-tab" class="auth-tab active" type="button" role="tab" aria-selected="true">Giriş yap</button>
+          <button id="register-tab" class="auth-tab" type="button" role="tab" aria-selected="false">Yeni hesap</button>
+        </div>
+
+        <form id="auth-form" class="auth-form">
+          <label id="name-wrap" class="auth-field" hidden>
+            <span>Ad soyad</span>
+            <input id="name" type="text" autocomplete="name" placeholder="Adınız ve soyadınız">
+          </label>
+
+          <label class="auth-field">
+            <span>E-posta adresi</span>
+            <input id="email" type="email" required autocomplete="email" placeholder="ornek@sirket.com">
+          </label>
+
+          <label class="auth-field">
+            <span>Parola</span>
+            <input id="password" type="password" minlength="8" required autocomplete="current-password" placeholder="En az 8 karakter">
+          </label>
+
+          <p id="auth-error" class="auth-error" role="alert" hidden></p>
+          <button id="submit" class="auth-submit" type="submit">
+            <span>Giriş yap</span><b aria-hidden="true">→</b>
+          </button>
+        </form>
+
+        <p class="auth-note"><span aria-hidden="true">✓</span> Yeni hesaplara her ay 50.000 ücretsiz token tanımlanır.</p>
+      </div>
+      <p class="auth-footer">© 2026 Rover CAD · TopkapıAI</p>
+    </section>
+  </main>
+  <script type="module" src="login.js"></script>
+</body>
+</html>
