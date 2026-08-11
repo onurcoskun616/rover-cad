@@ -69,7 +69,9 @@ copy NUL .env
 ```env
 PORT=3000
 CORS_ORIGIN=https://YOUR-NETLIFY-SITE.netlify.app
-API_KEY=guclu-bir-api-anahtari-buraya
+AUTH_SECRET=uzun-rastgele-bir-gizli-anahtar
+ADMIN_EMAIL=yonetici@ornek.com
+FREE_MONTHLY_TOKENS=50000
 
 # FreeCAD MCP (varsayilan: uvx freecad-mcp)
 FREECAD_MCP_COMMAND=uvx
@@ -190,3 +192,11 @@ npx netlify deploy --prod --dir=web
 ### Cloudflare Tunnel baglanti kopuyor
 - `cloudflared tunnel run rover-cad` komutunu tekrar calistir
 - Windows'ta servis olarak kur: `cloudflared service install`
+# SaaS environment
+
+Set `AUTH_SECRET` to a long random value, `ADMIN_EMAIL` to the first administrator's
+email address, and `FREE_MONTHLY_TOKENS=50000`. The account registered with
+`ADMIN_EMAIL` receives the administrator role automatically.
+
+`DATA_DIR` must point to a persistent, backed-up volume. User records, password
+hashes and token usage are stored in `accounts.json` under that directory.

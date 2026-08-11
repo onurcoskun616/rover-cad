@@ -18,6 +18,8 @@ import paramEditRouter from "./routes/paramEdit.js";
 import simulateRouter from "./routes/simulate.js";
 import { machinesRouter, toolsRouter } from "./routes/inventory.js";
 import { callFreecadTool, disconnectFreecad } from "./services/freecadMcpClient.js";
+import authRouter from "./routes/auth.js";
+import adminRouter from "./routes/admin.js";
 
 fs.mkdirSync(config.outputDir, { recursive: true });
 
@@ -29,13 +31,15 @@ app.use(
   cors({
     origin: true,
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "x-api-key"],
+    allowedHeaders: ["Content-Type", "Authorization"],
     maxAge: 1,
   }),
 );
 app.use(express.json());
 
 app.use("/health", healthRouter);
+app.use("/auth", authRouter);
+app.use("/admin", adminRouter);
 app.use("/generate", generateRouter);
 app.use("/generate-from-image", generateFromImageRouter);
 app.use("/upload-step", uploadStepRouter);
@@ -69,7 +73,7 @@ app.use("/", camAssistantRouter);
 // eslint-disable-next-line no-unused-vars
 app.use((err, req, res, next) => {
   console.error(err);
-  res.status(500).json({ error: err.message ?? "Internal server error" });
+  res.status(err.status ?? 500).json({ error: err.message ?? "Internal server error" });
 });
 
 const server = app.listen(config.port, () => {

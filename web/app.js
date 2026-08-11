@@ -1,9 +1,7 @@
 const API_BASE = "https://api.topkapikoleji.org";
-// NOTE: shipped in a public static site, so this is not a real secret -- it
-// only keeps casual/automated traffic off the endpoint, not a determined
-// attacker (anyone can read it via view-source). Must match API_KEY in the
-// backend's .env.
-const API_KEY = "1d48ec585a4b306db72a23be0b7ce8f56618c1275a3ea5efcee96df1106712f1";
+const sessionToken = localStorage.getItem("rover_session");
+if (!sessionToken) window.location.replace("login.html");
+const authHeaders = () => ({ Authorization: `Bearer ${sessionToken}` });
 
 const tabText = document.getElementById("tab-text");
 const tabImage = document.getElementById("tab-image");
@@ -323,7 +321,7 @@ async function runAsyncJob(url, options, onTick) {
     let statusData;
     try {
       statusResp = await fetch(`${API_BASE}/jobs/${jobId}`, {
-        headers: { "x-api-key": API_KEY },
+        headers: authHeaders(),
       });
       statusData = await readJson(statusResp);
     } catch {
@@ -369,7 +367,7 @@ async function handleGenerate() {
     url = `${API_BASE}/generate`;
     options = {
       method: "POST",
-      headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
+      headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify({ prompt }),
     };
   } else if (mode === "image") {
@@ -386,7 +384,7 @@ async function handleGenerate() {
       form.append("prompt", lastPrompt);
     }
     url = `${API_BASE}/generate-from-image`;
-    options = { method: "POST", headers: { "x-api-key": API_KEY }, body: form };
+    options = { method: "POST", headers: authHeaders(), body: form };
   } else {
     // STEP/IGES/DXF upload: import in FreeCAD, preview, then jump into CAM.
     const file = stepInput.files?.[0];
@@ -405,7 +403,7 @@ async function handleGenerate() {
     } else {
       url = `${API_BASE}/upload-step`;
     }
-    options = { method: "POST", headers: { "x-api-key": API_KEY }, body: form };
+    options = { method: "POST", headers: authHeaders(), body: form };
   }
 
   setLoading(true, `${baseMessage}, bu biraz zaman alabilir…`);
@@ -504,7 +502,7 @@ async function handleRevise() {
       `${API_BASE}/revise`,
       {
         method: "POST",
-        headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
+        headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify({ prompt: instruction, previousCode, basePrompt: base }),
       },
       (seconds) => setLoading(true, `Tasarım güncelleniyor… (${seconds} sn)`),
@@ -541,7 +539,7 @@ async function handlePdf() {
       `${API_BASE}/generate-pdf`,
       {
         method: "POST",
-        headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
+        headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify({
           stepPath: lastStepPath,
           code: lastGeneratedCode,
@@ -600,7 +598,7 @@ async function loadCamStep(targetIndex) {
   try {
     const response = await fetch(`${API_BASE}/cam-step`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
+      headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify({
         stepPath: lastStepPath,
         prompt: lastPrompt,
@@ -716,7 +714,7 @@ async function requestCamPlan(changeRequest) {
       `${API_BASE}/cam-plan`,
       {
         method: "POST",
-        headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
+        headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify(body),
       },
       (seconds) => setCamStatus(`İşleme planı oluşturuluyor… (${seconds}s)`, true),
@@ -769,7 +767,7 @@ async function handleCamPreview() {
       `${API_BASE}/cam-simulate`,
       {
         method: "POST",
-        headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
+        headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify({
           stepPath: lastStepPath,
           answers: camAnswers,
@@ -907,7 +905,7 @@ async function handleCamConfirm() {
       `${API_BASE}/cam-confirm`,
       {
         method: "POST",
-        headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
+        headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify({
           stepPath: lastStepPath,
           answers: camAnswers,
@@ -999,7 +997,7 @@ async function handleQuoteSubmit() {
   try {
     const response = await fetch(`${API_BASE}/cam-quote`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
+      headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify({
         mode,
         minutes: camEstimatedMinutes,
@@ -1081,7 +1079,7 @@ async function fetchAndShowDimensions() {
   try {
     const resp = await fetch(`${API_BASE}/extract-dimensions`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
+      headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify({ stepPath: lastStepPath }),
     });
     const data = await readJson(resp);
@@ -1156,7 +1154,7 @@ async function handleDimensionEdit(dim, newValue) {
         `${API_BASE}/param-edit`,
         {
           method: "POST",
-          headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
+          headers: { "Content-Type": "application/json", ...authHeaders() },
           body: JSON.stringify({ code, paramName, newValue }),
         },
         (seconds) => setLoading(true, `Ölçü güncelleniyor… (${seconds} sn)`),
@@ -1175,7 +1173,7 @@ async function handleDimensionEdit(dim, newValue) {
         `${API_BASE}/revise`,
         {
           method: "POST",
-          headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
+          headers: { "Content-Type": "application/json", ...authHeaders() },
           body: JSON.stringify({
             prompt: instruction,
             previousCode: code,
@@ -1266,7 +1264,7 @@ function showView(view) {
 async function apiJson(url, options) {
   const resp = await fetch(url, {
     ...options,
-    headers: { "Content-Type": "application/json", "x-api-key": API_KEY, ...(options?.headers || {}) },
+    headers: { "Content-Type": "application/json", ...authHeaders(), ...(options?.headers || {}) },
   });
   return { ok: resp.ok, data: await readJson(resp) };
 }
@@ -1532,7 +1530,7 @@ async function handleSimUndo() {
   try {
     const resp = await fetch(`${API_BASE}/simulate/undo`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
+      headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify({ sessionId: simSessionId }),
     });
     const data = await readJson(resp);
@@ -1607,7 +1605,7 @@ async function handleSimDemo() {
       `${API_BASE}/simulate/demo`,
       {
         method: "POST",
-        headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
+        headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify({ sessionId: simSessionId }),
       },
       (seconds) => {
@@ -1723,7 +1721,7 @@ async function handleSimGenerate() {
       `${API_BASE}/simulate/generate`,
       {
         method: "POST",
-        headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
+        headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify({
           prompt,
           previousCode: simCurrentCode || undefined,
@@ -1842,7 +1840,7 @@ async function handleSimCustom() {
       `${API_BASE}/simulate`,
       {
         method: "POST",
-        headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
+        headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify({ code }),
       },
       (seconds) => {

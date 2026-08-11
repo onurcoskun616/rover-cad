@@ -11,7 +11,9 @@ export const config = {
   // Persistent user data (machine/tool inventory). File-based JSON store.
   dataDir: path.resolve(process.env.DATA_DIR ?? "data"),
   corsOrigin: process.env.CORS_ORIGIN ?? "*",
-  apiKey: process.env.API_KEY ?? "",
+  authSecret: process.env.AUTH_SECRET ?? "change-me-in-production",
+  freeMonthlyTokens: Number(process.env.FREE_MONTHLY_TOKENS ?? 50000),
+  adminEmail: (process.env.ADMIN_EMAIL ?? "").toLowerCase(),
   // "openai" | "claude" — which LLM backend to use for code generation.
   llmProvider: (process.env.LLM_PROVIDER ?? "claude").toLowerCase(),
   freecadMcp: {
