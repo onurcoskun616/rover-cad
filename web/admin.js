@@ -1,4 +1,117 @@
-const API_BASE="https://api.topkapikoleji.org",token=localStorage.getItem("rover_session"),headers={Authorization:`Bearer ${token}`,"Content-Type":"application/json"};let all=[];const fmt=new Intl.NumberFormat("tr-TR");
-async function load(){const [s,u]=await Promise.all([fetch(`${API_BASE}/admin/stats`,{headers}),fetch(`${API_BASE}/admin/users`,{headers})]);if(s.status===403)return location.replace("dashboard.html");if(!s.ok)return location.replace("login.html");const stats=await s.json();document.getElementById("stats").innerHTML=`<article><span>Toplam üye</span><strong>${stats.users}</strong></article><article><span>Aktif üye</span><strong>${stats.activeUsers}</strong></article><article><span>Bu ay token</span><strong>${fmt.format(stats.monthlyTokensUsed)}</strong></article>`;all=(await u.json()).users;render(all)}
-function render(list){document.getElementById("users").innerHTML=list.map(u=>`<tr><td><strong>${u.name}</strong><small>${u.email}</small></td><td>${u.plan}</td><td>${fmt.format(u.usedTokens)}</td><td><select data-id="${u.id}" data-field="status"><option value="active" ${u.status==="active"?"selected":""}>Aktif</option><option value="blocked" ${u.status==="blocked"?"selected":""}>Engelli</option></select></td><td><input data-id="${u.id}" data-field="monthlyTokens" type="number" value="${u.monthlyTokens}"></td><td><button data-save="${u.id}">Kaydet</button></td></tr>`).join("")}
-document.getElementById("search").oninput=e=>render(all.filter(u=>(u.name+u.email).toLowerCase().includes(e.target.value.toLowerCase())));document.getElementById("users").onclick=async e=>{const id=e.target.dataset.save;if(!id)return;const row=e.target.closest("tr"),body={};row.querySelectorAll("[data-field]").forEach(x=>body[x.dataset.field]=x.value);await fetch(`${API_BASE}/admin/users/${id}`,{method:"PATCH",headers,body:JSON.stringify(body)});e.target.textContent="Kaydedildi";setTimeout(()=>e.target.textContent="Kaydet",1200)};load();
+const API_BASE = "https://api.topkapikoleji.org";
+const sessionToken = localStorage.getItem("rover_session");
+const fmt = new Intl.NumberFormat("tr-TR");
+const byId = (id) => document.getElementById(id);
+
+const demoData = {
+  stats: { users: 1284, activeUsers: 1168, monthlyTokensUsed: 1846250, files: 7432 },
+  users: [
+    { id: "1", name: "Tahir Fırat", email: "tahir@topkapikoleji.org", plan: "pro", usedTokens: 38240, monthlyTokens: 100000, status: "active", initials: "TF" },
+    { id: "2", name: "Ecem Şuekinci", email: "ecem@topkapikoleji.org", plan: "free", usedTokens: 7650, monthlyTokens: 50000, status: "active", initials: "EŞ" },
+    { id: "3", name: "Mehmet Yılmaz", email: "mehmet@example.com", plan: "free", usedTokens: 42100, monthlyTokens: 50000, status: "active", initials: "MY" },
+    { id: "4", name: "Selin Kaya", email: "selin@example.com", plan: "pro", usedTokens: 89120, monthlyTokens: 150000, status: "active", initials: "SK" },
+    { id: "5", name: "Ahmet Demir", email: "ahmet@example.com", plan: "free", usedTokens: 12800, monthlyTokens: 50000, status: "blocked", initials: "AD" }
+  ],
+  activity: [
+    { icon: "＋", title: "Yeni kullanıcı kaydı", detail: "Ecem Şuekinci ücretsiz planla katıldı", time: "8 dakika önce", tone: "blue" },
+    { icon: "↗", title: "Token kotası güncellendi", detail: "Selin Kaya · 150.000 token", time: "34 dakika önce", tone: "green" },
+    { icon: "◇", title: "Yeni proje oluşturuldu", detail: "Makine Parçası Tasarımı", time: "1 saat önce", tone: "violet" },
+    { icon: "!", title: "Hesap erişimi durduruldu", detail: "Ahmet Demir", time: "Dün, 18:20", tone: "orange" }
+  ]
+};
+
+let allUsers = [];
+let previewMode = false;
+
+function safeText(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
+}
+
+function renderStats(stats) {
+  const items = [
+    ["Toplam kullanıcı", fmt.format(stats.users), "+%8 bu ay", "users"],
+    ["Aktif kullanıcı", fmt.format(stats.activeUsers), `%${Math.round((stats.activeUsers / stats.users) * 100)} aktif`, "active"],
+    ["Bu ay kullanılan", fmt.format(stats.monthlyTokensUsed), "token", "tokens"],
+    ["Oluşturulan dosya", fmt.format(stats.files || 0), "+342 bu ay", "files"]
+  ];
+  byId("stats").innerHTML = items.map(([label, value, note, tone]) => `<article><div class="admin-metric-icon ${tone}">${tone === "users" ? "◎" : tone === "active" ? "✓" : tone === "tokens" ? "↗" : "▤"}</div><div><span>${label}</span><strong>${value}</strong><small>${note}</small></div></article>`).join("");
+}
+
+function filteredUsers() {
+  const query = byId("search").value.trim().toLocaleLowerCase("tr-TR");
+  const status = byId("status-filter").value;
+  const plan = byId("plan-filter").value;
+  return allUsers.filter((user) => `${user.name} ${user.email}`.toLocaleLowerCase("tr-TR").includes(query) && (status === "all" || user.status === status) && (plan === "all" || user.plan === plan));
+}
+
+function renderUsers() {
+  const users = filteredUsers();
+  byId("user-count").textContent = `${fmt.format(allUsers.length)} kayıtlı kullanıcı`;
+  byId("result-summary").textContent = users.length ? `${users.length} kullanıcı gösteriliyor` : "Sonuç bulunamadı";
+  byId("users-list").innerHTML = users.map((user) => {
+    const rate = Math.min(100, Math.round((user.usedTokens / user.monthlyTokens) * 100));
+    return `<tr data-user-id="${safeText(user.id)}">
+      <td><div class="admin-user-cell"><span>${safeText(user.initials || user.name.split(/\s+/).map((part) => part[0]).slice(0, 2).join(""))}</span><div><strong>${safeText(user.name)}</strong><small>${safeText(user.email)}</small></div></div></td>
+      <td><select class="admin-inline-select" data-field="plan"><option value="free" ${user.plan === "free" ? "selected" : ""}>Ücretsiz</option><option value="pro" ${user.plan === "pro" ? "selected" : ""}>Pro</option></select></td>
+      <td><div class="admin-usage-cell"><span><b>${fmt.format(user.usedTokens)}</b> / ${fmt.format(user.monthlyTokens)}</span><i><em style="width:${rate}%"></em></i></div></td>
+      <td><select class="admin-inline-select status-${safeText(user.status)}" data-field="status"><option value="active" ${user.status === "active" ? "selected" : ""}>Aktif</option><option value="blocked" ${user.status === "blocked" ? "selected" : ""}>Engelli</option></select></td>
+      <td><input class="admin-quota-input" data-field="monthlyTokens" type="number" min="0" step="1000" value="${Number(user.monthlyTokens)}" aria-label="${safeText(user.name)} aylık token kotası"></td>
+      <td><button class="admin-save-btn" data-save="${safeText(user.id)}" type="button">Kaydet</button></td>
+    </tr>`;
+  }).join("");
+}
+
+function renderActivity(items) {
+  byId("activity-list").innerHTML = items.map((item) => `<div class="admin-activity"><span class="${safeText(item.tone)}">${safeText(item.icon)}</span><div><strong>${safeText(item.title)}</strong><small>${safeText(item.detail)}</small></div><time>${safeText(item.time)}</time></div>`).join("");
+}
+
+function render(data, isPreview) {
+  previewMode = isPreview;
+  allUsers = data.users;
+  renderStats(data.stats);
+  renderUsers();
+  renderActivity(data.activity || demoData.activity);
+  byId("preview-banner").hidden = !isPreview;
+}
+
+async function loadAdmin() {
+  if (!sessionToken) { render(demoData, true); return; }
+  try {
+    const headers = { Authorization: `Bearer ${sessionToken}` };
+    const [statsResponse, usersResponse] = await Promise.all([fetch(`${API_BASE}/admin/stats`, { headers }), fetch(`${API_BASE}/admin/users`, { headers })]);
+    if (statsResponse.status === 403) throw new Error("Bu hesapta yönetici yetkisi bulunmuyor.");
+    if (!statsResponse.ok || !usersResponse.ok) throw new Error("Yönetim verileri alınamadı.");
+    const stats = await statsResponse.json();
+    const usersPayload = await usersResponse.json();
+    render({ stats, users: usersPayload.users, activity: [] }, false);
+  } catch (error) {
+    render(demoData, true);
+    byId("admin-notice").textContent = `${error.message} Örnek verilerle önizleme açıldı.`;
+  }
+}
+
+["search", "status-filter", "plan-filter"].forEach((id) => byId(id).addEventListener(id === "search" ? "input" : "change", renderUsers));
+
+byId("users-list").addEventListener("click", async (event) => {
+  const id = event.target.dataset.save;
+  if (!id) return;
+  const row = event.target.closest("tr");
+  const body = {};
+  row.querySelectorAll("[data-field]").forEach((field) => { body[field.dataset.field] = field.type === "number" ? Number(field.value) : field.value; });
+  if (!previewMode) {
+    const response = await fetch(`${API_BASE}/admin/users/${id}`, { method: "PATCH", headers: { Authorization: `Bearer ${sessionToken}`, "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    if (!response.ok) { byId("admin-notice").textContent = "Değişiklik kaydedilemedi."; return; }
+  }
+  const user = allUsers.find((item) => String(item.id) === String(id));
+  if (user) Object.assign(user, body);
+  event.target.textContent = "Kaydedildi";
+  byId("admin-notice").textContent = previewMode ? "Değişiklik yalnızca önizleme verisine uygulandı." : "Kullanıcı güncellendi.";
+  setTimeout(() => { event.target.textContent = "Kaydet"; renderUsers(); }, 1000);
+});
+
+document.querySelectorAll("[data-admin-action]").forEach((button) => button.addEventListener("click", () => {
+  byId("admin-notice").textContent = "Bu yönetim işlemi API bağlantısı açıldığında etkinleşecek.";
+}));
+
+byId("logout-btn").addEventListener("click", () => { localStorage.removeItem("rover_session"); location.replace("login.html"); });
+loadAdmin();
