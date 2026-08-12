@@ -21,9 +21,11 @@
   justify-content: center;
   width: 100%;
   min-height: 100vh;
+  min-height: 100svh;
   max-width: none;
   margin: 0;
   padding: 24px;
+  box-sizing: border-box;
 }
 
 .auth-bg-lights {
@@ -60,6 +62,7 @@
   position: relative;
   z-index: 1;
   width: min(100%, 28rem);
+  margin: auto;
   padding: 32px;
   border: 1px solid var(--workspace-border);
   border-radius: 24px;
@@ -358,8 +361,9 @@
   }
 
   .auth-page-v2 .auth-shell {
-    align-items: flex-start;
+    align-items: center;
     min-height: 100vh;
+    min-height: 100svh;
     padding: 18px;
   }
 
