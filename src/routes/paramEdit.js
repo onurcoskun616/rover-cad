@@ -3,6 +3,7 @@ import { Router } from "express";
 import { apiKeyAuth } from "./apiKeyAuth.js";
 import { runParamEdit, parseParams } from "../services/paramEditService.js";
 import { createJob, runJob } from "../services/jobStore.js";
+import { archiveProjectBuildFailOpen } from "../services/projectArchiveService.js";
 
 function makeFileUrl(proto, host, filePath) {
   if (!filePath) return null;
@@ -14,7 +15,7 @@ const router = Router();
 router.use(apiKeyAuth);
 
 router.post("/", (req, res) => {
-  const { code, paramName, newValue } = req.body ?? {};
+  const { code, paramName, newValue, projectId, projectName, basePrompt } = req.body ?? {};
 
   if (typeof code !== "string" || !code.trim()) {
     return res.status(400).json({ error: "code is required" });
@@ -37,6 +38,7 @@ router.post("/", (req, res) => {
 
   const proto = req.protocol;
   const host = req.get("host");
+  const userId = req.user?.id ?? null;
   const jobId = createJob();
 
   runJob(
@@ -51,6 +53,18 @@ router.post("/", (req, res) => {
         };
       }
 
+      const archived = archiveProjectBuildFailOpen({
+        userId,
+        projectId,
+        projectName,
+        operation: "cad-param-edit",
+        prompt: `${basePrompt || "Parametrik düzenleme"}; ${paramName}=${newValue}`,
+        generatedCode: result.generatedCode,
+        stepPath: result.stepPath,
+        stlPath: result.stlPath,
+        bbox: result.bbox,
+      });
+
       return {
         ok: true,
         body: {
@@ -62,6 +76,7 @@ router.post("/", (req, res) => {
           anchors: result.anchors,
           center: result.center,
           generatedCode: result.generatedCode,
+          ...(archived ?? {}),
         },
       };
     },
