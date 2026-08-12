@@ -1073,13 +1073,21 @@ async function loadStlPreview(stlUrl) {
     if (!viewer) {
       viewer = initViewer(viewerContainer);
     }
-    loadStl(viewer, stlUrl);
+    loadStl(viewer, await privateAssetUrl(stlUrl));
     if (lastStepPath && !lastDimData) {
       fetchAndShowDimensions();
     }
   } catch (err) {
     console.error("3D önizleme yüklenemedi:", err);
   }
+}
+
+async function privateAssetUrl(url) {
+  const value = String(url || "");
+  if (!value.includes("/auth/projects/")) return value;
+  const response = await fetch(value, { headers: authHeaders() });
+  if (!response.ok) throw new Error("Dosya önizleme için alınamadı");
+  return URL.createObjectURL(await response.blob());
 }
 
 async function showAnchors(anchors, center) {
@@ -1276,7 +1284,7 @@ function buildSyntheticCode() {
 // 2D contour preview (DXF without thickness): draw the contour as lines.
 async function loadContourPreview(contourUrl) {
   try {
-    const response = await fetch(contourUrl);
+    const response = await fetch(contourUrl, contourUrl.includes("/auth/projects/") ? { headers: authHeaders() } : undefined);
     const data = await readJson(response);
     const { initViewer, loadToolpath } = await import("./viewer.js");
     if (!viewer) viewer = initViewer(viewerContainer);
