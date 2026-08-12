@@ -2000,4 +2000,9 @@ promptInput.addEventListener("keydown", (event) => {
   }
 });
 
+const initialMode = new URLSearchParams(location.search).get("mode");
+if (["text", "image", "step", "sim"].includes(initialMode)) {
+  setMode(initialMode);
+}
+
 loadProjectFromUrl();
