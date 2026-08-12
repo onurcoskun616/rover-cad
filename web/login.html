@@ -9,14 +9,44 @@
 <body class="auth-page">
   <main class="auth-shell">
     <section class="auth-intro" aria-label="TOPKAPIAI tanıtımı">
+      <div class="auth-machine-drawing" aria-hidden="true">
+        <svg viewBox="0 0 900 900" role="presentation">
+          <g class="machine-gear machine-gear-large">
+            <circle cx="650" cy="238" r="116" />
+            <circle cx="650" cy="238" r="48" />
+            <path d="M650 98v-38M650 416v-38M510 238h-38M828 238h-38M551 139l-27-27M776 364l-27-27M551 337l-27 27M776 112l-27 27" />
+            <path d="M606 130l-15-35M709 381l-15-35M542 282l-35 15M793 179l-35 15M542 194l-35-15M793 297l-35-15M606 346l-15 35M709 95l-15 35" />
+          </g>
+          <g class="machine-bearing">
+            <circle cx="235" cy="642" r="91" />
+            <circle cx="235" cy="642" r="38" />
+            <circle cx="235" cy="580" r="10" />
+            <circle cx="289" cy="611" r="10" />
+            <circle cx="289" cy="673" r="10" />
+            <circle cx="235" cy="704" r="10" />
+            <circle cx="181" cy="673" r="10" />
+            <circle cx="181" cy="611" r="10" />
+          </g>
+          <g class="machine-shaft">
+            <path d="M418 560h259l48 48-48 48H418l-41-48 41-48Z" />
+            <path d="M465 560v96M620 560v96M725 608h88M813 584v48" />
+            <circle cx="813" cy="608" r="24" />
+          </g>
+          <g class="machine-blueprint">
+            <path d="M106 244h270M106 226v36M376 226v36M136 212v-78h210v78" />
+            <path d="M163 182h156M191 134v48M291 134v48" />
+          </g>
+        </svg>
+      </div>
+
       <a class="auth-brand" href="index.html" aria-label="TOPKAPIAI ana sayfa">
-        <img src="logo.png" alt="" class="auth-logo">
+        <img src="logo.png" alt="Topkapı Okulları logosu" class="auth-logo">
         <span><strong>TOPKAPIAI</strong></span>
       </a>
 
       <div class="auth-copy">
         <span class="auth-kicker">YAPAY ZEKA DESTEKLİ ÜRETİM</span>
-        <h1>Fikrinizden<br><em>üretime.</em></h1>
+        <h1>Fikirden<br><em>üretime.</em></h1>
         <p>Teknik çizimden 3D modele, CAM planından CNC çıktısına kadar tüm üretim süreciniz tek çalışma alanında.</p>
       </div>
 
@@ -39,6 +69,17 @@
           <button id="register-tab" class="auth-tab" type="button" role="tab" aria-selected="false">Yeni hesap</button>
         </div>
 
+        <button id="google-login" class="auth-google" type="button">
+          <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+            <path fill="#4285F4" d="M23.49 12.27c0-.79-.07-1.54-.19-2.27H12v4.29h6.47c-.28 1.5-1.13 2.77-2.4 3.62v2.79h3.89c2.27-2.09 3.53-5.17 3.53-8.43Z"/>
+            <path fill="#34A853" d="M12 24c3.24 0 5.96-1.07 7.95-2.9l-3.89-2.79c-1.08.72-2.45 1.14-4.06 1.14-3.12 0-5.77-2.11-6.71-4.94H1.28v2.88C3.26 21.31 7.33 24 12 24Z"/>
+            <path fill="#FBBC05" d="M5.29 14.51c-.24-.72-.38-1.49-.38-2.28s.14-1.56.38-2.28V7.07H1.28C.47 8.69 0 10.41 0 12.23s.47 3.54 1.28 5.16l4.01-2.88Z"/>
+            <path fill="#EA4335" d="M12 4.77c1.76 0 3.35.61 4.59 1.8l3.44-3.44C17.95 1.19 15.23 0 12 0 7.33 0 3.26 2.69 1.28 6.61l4.01 3.11C6.23 6.88 8.88 4.77 12 4.77Z"/>
+          </svg>
+          <span>Google hesabı ile devam et</span>
+        </button>
+        <div class="auth-divider"><span>veya e-posta ile</span></div>
+
         <form id="auth-form" class="auth-form">
           <label id="name-wrap" class="auth-field" hidden>
             <span>Ad soyad</span>
@@ -55,6 +96,7 @@
             <input id="password" type="password" minlength="8" required autocomplete="current-password" placeholder="En az 8 karakter">
           </label>
 
+          <button id="forgot-password" class="auth-link-button" type="button">Şifremi unuttum</button>
           <p id="auth-error" class="auth-error" role="alert" hidden></p>
           <button id="submit" class="auth-submit" type="submit">
             <span>Giriş yap</span><b aria-hidden="true">→</b>
