@@ -59,6 +59,12 @@ function fileTypeLabel(type) {
   }[String(type ?? "").toLowerCase()] || String(type || "DOSYA").toUpperCase();
 }
 
+function apiUrl(pathOrUrl) {
+  const value = String(pathOrUrl || "");
+  if (/^https?:\/\//i.test(value)) return value;
+  return `${API_BASE}${value.startsWith("/") ? "" : "/"}${value}`;
+}
+
 function renderActivity(usage = []) {
   const list = usage.slice(0, 8);
   byId("activity-list").innerHTML = list.length ? list.map((item) => `
@@ -91,17 +97,18 @@ function renderProjects(projects = []) {
 }
 
 function renderFiles(files = []) {
-  const list = files.slice(0, 20);
+  const list = files.slice(0, 60);
   byId("file-list").innerHTML = list.length ? list.map((file) => {
     const type = fileTypeLabel(file.type);
-    const href = file.url || "#";
+    const href = file.url ? apiUrl(file.url) : "#";
+    const version = file.versionNumber ? `v${String(file.versionNumber).padStart(3, "0")}` : (file.versionId || "");
     return `
       <tr>
         <td><span class="file-icon">${safeText(type)}</span><strong>${safeText(file.name)}</strong></td>
-        <td>${safeText(shortText(file.projectName || "Kayıtlı proje", 42))}</td>
+        <td>${safeText(shortText(file.projectName || "Kayıtlı proje", 42))}<small>${safeText(version)} ${safeText(file.operationLabel || "")}</small></td>
         <td><span class="file-type">${safeText(type)}</span></td>
         <td>${safeText(formatDate(file.createdAt))}</td>
-        <td><a class="file-download" href="${safeText(href)}" aria-label="${safeText(file.name)} dosyasını indir">↓</a></td>
+        <td><a class="file-download" href="${safeText(href)}" data-url="${safeText(href)}" data-name="${safeText(file.name)}" aria-label="${safeText(file.name)} dosyasını indir">↓</a></td>
       </tr>`;
   }).join("") : `<tr><td colspan="5"><p class="empty-state">Başarılı tasarımların STEP, STL ve kaynak dosyaları burada saklanacak.</p></td></tr>`;
 }
@@ -184,5 +191,29 @@ document.querySelectorAll("[data-demo-action]").forEach((button) => button.addEv
   }
   byId("dashboard-notice").textContent = "İlgili bölüm açıldı.";
 }));
+
+byId("file-list").addEventListener("click", async (event) => {
+  const link = event.target.closest(".file-download");
+  if (!link) return;
+  event.preventDefault();
+  if (!link.dataset.url || link.dataset.url === "#") return;
+  try {
+    byId("dashboard-notice").textContent = "Dosya hazırlanıyor…";
+    const response = await fetch(link.dataset.url, { headers: { Authorization: `Bearer ${sessionToken}` } });
+    if (!response.ok) throw new Error("Dosya indirilemedi");
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = link.dataset.name || "topkapi-ai-dosya";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    byId("dashboard-notice").textContent = "Dosya indirildi.";
+  } catch (error) {
+    byId("dashboard-notice").textContent = error.message || "Dosya indirilemedi.";
+  }
+});
 
 loadDashboard();
