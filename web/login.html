@@ -3,24 +3,15 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>TOPKAPIAI · Giriş</title>
+  <title>TOPKAPIAI · Giriş Yap</title>
   <link rel="stylesheet" href="style.css">
   <link rel="stylesheet" href="login-v2.css">
 </head>
 <body class="auth-page auth-page-v2">
   <main class="auth-shell">
-    <div class="auth-glow auth-glow-one" aria-hidden="true"></div>
-    <div class="auth-glow auth-glow-two" aria-hidden="true"></div>
-
-    <div class="auth-particles" aria-hidden="true">
-      <svg class="auth-particle p-1" viewBox="0 0 24 24"><path d="M10.3 4.3c.4-1.8 2.9-1.8 3.4 0 .2.9 1.2 1.4 2 .9 1.6-.9 3.3.8 2.4 2.4-.5.8 0 1.8.9 2 1.8.4 1.8 2.9 0 3.4-.9.2-1.4 1.2-.9 2 .9 1.6-.8 3.3-2.4 2.4-.8-.5-1.8 0-2 .9-.5 1.8-3 1.8-3.4 0-.2-.9-1.2-1.4-2-.9-1.6.9-3.3-.8-2.4-2.4.5-.8 0-1.8-.9-2-1.8-.5-1.8-3 0-3.4.9-.2 1.4-1.2.9-2-.9-1.6.8-3.3 2.4-2.4.8.5 1.8 0 2-.9Z"/><circle cx="12" cy="12" r="3"/></svg>
-      <svg class="auth-particle p-2" viewBox="0 0 24 24"><path d="M4 17h16M6 17V7h7l5 5v5M8 17a2 2 0 1 0 4 0M16 17a2 2 0 1 0 4 0M13 7v5h5"/></svg>
-      <svg class="auth-particle p-3" viewBox="0 0 24 24"><path d="M9 3v6l-4 7a3 3 0 0 0 2.6 4.5h8.8A3 3 0 0 0 19 16l-4-7V3M8 12h8"/></svg>
-      <svg class="auth-particle p-4" viewBox="0 0 24 24"><path d="M13 2 4 14h7l-1 8 9-12h-7l1-8Z"/></svg>
-      <svg class="auth-particle p-5" viewBox="0 0 24 24"><path d="M8 3v3M12 3v3M16 3v3M8 18v3M12 18v3M16 18v3M3 8h3M3 12h3M3 16h3M18 8h3M18 12h3M18 16h3M7 7h10v10H7zM10 10h4v4h-4z"/></svg>
-      <svg class="auth-particle p-6" viewBox="0 0 24 24"><path d="M3 12h3l2-5 4 10 3-7 2 2h4"/></svg>
-      <svg class="auth-particle p-7" viewBox="0 0 24 24"><path d="M4 21V4h10v17M14 9h6v12M8 8h2M8 12h2M8 16h2M17 13h1M17 17h1"/></svg>
-      <svg class="auth-particle p-8" viewBox="0 0 24 24"><path d="M8 9 6 7l2-2M16 9l2-2-2-2M9 15l-2 2 2 2M15 15l2 2-2 2M8 12h8M12 8v8"/></svg>
+    <div class="auth-bg-lights" aria-hidden="true">
+      <span class="auth-light auth-light-one"></span>
+      <span class="auth-light auth-light-two"></span>
     </div>
 
     <section class="auth-card-v2" aria-label="TOPKAPIAI giriş">
@@ -28,11 +19,9 @@
         <div class="auth-logo-orbit">
           <img src="logo.png" alt="Topkapı Okulları logosu" class="auth-logo">
         </div>
-        <div>
-          <p class="auth-eyebrow">YAPAY ZEKA DESTEKLI CAD PLATFORMU</p>
-          <h1 id="auth-title">Topkapı Okulları</h1>
-          <p id="auth-description">Teknik çizimden 3D modele, CAM planından CNC çıktısına kadar tek çalışma alanı.</p>
-        </div>
+        <p class="auth-eyebrow">YAPAY ZEKA DESTEKLI CAD PLATFORMU</p>
+        <h1 id="auth-title">Topkapı Okulları</h1>
+        <p id="auth-description">Teknik çizimden 3D modele, CAM planından CNC çıktısına kadar tek çalışma alanı.</p>
       </div>
 
       <div class="auth-tabs" role="tablist" aria-label="Hesap işlemleri">
@@ -71,13 +60,15 @@
         <button id="forgot-password" class="auth-link-button" type="button">Şifremi unuttum</button>
         <p id="auth-error" class="auth-error" role="alert" hidden></p>
         <button id="submit" class="auth-submit" type="submit">
-          <span>Giriş yap</span><b aria-hidden="true">→</b>
+          <span>Giriş yap</span>
+          <b aria-hidden="true">→</b>
         </button>
       </form>
 
       <p class="auth-note"><span aria-hidden="true">✓</span> Yeni hesaplara her ay 50.000 ücretsiz token tanımlanır.</p>
-      <p class="auth-footer">© 2026 Topkapı Okulları Yapay Zeka</p>
     </section>
+
+    <p class="auth-footer">© 2026 Topkapı Okulları Yapay Zeka</p>
   </main>
   <script type="module" src="login.js"></script>
 </body>
