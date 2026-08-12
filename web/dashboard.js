@@ -102,13 +102,19 @@ function renderFiles(files = []) {
     const type = fileTypeLabel(file.type);
     const href = file.url ? apiUrl(file.url) : "#";
     const version = file.versionNumber ? `v${String(file.versionNumber).padStart(3, "0")}` : (file.versionId || "");
+    const openHref = file.projectId
+      ? `index.html?projectId=${encodeURIComponent(file.projectId)}${file.versionId ? `&versionId=${encodeURIComponent(file.versionId)}` : ""}`
+      : "#";
     return `
       <tr>
         <td><span class="file-icon">${safeText(type)}</span><strong>${safeText(file.name)}</strong></td>
         <td>${safeText(shortText(file.projectName || "Kayıtlı proje", 42))}<small>${safeText(version)} ${safeText(file.operationLabel || "")}</small></td>
         <td><span class="file-type">${safeText(type)}</span></td>
         <td>${safeText(formatDate(file.createdAt))}</td>
-        <td><a class="file-download" href="${safeText(href)}" data-url="${safeText(href)}" data-name="${safeText(file.name)}" aria-label="${safeText(file.name)} dosyasını indir">↓</a></td>
+        <td class="file-actions">
+          <a class="file-open" href="${safeText(openHref)}" aria-label="${safeText(file.projectName)} sürümünü aç">Aç</a>
+          <a class="file-download" href="${safeText(href)}" data-url="${safeText(href)}" data-name="${safeText(file.name)}" aria-label="${safeText(file.name)} dosyasını indir">↓</a>
+        </td>
       </tr>`;
   }).join("") : `<tr><td colspan="5"><p class="empty-state">Başarılı tasarımların STEP, STL ve kaynak dosyaları burada saklanacak.</p></td></tr>`;
 }
