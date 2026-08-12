@@ -85,6 +85,9 @@ function publicFile(projectId, version, file) {
     path: filePath,
     type: file?.type || "file",
     size: Number(file?.size) || 0,
+    versionId: version.id,
+    versionNumber: Number(version.number) || 0,
+    operation: version.operation,
     url: `/auth/projects/${encodeURIComponent(projectId)}/files/${encodeURIComponent(filePath)}`,
     createdAt: version.createdAt,
   };
@@ -96,6 +99,16 @@ function publicProject(manifest) {
   const latest = versions.find((item) => item.id === manifest.latestVersion) || versions.at(-1) || null;
   const files = latest ? (latest.files ?? []).map((file) => publicFile(manifest.id, latest, file)) : [];
   const prompt = latest?.prompt || manifest.name || "";
+  const publicVersions = versions.map((version) => ({
+    id: version.id,
+    number: Number(version.number) || 0,
+    operation: version.operation || "",
+    operationLabel: operationLabel(version.operation),
+    prompt: version.prompt || "",
+    createdAt: version.createdAt,
+    bbox: version.bbox ?? null,
+    files: (version.files ?? []).map((file) => publicFile(manifest.id, version, file)),
+  }));
   return {
     id: manifest.id,
     name: manifest.name || titleFromPrompt(prompt),
@@ -109,6 +122,7 @@ function publicProject(manifest) {
     versionCount: versions.length,
     bbox: latest?.bbox ?? null,
     files,
+    versions: publicVersions,
   };
 }
 
@@ -129,6 +143,11 @@ function fileRecord(sourcePath, destinationPath, projectDir) {
   };
 }
 
+/**
+ * Copy a successful build into private user/project/version storage. The
+ * original output files remain untouched so current previews and downloads keep
+ * working. Throws internally, but the fail-open wrapper below protects requests.
+ */
 export function archiveProjectBuild({
   userId,
   projectId: requestedProjectId,
@@ -211,6 +230,8 @@ export function archiveProjectBuild({
   return { projectId, projectName: manifest.name, versionId, files };
 }
 
+// Archiving is an additive durability feature. Disk/index failures are logged
+// but never allowed to break a successful CAD result.
 export function archiveProjectBuildFailOpen(options) {
   if (config.projectArchive?.enabled === false) return null;
   try {
@@ -243,6 +264,13 @@ export function getUserProject(userId, projectId, proto = "https", host = "") {
       ...file,
       url: `${proto}://${host}${file.url}`,
     })),
+    versions: manifest.versions.map((version) => ({
+      ...version,
+      files: version.files.map((file) => ({
+        ...file,
+        url: `${proto}://${host}${file.url}`,
+      })),
+    })),
   };
   const step = withFullUrls.files.find((file) => file.type === "step");
   const stl = withFullUrls.files.find((file) => file.type === "stl");
@@ -259,13 +287,17 @@ export function getUserProject(userId, projectId, proto = "https", host = "") {
 
 export function listUserFiles(userId, limit = 60) {
   return listUserProjects(userId, 100).flatMap((project) =>
-    project.files.map((file) => ({
+    project.versions.flatMap((version) => version.files.map((file) => ({
       ...file,
       projectId: project.id,
       projectName: project.name,
       projectPrompt: project.prompt,
       projectUpdatedAt: project.updatedAt,
-    })),
+      versionId: version.id,
+      versionNumber: version.number,
+      operationLabel: version.operationLabel,
+      prompt: version.prompt,
+    }))),
   ).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))
     .slice(0, Math.min(200, Math.max(1, Number(limit) || 60)));
 }
