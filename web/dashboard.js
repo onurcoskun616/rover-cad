@@ -1,5 +1,6 @@
 const API_BASE = "https://api.topkapikoleji.org";
 const sessionToken = localStorage.getItem("rover_session");
+if (!sessionToken) window.location.replace("login.html");
 const fmt = new Intl.NumberFormat("tr-TR");
 const byId = (id) => document.getElementById(id);
 
@@ -131,7 +132,6 @@ function render(data, isPreview = false) {
 }
 
 async function loadDashboard() {
-  if (!sessionToken) { render(demoData, true); return; }
   try {
     const headers = { Authorization: `Bearer ${sessionToken}` };
     const [meResponse, usageResponse, projectsResponse, filesResponse] = await Promise.all([
@@ -152,8 +152,13 @@ async function loadDashboard() {
       files: filesPayload.files ?? [],
     });
   } catch {
-    render(demoData, true);
-    byId("dashboard-notice").textContent = "API bağlantısı kurulamadı; tasarım önizleme verileriyle açıldı.";
+    render({
+      ...demoData,
+      usage: [],
+      projects: [],
+      files: [],
+    }, false);
+    byId("dashboard-notice").textContent = "Veriler şu anda alınamadı. Lütfen sayfayı yenileyin.";
   }
 }
 
@@ -165,11 +170,19 @@ byId("logout-btn").addEventListener("click", () => {
 
 document.querySelectorAll("[data-demo-action]").forEach((button) => button.addEventListener("click", () => {
   const firstProject = document.querySelector(".project-open");
+  if (button.dataset.demoAction === "upload") {
+    location.href = "index.html?mode=image";
+    return;
+  }
   if (button.dataset.demoAction === "history" && firstProject) {
     firstProject.click();
     return;
   }
-  byId("dashboard-notice").textContent = "Bu işlem API bağlantısı açıldığında etkinleşecek.";
+  if (button.dataset.demoAction === "account") {
+    document.getElementById("account")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    return;
+  }
+  byId("dashboard-notice").textContent = "İlgili bölüm açıldı.";
 }));
 
 loadDashboard();
