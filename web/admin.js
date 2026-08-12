@@ -11,11 +11,11 @@ const demoData = {
     { feature: "POST /simulate/generate", provider: "openai", model: "gpt-4o", calls: 72, inputTokens: 181000, outputTokens: 94000, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: 275000, costUsd: 3.67 }
   ],
   users: [
-    { id: "1", name: "Tahir Fırat", email: "tahir@topkapikoleji.org", plan: "pro", usedTokens: 38240, monthlyTokens: 100000, status: "active", initials: "TF" },
-    { id: "2", name: "Ecem Şuekinci", email: "ecem@topkapikoleji.org", plan: "free", usedTokens: 7650, monthlyTokens: 50000, status: "active", initials: "EŞ" },
-    { id: "3", name: "Mehmet Yılmaz", email: "mehmet@example.com", plan: "free", usedTokens: 42100, monthlyTokens: 50000, status: "active", initials: "MY" },
-    { id: "4", name: "Selin Kaya", email: "selin@example.com", plan: "pro", usedTokens: 89120, monthlyTokens: 150000, status: "active", initials: "SK" },
-    { id: "5", name: "Ahmet Demir", email: "ahmet@example.com", plan: "free", usedTokens: 12800, monthlyTokens: 50000, status: "blocked", initials: "AD" }
+    { id: "1", name: "Tahir Fırat", email: "tahir@topkapikoleji.org", plan: "pro", usedTokens: 38240, monthlyTokens: 100000, bonusTokens: 20000, status: "active", initials: "TF" },
+    { id: "2", name: "Ecem Şuekinci", email: "ecem@topkapikoleji.org", plan: "free", usedTokens: 7650, monthlyTokens: 50000, bonusTokens: 0, status: "active", initials: "EŞ" },
+    { id: "3", name: "Mehmet Yılmaz", email: "mehmet@example.com", plan: "free", usedTokens: 42100, monthlyTokens: 50000, bonusTokens: 5000, status: "active", initials: "MY" },
+    { id: "4", name: "Selin Kaya", email: "selin@example.com", plan: "pro", usedTokens: 89120, monthlyTokens: 150000, bonusTokens: 0, status: "active", initials: "SK" },
+    { id: "5", name: "Ahmet Demir", email: "ahmet@example.com", plan: "free", usedTokens: 12800, monthlyTokens: 50000, bonusTokens: 0, status: "blocked", initials: "AD" }
   ],
   activity: [
     { icon: "＋", title: "Yeni kullanıcı kaydı", detail: "Ecem Şuekinci ücretsiz planla katıldı", time: "8 dakika önce", tone: "blue" },
@@ -62,13 +62,15 @@ function renderUsers() {
   byId("user-count").textContent = `${fmt.format(allUsers.length)} kayıtlı kullanıcı`;
   byId("result-summary").textContent = users.length ? `${users.length} kullanıcı gösteriliyor` : "Sonuç bulunamadı";
   byId("users-list").innerHTML = users.map((user) => {
-    const rate = Math.min(100, Math.round((user.usedTokens / user.monthlyTokens) * 100));
+    const totalLimit = Number(user.monthlyTokens) + Number(user.bonusTokens || 0);
+    const rate = totalLimit ? Math.min(100, Math.round((user.usedTokens / totalLimit) * 100)) : 0;
     return `<tr data-user-id="${safeText(user.id)}">
       <td><div class="admin-user-cell"><span>${safeText(user.initials || user.name.split(/\s+/).map((part) => part[0]).slice(0, 2).join(""))}</span><div><strong>${safeText(user.name)}</strong><small>${safeText(user.email)}</small></div></div></td>
       <td><select class="admin-inline-select" data-field="plan"><option value="free" ${user.plan === "free" ? "selected" : ""}>Ücretsiz</option><option value="pro" ${user.plan === "pro" ? "selected" : ""}>Pro</option></select></td>
-      <td><div class="admin-usage-cell"><span><b>${fmt.format(user.usedTokens)}</b> / ${fmt.format(user.monthlyTokens)}</span><i><em style="width:${rate}%"></em></i></div></td>
+      <td><div class="admin-usage-cell"><span><b>${fmt.format(user.usedTokens)}</b> / ${fmt.format(totalLimit)}</span><i><em style="width:${rate}%"></em></i></div></td>
       <td><select class="admin-inline-select status-${safeText(user.status)}" data-field="status"><option value="active" ${user.status === "active" ? "selected" : ""}>Aktif</option><option value="blocked" ${user.status === "blocked" ? "selected" : ""}>Engelli</option></select></td>
       <td><input class="admin-quota-input" data-field="monthlyTokens" type="number" min="0" step="1000" value="${Number(user.monthlyTokens)}" aria-label="${safeText(user.name)} aylık token kotası"></td>
+      <td><div class="admin-bonus-cell"><span>${fmt.format(user.bonusTokens || 0)}</span><button class="admin-grant-btn" data-grant="${safeText(user.id)}" type="button">+ Token ver</button></div></td>
       <td><button class="admin-save-btn" data-save="${safeText(user.id)}" type="button">Kaydet</button></td>
     </tr>`;
   }).join("");
@@ -124,7 +126,37 @@ byId("users-list").addEventListener("click", async (event) => {
   setTimeout(() => { event.target.textContent = "Kaydet"; renderUsers(); }, 1000);
 });
 
+byId("users-list").addEventListener("click", async (event) => {
+  const userId = event.target.dataset.grant;
+  if (!userId) return;
+  const user = allUsers.find((u) => String(u.id) === String(userId));
+  const input = prompt(`${user ? user.name + " kullanıcısına" : "Kullanıcıya"} kaç bonus token eklemek istiyorsunuz?`, "10000");
+  if (!input) return;
+  const amount = Number(input);
+  if (!amount || amount <= 0) { byId("admin-notice").textContent = "Geçerli bir token miktarı giriniz."; return; }
+  if (previewMode) {
+    if (user) user.bonusTokens = (user.bonusTokens || 0) + amount;
+    renderUsers();
+    byId("admin-notice").textContent = `Önizleme: ${fmt.format(amount)} bonus token eklendi.`;
+    return;
+  }
+  try {
+    const response = await fetch(`${API_BASE}/admin/users/${userId}/grant-tokens`, {
+      method: "POST", headers: { Authorization: `Bearer ${sessionToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ amount }),
+    });
+    if (!response.ok) { byId("admin-notice").textContent = "Token eklenemedi."; return; }
+    const data = await response.json();
+    const idx = allUsers.findIndex((u) => String(u.id) === String(userId));
+    if (idx >= 0 && data.user) allUsers[idx] = data.user;
+    renderUsers();
+    byId("admin-notice").textContent = `${fmt.format(amount)} bonus token başarıyla eklendi.`;
+  } catch { byId("admin-notice").textContent = "Token eklenirken hata oluştu."; }
+});
+
 document.querySelectorAll("[data-admin-action]").forEach((button) => button.addEventListener("click", () => {
+  const action = button.dataset.adminAction;
+  if (action === "tokens") { document.getElementById("users").scrollIntoView({ behavior: "smooth" }); return; }
   byId("admin-notice").textContent = "Bu yönetim işlemi API bağlantısı açıldığında etkinleşecek.";
 }));
 
