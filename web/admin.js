@@ -1,5 +1,6 @@
 const API_BASE = "https://api.topkapikoleji.org";
 const sessionToken = localStorage.getItem("rover_session");
+if (!sessionToken) { location.replace("login.html"); }
 const fmt = new Intl.NumberFormat("tr-TR");
 const byId = (id) => document.getElementById(id);
 
@@ -95,6 +96,7 @@ async function loadAdmin() {
   try {
     const headers = { Authorization: `Bearer ${sessionToken}` };
     const [statsResponse, usersResponse, usageResponse] = await Promise.all([fetch(`${API_BASE}/admin/stats`, { headers }), fetch(`${API_BASE}/admin/users`, { headers }), fetch(`${API_BASE}/admin/usage-summary?days=31`, { headers })]);
+    if (statsResponse.status === 401) { localStorage.removeItem("rover_session"); location.replace("login.html"); return; }
     if (statsResponse.status === 403) throw new Error("Bu hesapta yönetici yetkisi bulunmuyor.");
     if (!statsResponse.ok || !usersResponse.ok) throw new Error("Yönetim verileri alınamadı.");
     const stats = await statsResponse.json();
@@ -103,7 +105,7 @@ async function loadAdmin() {
     render({ stats, users: usersPayload.users, usage: usagePayload.usage, activity: [] }, false);
   } catch (error) {
     render(demoData, true);
-    byId("admin-notice").textContent = `${error.message} Örnek verilerle önizleme açıldı.`;
+    byId("admin-notice").textContent = `${error.message} — API adresi: ${API_BASE}`;
   }
 }
 

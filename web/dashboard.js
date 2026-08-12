@@ -1,5 +1,6 @@
 const API_BASE = "https://api.topkapikoleji.org";
 const sessionToken = localStorage.getItem("rover_session");
+if (!sessionToken) { location.replace("login.html"); }
 const fmt = new Intl.NumberFormat("tr-TR");
 const byId = (id) => document.getElementById(id);
 
