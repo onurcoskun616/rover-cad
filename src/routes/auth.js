@@ -54,7 +54,7 @@ router.get("/projects", apiKeyAuth, (req, res, next) => {
   try { res.json({ projects: listUserProjects(req.user.id, req.query.limit) }); } catch (error) { next(error); }
 });
 router.get("/projects/:projectId", apiKeyAuth, (req, res, next) => {
-  try { res.json({ project: getUserProject(req.user.id, req.params.projectId, req.protocol, req.get("host")) }); } catch (error) { next(error); }
+  try { res.json({ project: getUserProject(req.user.id, req.params.projectId, req.protocol, req.get("host"), req.query.versionId) }); } catch (error) { next(error); }
 });
 router.get("/projects/:projectId/files/*", apiKeyAuth, (req, res, next) => {
   try { res.download(getUserProjectFilePath(req.user.id, req.params.projectId, req.params[0])); } catch (error) { next(error); }
