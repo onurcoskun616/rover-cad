@@ -844,14 +844,22 @@ async function setupSimulation(simulationUrl) {
     onUpdate: ({ progress, op, x, y, z, f, lineIndex }) => {
       camSimProgress.value = String(Math.round(progress * 1000));
       camSimOp.textContent = `Operasyon: ${op || "—"}`;
-      if (camSim && !camSim.isPlaying()) camSimPlay.textContent = "Oynat";
-      if (progress >= 1) camSimPlay.textContent = "Tekrar Oynat";
+      if (camSim && !camSim.isPlaying()) camSimPlay.textContent = "▶ Oynat";
+      if (progress >= 1) camSimPlay.textContent = "▶ Tekrar Oynat";
 
       if (coordX) {
         coordX.textContent = x != null ? x.toFixed(3) : "0.000";
         coordY.textContent = y != null ? y.toFixed(3) : "0.000";
         coordZ.textContent = z != null ? z.toFixed(3) : "0.000";
         coordF.textContent = f != null ? String(Math.round(f)) : "0";
+      }
+      const cncX = document.getElementById("cnc-cam-x");
+      const cncY = document.getElementById("cnc-cam-y");
+      const cncZ = document.getElementById("cnc-cam-z");
+      if (cncX) {
+        cncX.textContent = x != null ? x.toFixed(3) : "0.000";
+        cncY.textContent = y != null ? y.toFixed(3) : "0.000";
+        cncZ.textContent = z != null ? z.toFixed(3) : "0.000";
       }
 
       if (lineIndex !== lastLineIdx && gcodeLineEls.length > 0) {
@@ -890,8 +898,10 @@ async function setupSimulation(simulationUrl) {
   requestAnimationFrame(() => window.dispatchEvent(new Event("resize")));
 
   camSimProgress.value = "0";
-  camSimPlay.textContent = "Oynat";
+  camSimPlay.textContent = "▶ Oynat";
   setSimSpeed(1);
+  const cncStatus = document.getElementById("cnc-cam-status");
+  if (cncStatus) { cncStatus.textContent = "Hazır"; cncStatus.style.color = "#3ddc84"; }
 }
 
 function handleCamReject() {
@@ -1415,18 +1425,21 @@ camConfirmBtn.addEventListener("click", handleCamConfirm);
 camRejectBtn.addEventListener("click", handleCamReject);
 camSimPlay.addEventListener("click", () => {
   if (!camSim) return;
+  const cncStatus = document.getElementById("cnc-cam-status");
   if (camSim.isPlaying()) {
     camSim.pause();
-    camSimPlay.textContent = "Oynat";
+    camSimPlay.textContent = "▶ Oynat";
+    if (cncStatus) { cncStatus.textContent = "Duraklatıldı"; cncStatus.style.color = "#f0c040"; }
   } else {
     camSim.play();
-    camSimPlay.textContent = "Duraklat";
+    camSimPlay.textContent = "⏸ Duraklat";
+    if (cncStatus) { cncStatus.textContent = "Çalışıyor"; cncStatus.style.color = "#3ddc84"; }
   }
 });
 camSimProgress.addEventListener("input", () => {
   if (!camSim) return;
   camSim.pause();
-  camSimPlay.textContent = "Oynat";
+  camSimPlay.textContent = "▶ Oynat";
   camSim.seek(Number(camSimProgress.value) / 1000);
 });
 Object.entries(camSimSpeedBtns).forEach(([m, btn]) => {
@@ -1940,16 +1953,19 @@ simRunBtn.addEventListener("click", handleSimCustom);
 
 kinSimPlay.addEventListener("click", () => {
   if (!kinSim) return;
+  const cncKinStatus = document.getElementById("cnc-kin-status");
   if (kinSim.isPlaying()) {
     kinSim.pause();
-    kinSimPlay.textContent = "Oynat";
+    kinSimPlay.textContent = "▶ Oynat";
+    if (cncKinStatus) { cncKinStatus.textContent = "Duraklatıldı"; cncKinStatus.style.color = "#f0c040"; }
   } else {
     if (!kinCollisionAlert.hidden) {
       kinSim.reset();
       kinCollisionAlert.hidden = true;
     }
     kinSim.play();
-    kinSimPlay.textContent = "Duraklat";
+    kinSimPlay.textContent = "⏸ Duraklat";
+    if (cncKinStatus) { cncKinStatus.textContent = "Çalışıyor"; cncKinStatus.style.color = "#3ddc84"; }
   }
 });
 
