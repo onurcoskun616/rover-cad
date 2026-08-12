@@ -2,6 +2,7 @@ import { Router } from "express";
 import { ensureProfile, listUsage } from "../services/accountStore.js";
 import { apiKeyAuth } from "./apiKeyAuth.js";
 import { googleOAuthUrl, loginWithSupabase, registerWithSupabase, requestPasswordReset } from "../services/supabaseAuth.js";
+import { getUserProject, getUserProjectFilePath, listUserFiles, listUserProjects } from "../services/projectArchiveService.js";
 const router = Router();
 
 function validateCredentials(body, requiresName = false) {
@@ -48,5 +49,17 @@ router.get("/oauth/google", (req, res, next) => {
 router.get("/me", apiKeyAuth, (req, res) => res.json({ user: req.user }));
 router.get("/usage", apiKeyAuth, async (req, res, next) => {
   try { res.json({ usage: await listUsage(req.user.id) }); } catch (error) { next(error); }
+});
+router.get("/projects", apiKeyAuth, (req, res, next) => {
+  try { res.json({ projects: listUserProjects(req.user.id, req.query.limit) }); } catch (error) { next(error); }
+});
+router.get("/projects/:projectId", apiKeyAuth, (req, res, next) => {
+  try { res.json({ project: getUserProject(req.user.id, req.params.projectId, req.protocol, req.get("host")) }); } catch (error) { next(error); }
+});
+router.get("/projects/:projectId/files/*", apiKeyAuth, (req, res, next) => {
+  try { res.download(getUserProjectFilePath(req.user.id, req.params.projectId, req.params[0])); } catch (error) { next(error); }
+});
+router.get("/files", apiKeyAuth, (req, res, next) => {
+  try { res.json({ files: listUserFiles(req.user.id, req.query.limit) }); } catch (error) { next(error); }
 });
 export default router;
