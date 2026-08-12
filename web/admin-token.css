@@ -1,0 +1,44 @@
+.admin-token-cell {
+  display: grid;
+  gap: 7px;
+}
+
+.admin-token-cell div {
+  display: flex;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+
+.admin-token-cell button {
+  width: auto;
+  padding: 5px 7px;
+  border: 1px solid #d8e3f0;
+  border-radius: 7px;
+  background: #f7faff;
+  color: #336dbd;
+  font-size: 9px;
+  font-weight: 850;
+  cursor: pointer;
+}
+
+.admin-token-cell button:hover {
+  border-color: #377fe9;
+  background: #377fe9;
+  color: #fff;
+}
+
+.admin-empty-state {
+  display: grid;
+  gap: 4px;
+  padding: 16px;
+  color: #7a879a;
+}
+
+.admin-empty-state strong {
+  color: #26354f;
+}
+
+.admin-usage-cell small {
+  color: #7e8ca1;
+  font-size: 10px;
+}
