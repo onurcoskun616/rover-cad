@@ -114,6 +114,7 @@ let lastStepPath = null;
 let lastGeneratedCode = null;
 let lastBbox = null;
 let lastPrompt = "";
+let lastProjectId = null;
 let camAnswers = {};
 let camStepIndex = 0;
 let camStepFieldNames = [];
@@ -205,6 +206,7 @@ function resetResult() {
   lastGeneratedCode = null;
   lastBbox = null;
   lastPrompt = "";
+  lastProjectId = null;
   lastDimData = null;
   dimEditInProgress = false;
   dimEditQueue = [];
@@ -441,6 +443,11 @@ async function handleGenerate() {
 function showResult(data) {
   resetSimLayout();
   resultSection.hidden = false;
+  if (data.prompt) {
+    lastPrompt = data.prompt;
+    promptInput.value = data.prompt;
+    setMode("text");
+  }
 
   if (data.warning) {
     warningText.hidden = false;
@@ -463,6 +470,7 @@ function showResult(data) {
   }
 
   lastGeneratedCode = data.generatedCode ?? null;
+  if (data.projectId) lastProjectId = data.projectId;
   lastBbox = data.bbox ?? null;
   // The PDF is generated on demand to keep /generate fast. Reset any stale
   // PDF link so the user re-generates with the current dimensions.
@@ -485,6 +493,31 @@ function showResult(data) {
   }
 }
 
+async function loadProjectFromUrl() {
+  const projectId = new URLSearchParams(location.search).get("projectId");
+  if (!projectId) return;
+  clearError();
+  resetResult();
+  setLoading(true, "Proje yükleniyor…");
+  try {
+    const response = await fetch(`${API_BASE}/auth/projects/${encodeURIComponent(projectId)}`, {
+      headers: authHeaders(),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || "Proje yüklenemedi");
+    if (!payload.project) throw new Error("Proje bulunamadı");
+    showResult({
+      ...payload.project,
+      projectId: payload.project.id,
+    });
+    statusText.textContent = "";
+  } catch (err) {
+    showError(`Proje açılamadı: ${err.message}`);
+  } finally {
+    setLoading(false);
+  }
+}
+
 async function handleRevise() {
   const instruction = reviseInput.value.trim();
   if (!instruction) return;
@@ -503,7 +536,12 @@ async function handleRevise() {
       {
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeaders() },
-        body: JSON.stringify({ prompt: instruction, previousCode, basePrompt: base }),
+        body: JSON.stringify({
+          prompt: instruction,
+          previousCode,
+          basePrompt: base,
+          projectId: lastProjectId,
+        }),
       },
       (seconds) => setLoading(true, `Tasarım güncelleniyor… (${seconds} sn)`),
     );
@@ -1155,7 +1193,13 @@ async function handleDimensionEdit(dim, newValue) {
         {
           method: "POST",
           headers: { "Content-Type": "application/json", ...authHeaders() },
-          body: JSON.stringify({ code, paramName, newValue }),
+          body: JSON.stringify({
+            code,
+            paramName,
+            newValue,
+            projectId: lastProjectId,
+            basePrompt: lastPrompt,
+          }),
         },
         (seconds) => setLoading(true, `Ölçü güncelleniyor… (${seconds} sn)`),
       );
@@ -1178,6 +1222,7 @@ async function handleDimensionEdit(dim, newValue) {
             prompt: instruction,
             previousCode: code,
             basePrompt: lastPrompt,
+            projectId: lastProjectId,
           }),
         },
         (seconds) => setLoading(true, `Ölçü güncelleniyor… (${seconds} sn)`),
@@ -1954,3 +1999,5 @@ promptInput.addEventListener("keydown", (event) => {
     handleGenerate();
   }
 });
+
+loadProjectFromUrl();
