@@ -494,13 +494,16 @@ function showResult(data) {
 }
 
 async function loadProjectFromUrl() {
-  const projectId = new URLSearchParams(location.search).get("projectId");
+  const params = new URLSearchParams(location.search);
+  const projectId = params.get("projectId");
+  const versionId = params.get("versionId");
   if (!projectId) return;
   clearError();
   resetResult();
-  setLoading(true, "Proje yükleniyor…");
+  setLoading(true, versionId ? "Geçmiş sürüm yükleniyor…" : "Proje yükleniyor…");
   try {
-    const response = await fetch(`${API_BASE}/auth/projects/${encodeURIComponent(projectId)}`, {
+    const query = versionId ? `?versionId=${encodeURIComponent(versionId)}` : "";
+    const response = await fetch(`${API_BASE}/auth/projects/${encodeURIComponent(projectId)}${query}`, {
       headers: authHeaders(),
     });
     const payload = await response.json().catch(() => ({}));
@@ -510,6 +513,10 @@ async function loadProjectFromUrl() {
       ...payload.project,
       projectId: payload.project.id,
     });
+    if (payload.project.selectedVersionId && payload.project.selectedVersionId !== payload.project.latestVersion) {
+      warningText.hidden = false;
+      warningText.textContent = `Geçmiş sürüm açıldı: ${payload.project.selectedVersionId}. Yeni revizyon yaparsanız bu projenin yeni sürümü olarak kaydedilir.`;
+    }
     statusText.textContent = "";
   } catch (err) {
     showError(`Proje açılamadı: ${err.message}`);
