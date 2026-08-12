@@ -1,1 +1,101 @@
-<!doctype html><html lang="tr"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>TOPKAPIAI · Hesabım</title><link rel="stylesheet" href="style.css"></head><body><header class="app-bar"><a href="index.html">← CAD çalışma alanı</a><strong>Hesabım</strong><button id="logout-btn" class="link-button">Çıkış</button></header><main class="dashboard"><section class="welcome-card"><p class="eyebrow">TOPKAPIAI HESABI</p><h1 id="welcome">Hoş geldiniz</h1><p id="email"></p></section><section class="metrics"><article><span>Plan</span><strong id="plan">Ücretsiz</strong></article><article><span>Aylık kota</span><strong id="quota">50.000</strong></article><article><span>Kullanılan</span><strong id="used">0</strong></article><article><span>Kalan</span><strong id="remaining">50.000</strong></article></section><section class="usage-card"><div class="usage-head"><h2>Token kullanımı</h2><span id="period"></span></div><div class="progress"><i id="progress"></i></div><p id="usage-copy"></p><button id="upgrade" disabled>Paketler yakında</button></section><section class="usage-card"><h2>Son işlemler</h2><div id="usage-list" class="usage-list"></div></section></main><script type="module" src="dashboard.js"></script></body></html>
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>TOPKAPIAI · Çalışma Alanım</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="account-dashboard-page">
+  <div class="account-shell">
+    <aside class="account-sidebar">
+      <a class="account-brand" href="index.html" aria-label="TOPKAPIAI ana sayfa">
+        <span class="account-brand-mark">T</span>
+        <span>TOPKAPI<em>AI</em></span>
+      </a>
+      <nav class="account-nav" aria-label="Hesap menüsü">
+        <a class="is-active" href="#overview"><span>⌂</span> Genel bakış</a>
+        <a href="#projects"><span>◇</span> Projelerim</a>
+        <a href="#files"><span>▤</span> Dosyalarım</a>
+        <a href="#account"><span>○</span> Hesap bilgileri</a>
+      </nav>
+      <div class="account-sidebar-foot">
+        <a href="index.html">← CAD çalışma alanına dön</a>
+        <button id="logout-btn" class="account-logout" type="button">Çıkış yap</button>
+      </div>
+    </aside>
+
+    <main class="account-main">
+      <div id="preview-banner" class="preview-banner" hidden>
+        <span>ÖNİZLEME</span>
+        API kapalı olduğu için örnek veriler gösteriliyor.
+      </div>
+
+      <header class="account-topbar" id="overview">
+        <div>
+          <p class="account-kicker">ÇALIŞMA ALANIM</p>
+          <h1 id="welcome">Geleceğe hoş geldiniz</h1>
+          <p>Projelerinizi yönetin, kullanımınızı takip edin ve üretmeye devam edin.</p>
+        </div>
+        <div class="account-user">
+          <span id="avatar">TF</span>
+          <div><strong id="user-name">Tahir Fırat</strong><small id="user-plan">Ücretsiz plan</small></div>
+        </div>
+      </header>
+
+      <section class="quick-actions" aria-label="Hızlı işlemler">
+        <a class="quick-action quick-action-primary" href="index.html"><span>＋</span><div><strong>Yeni proje oluştur</strong><small>CAD çalışma alanını aç</small></div></a>
+        <button class="quick-action" type="button" data-demo-action="upload"><span>↑</span><div><strong>Dosya yükle</strong><small>PDF veya çizim ekle</small></div></button>
+        <button class="quick-action" type="button" data-demo-action="history"><span>↗</span><div><strong>Son işleme git</strong><small>Kaldığınız yerden devam edin</small></div></button>
+      </section>
+
+      <section class="dashboard-grid">
+        <article class="account-panel token-panel">
+          <div class="panel-heading"><div><p class="account-kicker">TOKEN VE KULLANIM</p><h2>Aylık kullanımınız</h2></div><span id="period" class="soft-badge"></span></div>
+          <div class="token-balance"><strong id="remaining">42.350</strong><span>token kaldı</span></div>
+          <div class="account-progress" role="progressbar" aria-label="Token kullanımı"><i id="progress"></i></div>
+          <div class="token-stats">
+            <div><span>Kullanılan</span><strong id="used">7.650</strong></div>
+            <div><span>Aylık kota</span><strong id="quota">50.000</strong></div>
+            <div><span>Kullanım oranı</span><strong id="usage-rate">%15</strong></div>
+          </div>
+        </article>
+
+        <article class="account-panel account-summary" id="account">
+          <div class="panel-heading"><div><p class="account-kicker">HESAP VE ÜYELİK</p><h2>Hesap özeti</h2></div><span class="status-dot">Aktif</span></div>
+          <dl>
+            <div><dt>E-posta</dt><dd id="email">ornek@mail.com</dd></div>
+            <div><dt>Plan</dt><dd id="plan">Ücretsiz</dd></div>
+            <div><dt>Üyelik tarihi</dt><dd id="member-since">11 Ağustos 2026</dd></div>
+            <div><dt>Yenilenme</dt><dd id="renewal">1 Eylül 2026</dd></div>
+          </dl>
+          <button class="account-secondary-btn" type="button" data-demo-action="account">Hesap ayarları</button>
+        </article>
+      </section>
+
+      <section class="account-panel activity-panel" id="activity">
+        <div class="panel-heading"><div><p class="account-kicker">SON İŞLEMLER</p><h2>Yakın kullanım geçmişi</h2></div></div>
+        <div id="activity-list" class="activity-list"></div>
+      </section>
+
+      <section class="account-panel projects-panel" id="projects">
+        <div class="panel-heading"><div><p class="account-kicker">PROJE SAYFASI</p><h2>Kaldığınız yerden devam edin</h2></div><a href="index.html">Yeni proje oluştur →</a></div>
+        <div id="project-list" class="project-list"></div>
+      </section>
+
+      <section class="account-panel files-panel" id="files">
+        <div class="panel-heading"><div><p class="account-kicker">DOSYALARIM</p><h2>Başarılı tasarımların kayıtlı çıktıları</h2></div><button class="filter-button" type="button">Tüm dosyalar⌄</button></div>
+        <div class="files-table-wrap">
+          <table class="files-table">
+            <thead><tr><th>Dosya</th><th>Proje</th><th>Tür</th><th>Tarih</th><th></th></tr></thead>
+            <tbody id="file-list"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <p id="dashboard-notice" class="dashboard-notice" role="status" aria-live="polite"></p>
+    </main>
+  </div>
+  <script type="module" src="dashboard.js"></script>
+</body>
+</html>
