@@ -253,17 +253,33 @@ export function listUserProjects(userId, limit = 30) {
   }).filter(Boolean);
 }
 
-export function getUserProject(userId, projectId, proto = "https", host = "") {
+export function getUserProject(userId, projectId, proto = "https", host = "", requestedVersionId = "") {
   const projectDir = projectDirFor(userId, projectId);
   const manifest = publicProject(readJson(path.join(projectDir, "project.json"), null));
   if (!manifest?.id) throw Object.assign(new Error("Proje bulunamadı"), { status: 404 });
+  const requestedVersion = requestedVersionId
+    ? manifest.versions.find((version) => version.id === requestedVersionId)
+    : null;
+  if (requestedVersionId && !requestedVersion) {
+    throw Object.assign(new Error("Proje sürümü bulunamadı"), { status: 404 });
+  }
+  const selectedVersion = requestedVersion
+    || manifest.versions.find((version) => version.id === manifest.latestVersion)
+    || manifest.versions.at(-1)
+    || null;
   const absolute = (file) => path.join(projectDir, file.path);
   const withFullUrls = {
     ...manifest,
-    files: manifest.files.map((file) => ({
+    files: (selectedVersion?.files ?? manifest.files).map((file) => ({
       ...file,
       url: `${proto}://${host}${file.url}`,
     })),
+    selectedVersionId: selectedVersion?.id ?? manifest.latestVersion,
+    selectedVersionNumber: selectedVersion?.number ?? manifest.versionCount,
+    prompt: selectedVersion?.prompt || manifest.prompt,
+    operation: selectedVersion?.operation || manifest.operation,
+    operationLabel: selectedVersion?.operationLabel || manifest.operationLabel,
+    bbox: selectedVersion?.bbox ?? manifest.bbox,
     versions: manifest.versions.map((version) => ({
       ...version,
       files: version.files.map((file) => ({
