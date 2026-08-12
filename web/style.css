@@ -1244,6 +1244,7 @@ main.sim-expanded {
 }
 
 .project-open,
+.file-open,
 .file-download {
   display: grid;
   place-items: center;
@@ -1251,6 +1252,12 @@ main.sim-expanded {
   height: 30px;
   padding: 0;
   text-decoration: none;
+}
+
+.file-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .project-open {
@@ -1266,4 +1273,15 @@ main.sim-expanded {
   border-radius: 8px;
   background: #fff;
   color: #4f6e96;
+}
+
+.file-open {
+  width: auto;
+  padding: 0 9px;
+  border: 1px solid #cfe0f7;
+  border-radius: 8px;
+  background: #eef6ff;
+  color: #2f70c8;
+  font-size: 10px;
+  font-weight: 850;
 }
