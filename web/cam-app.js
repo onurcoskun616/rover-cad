@@ -391,6 +391,19 @@ async function handleCamConfirm() {
     setCamStatus("G-code hazır.", false);
     gcodeLink.href = result.body.gcodeUrl;
     gcodeLink.hidden = false;
+
+    const cncSimBtn = byId("cnc-sim-btn");
+    if (cncSimBtn) {
+      cncSimBtn.hidden = false;
+      cncSimBtn.onclick = async () => {
+        try {
+          const resp = await fetch(result.body.gcodeUrl);
+          const gcode = await resp.text();
+          sessionStorage.setItem("rover_cnc_gcode", JSON.stringify({ gcode, machineType: camAnswers.machineType || "freze" }));
+          window.open("cnc-sim.html", "_blank");
+        } catch { window.open("cnc-sim.html", "_blank"); }
+      };
+    }
   } catch (err) { setCamStatus(`Sunucuya bağlanılamadı: ${err.message}`, false); }
   finally { camConfirmBtn.disabled = false; camRejectBtn.disabled = false; }
 }

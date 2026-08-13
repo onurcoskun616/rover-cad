@@ -60,6 +60,10 @@ const FACE_TOP_OPTIONS = [
   "Evet, ust yuzey yuzeylensin (Face)",
   "Hayir, gerekli degil",
 ];
+const MACHINE_TYPE_OPTIONS = [
+  "Freze (CNC Mill)",
+  "Torna (CNC Lathe)",
+];
 const MACHINE_CLASS_OPTIONS = [
   "Hobi / masaustu CNC",
   "Endustriyel CNC",
@@ -251,16 +255,26 @@ function buildApplicableSteps({ geometry, threads, answers }) {
 
   const steps = [];
 
+  // 0. Machine type (Freze / Torna)
+  steps.push({
+    id: "machineType",
+    title: "1. Tezgah tipi secimi",
+    intro: "Parcalarin hangi tip CNC tezgahta islenecegini secin. Torna, silindirik parcalar icin kullanilir; freze, prizmatik veya serbest formlu parcalar icindir.",
+    fields: [
+      selectField("machineType", "Tezgah tipi", MACHINE_TYPE_OPTIONS, pick(a, "machineType", MACHINE_TYPE_OPTIONS[0])),
+    ],
+  });
+
   // 1. Material
   steps.push({
     id: "material",
-    title: "1. Malzeme secimi",
+    title: "2. Malzeme secimi",
     fields: [
       selectField("material", "Malzeme", MATERIAL_OPTIONS, pick(a, "material", MATERIAL_OPTIONS[0])),
     ],
   });
 
-  // 2. Stock (raw block): per-side margin, block size, and (3D only) top-face
+  // 3. Stock (raw block): per-side margin, block size, and (3D only) top-face
   //    facing. For a pure 2D cut there is nothing to face.
   const stockFields = [
     numberField("stockMargin", "Her yuzeyden pay", "mm", margin),
@@ -275,7 +289,7 @@ function buildApplicableSteps({ geometry, threads, answers }) {
   }
   steps.push({
     id: "stock",
-    title: "2. Stok (ham blok) boyutu",
+    title: "3. Stok (ham blok) boyutu",
     intro: "Blok, parca olculeri + her yuzeyden pay olarak onerilir.",
     fields: stockFields,
   });
@@ -300,7 +314,7 @@ function buildApplicableSteps({ geometry, threads, answers }) {
   );
   steps.push({
     id: "machine",
-    title: "3. Tezgah sinifi, ekseni ve post-processor",
+    title: "4. Tezgah sinifi, ekseni ve post-processor",
     intro: machineIntro,
     fields: machineFields,
   });
@@ -308,7 +322,7 @@ function buildApplicableSteps({ geometry, threads, answers }) {
   // 4. Workholding
   steps.push({
     id: "workholding",
-    title: "4. Baglama yontemi",
+    title: "5. Baglama yontemi",
     fields: [
       selectField("workholding", "Baglama", WORKHOLDING_OPTIONS, pick(a, "workholding", WORKHOLDING_OPTIONS[0])),
     ],
@@ -317,7 +331,7 @@ function buildApplicableSteps({ geometry, threads, answers }) {
   // 5. Reference/zero point (WCS) + working plane (asked separately).
   steps.push({
     id: "reference",
-    title: "5. Referans noktasi (WCS) ve calisma duzlemi",
+    title: "6. Referans noktasi (WCS) ve calisma duzlemi",
     fields: [
       selectField("wcs", "Sifir noktasi (WCS)", WCS_OPTIONS, pick(a, "wcs", WCS_OPTIONS[0])),
       selectField("workPlane", "Calisma duzlemi", WORKPLANE_OPTIONS, pick(a, "workPlane", WORKPLANE_OPTIONS[0])),
@@ -362,7 +376,7 @@ function buildApplicableSteps({ geometry, threads, answers }) {
   }
   steps.push({
     id: "tooling",
-    title: "6. Takim secimi",
+    title: "7. Takim secimi",
     intro: toolIntro || undefined,
     fields: toolFields,
   });
@@ -370,7 +384,7 @@ function buildApplicableSteps({ geometry, threads, answers }) {
   // 7. Operation-type mapping (feature -> standard operation name).
   steps.push({
     id: "operations",
-    title: "7. Operasyon tipi esleştirmesi",
+    title: "8. Operasyon tipi esleştirmesi",
     intro: `Tespit edilen ozelliklere onerilen operasyonlar: ${opSuggestion.text}. Parca ${opSuggestion.is2D ? "2D kontur (sac/lazer/plazma kesim)" : opSuggestion.is3D ? "3D (serbest yuzeyli)" : "2.5D"} olarak degerlendirildi.`,
     fields: [
       selectField("operationMapping", "Operasyon esleştirmesi", OP_MAPPING_OPTIONS, pick(a, "operationMapping", OP_MAPPING_OPTIONS[0])),
@@ -381,7 +395,7 @@ function buildApplicableSteps({ geometry, threads, answers }) {
   //    stock-to-leave, stepover and milling direction.
   steps.push({
     id: "cutting",
-    title: "8. Kesme parametreleri (kaba + finis)",
+    title: "9. Kesme parametreleri (kaba + finis)",
     intro: `Onerilenler ${a.material ?? MATERIAL_OPTIONS[0]} + O${endmill}mm takima gore (${(a.machineClass || MACHINE_CLASS_OPTIONS[0]).includes("Hobi") ? "hobi tezgah, muhafazakar stepover" : "endustriyel tezgah"}). Kaba ve finis ayri operasyon planlanir.`,
     fields: [
       numberField("spindleRpm", "Spindle hizi", "rpm", pick(a, "spindleRpm", params.spindleRpm)),
@@ -398,7 +412,7 @@ function buildApplicableSteps({ geometry, threads, answers }) {
   if (isStepped) {
     steps.push({
       id: "steps",
-      title: "9. Kademe / cok seviyeli operasyon",
+      title: "10. Kademe / cok seviyeli operasyon",
       intro: `Parcada ${geometry.horizontalLevelCount} farkli yukseklik seviyesi tespit edildi.`,
       fields: [
         selectField("stepStrategy", "Kademeler nasil islensin?", STEP_STRATEGY_OPTIONS, pick(a, "stepStrategy", STEP_STRATEGY_OPTIONS[0])),
@@ -413,7 +427,7 @@ function buildApplicableSteps({ geometry, threads, answers }) {
       .join(", ");
     steps.push({
       id: "repeated",
-      title: "10. Tekrarlayan ozellik tespiti",
+      title: "11. Tekrarlayan ozellik tespiti",
       intro: `Ayni capta tekrarlayan ozellik tespit edildi: ${desc}. Tek operasyon olarak gruplanabilir.`,
       fields: [
         selectField("groupRepeated", "Tekrarlayan ozellikler nasil islensin?", GROUP_REPEATED_OPTIONS, pick(a, "groupRepeated", GROUP_REPEATED_OPTIONS[0])),
@@ -470,11 +484,16 @@ export function camParamsBlock(answers, geometry) {
     ? repeats.map((r) => `${r.count}xO${r.diameterMm}mm`).join(", ")
     : "";
   const twoD = geometry ? isTwoDGeometry(geometry) : false;
+  const isTorna = String(a.machineType || "").toLowerCase().includes("torna");
   return [
     twoD
       ? "\n[2D_KESIM]: Bu parca 2D konturdur (yuzey/hacim yok). SADECE 2D Contour/Profile operasyonu uret; 3D, kademe, kaba/finis katmani, Face ve delme derinligi yok. Tek gecis kontur kesimi (sac/lazer/plazma)."
       : null,
+    isTorna
+      ? "\n[TORNA]: Bu parca CNC torna tezgahinda islenecek. X ekseni radyal (cap yonu), Z ekseni eksenel (uzunluk yonu). G-kodlarinda X degerleri cap olarak (diameter mode) verilir."
+      : null,
     "\n[CAM_PARAMETRELERI] (bu degerlere uy):",
+    `- Tezgah tipi: ${a.machineType ?? "Freze (CNC Mill)"}`,
     `- Malzeme: ${a.material ?? "?"}`,
     `- Stok (ham blok) mm: ${a.stockX ?? "?"} x ${a.stockY ?? "?"} x ${a.stockZ ?? "?"} (her yuzeyden pay: ${a.stockMargin ?? "?"} mm)`,
     `- Ust yuzey Face operasyonu: ${a.faceTop ?? "?"}`,

@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="tr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CNC Simülatör · Topkapı Okulları</title>
+    <link rel="stylesheet" href="style.css" />
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+          "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+        }
+      }
+    </script>
+    <link rel="stylesheet" href="cnc-sim.css" />
+  </head>
+  <body>
+    <header class="site-header" style="padding:1.5rem 1.5rem 0.75rem">
+      <div class="account-strip">
+        <a href="cam.html" class="cam-back-link">← CAM Asistanı</a>
+        <a href="index.html">Ana Sayfa</a>
+        <button id="logout-btn" class="link-button" type="button">Çıkış</button>
+      </div>
+    </header>
+
+    <main class="cnc-main">
+      <div class="cnc-simulator">
+        <!-- Machine tabs -->
+        <div class="cnc-machine-tabs">
+          <button id="tab-freze" class="cnc-machine-tab active" type="button">
+            <span class="cnc-tab-icon">⚙</span> Freze (CNC Mill)
+          </button>
+          <button id="tab-torna" class="cnc-machine-tab" type="button">
+            <span class="cnc-tab-icon">🔩</span> Torna (CNC Lathe)
+          </button>
+        </div>
+
+        <div class="cnc-body">
+          <!-- LEFT: Viewport -->
+          <div class="cnc-viewport-col">
+            <div class="cnc-viewport-header">
+              <span id="cnc-machine-label" class="cnc-machine-label">FANUC 0i-MF — Freze</span>
+              <div class="cnc-camera-btns">
+                <button id="cam-iso" type="button" class="cnc-cam-btn active">İzo</button>
+                <button id="cam-top" type="button" class="cnc-cam-btn">Üst</button>
+                <button id="cam-front" type="button" class="cnc-cam-btn">Ön</button>
+                <button id="cam-right" type="button" class="cnc-cam-btn">Sağ</button>
+              </div>
+            </div>
+            <!-- 3D milling viewport -->
+            <div id="viewport-freze" class="cnc-viewport"></div>
+            <!-- 2D lathe viewport -->
+            <canvas id="viewport-torna" class="cnc-viewport" hidden></canvas>
+
+            <div class="cnc-dro">
+              <div class="cnc-dro-axis"><span class="cnc-dro-label">X</span><span id="dro-x" class="cnc-dro-val">0.000</span></div>
+              <div class="cnc-dro-axis"><span class="cnc-dro-label">Y</span><span id="dro-y" class="cnc-dro-val">0.000</span></div>
+              <div class="cnc-dro-axis"><span class="cnc-dro-label">Z</span><span id="dro-z" class="cnc-dro-val">0.000</span></div>
+              <div class="cnc-dro-axis cnc-dro-feed"><span class="cnc-dro-label">F</span><span id="dro-f" class="cnc-dro-val">0</span></div>
+              <div class="cnc-dro-axis cnc-dro-speed"><span class="cnc-dro-label">S</span><span id="dro-s" class="cnc-dro-val">0</span></div>
+              <div class="cnc-dro-axis cnc-dro-tool"><span class="cnc-dro-label">T</span><span id="dro-t" class="cnc-dro-val">01</span></div>
+            </div>
+          </div>
+
+          <!-- RIGHT: Controller panel -->
+          <div class="cnc-controller-col">
+            <!-- LCD display -->
+            <div class="cnc-lcd">
+              <div class="cnc-lcd-header">
+                <span id="cnc-mode-label">AUTO</span>
+                <span id="cnc-program-name">O0001</span>
+              </div>
+              <div id="cnc-lcd-lines" class="cnc-lcd-lines"></div>
+              <div class="cnc-lcd-footer">
+                <span id="cnc-lcd-status">HAZIR</span>
+                <span id="cnc-lcd-line">N0</span>
+              </div>
+            </div>
+
+            <!-- Mode selector -->
+            <div class="cnc-mode-row">
+              <button id="mode-auto" class="cnc-mode-btn active" type="button">AUTO</button>
+              <button id="mode-mdi" class="cnc-mode-btn" type="button">MDI</button>
+              <button id="mode-manual" class="cnc-mode-btn" type="button">MANUAL</button>
+            </div>
+
+            <!-- Cycle controls -->
+            <div class="cnc-cycle-row">
+              <button id="btn-cycle-start" class="cnc-cycle-btn cnc-green" type="button">▶ Cycle Start</button>
+              <button id="btn-feed-hold" class="cnc-cycle-btn cnc-yellow" type="button">⏸ Feed Hold</button>
+              <button id="btn-reset" class="cnc-cycle-btn cnc-red" type="button">⏹ Reset</button>
+            </div>
+
+            <!-- Speed sliders -->
+            <div class="cnc-slider-group">
+              <div class="cnc-slider-row">
+                <label>Hız:</label>
+                <input id="speed-slider" type="range" min="1" max="200" value="100" />
+                <span id="speed-pct">100%</span>
+              </div>
+              <div class="cnc-slider-row">
+                <label>İlerleme:</label>
+                <input id="feed-override" type="range" min="10" max="200" value="100" />
+                <span id="feed-pct">100%</span>
+              </div>
+            </div>
+
+            <!-- E-Stop -->
+            <button id="btn-estop" class="cnc-estop" type="button">
+              <span class="cnc-estop-icon">⚠</span> E-STOP
+            </button>
+
+            <!-- G-code input -->
+            <div class="cnc-gcode-input-area">
+              <label class="cnc-gcode-label">G-Code Programı</label>
+              <textarea id="gcode-input" class="cnc-gcode-textarea" rows="8" placeholder="G90 G21&#10;G00 X0 Y0 Z5&#10;G01 Z-1 F200&#10;G01 X50 F300&#10;G02 X50 Y50 R25&#10;..."></textarea>
+              <div class="cnc-gcode-actions">
+                <button id="btn-load-gcode" type="button">Yükle</button>
+                <button id="btn-demo-freze" type="button" class="secondary">Demo: Freze</button>
+                <button id="btn-demo-torna" type="button" class="secondary">Demo: Torna</button>
+              </div>
+            </div>
+
+            <!-- G-code listing (auto mode) -->
+            <div id="gcode-listing" class="cnc-gcode-listing" hidden>
+              <div class="cnc-gcode-listing-header">Program Listesi</div>
+              <div id="gcode-listing-lines" class="cnc-gcode-listing-lines"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <footer class="site-footer" style="padding:0.75rem">
+      <p>Topkapı Okulları Yapay Zeka · CNC Simülatör</p>
+    </footer>
+
+    <script type="module" src="cnc-sim.js"></script>
+    <script type="module" src="session-nav.js"></script>
+  </body>
+</html>
