@@ -194,13 +194,12 @@ function initThree() {
   scene = new THREE.Scene();
   scene.background = new THREE.Color(0x0a1018);
 
-  camera = new THREE.PerspectiveCamera(45, viewFreze.clientWidth / (viewFreze.clientHeight || 450), 0.1, 10000);
+  camera = new THREE.PerspectiveCamera(45, viewFreze.clientWidth / (viewFreze.clientHeight || 450), 1, 5000);
   camera.position.set(200, 150, 200);
 
-  renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer = new THREE.WebGLRenderer({ antialias: true, logarithmicDepthBuffer: true });
   renderer.setSize(viewFreze.clientWidth, viewFreze.clientHeight || 450);
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-  renderer.shadowMap.enabled = true;
   viewFreze.replaceChildren(renderer.domElement);
 
   controls = new OrbitControls(camera, renderer.domElement);
@@ -210,7 +209,6 @@ function initThree() {
   scene.add(new THREE.AmbientLight(0xffffff, 0.5));
   const dir = new THREE.DirectionalLight(0xffffff, 0.8);
   dir.position.set(100, 200, 150);
-  dir.castShadow = true;
   scene.add(dir);
   const dir2 = new THREE.DirectionalLight(0xffffff, 0.3);
   dir2.position.set(-100, -50, -100);
@@ -381,12 +379,14 @@ function cutFreze(tx, ty, tz) {
           stockHeights[idx] = ch;
           setCol(ix, iy, ch);
           dirty = true;
-          spawnChip3D(tx, ty, tz);
         }
       }
     }
   }
-  if (dirty) stockMesh.instanceMatrix.needsUpdate = true;
+  if (dirty) {
+    stockMesh.instanceMatrix.needsUpdate = true;
+    spawnChip3D(tx, ty, tz);
+  }
 }
 
 function resetFrezeStock() {
@@ -398,13 +398,15 @@ function resetFrezeStock() {
   stockMesh.instanceMatrix.needsUpdate = true;
 }
 
-// Chip particles (3D)
+// Chip particles (3D) — shared geometry/material to avoid GC pressure
+const chipGeo = new THREE.BoxGeometry(1, 0.3, 1);
+const chipMat = new THREE.MeshStandardMaterial({ color: 0xbbaa77, metalness: 0.6, roughness: 0.4 });
 function spawnChip3D(x, y, z) {
-  if (chipParticles.length > 60) return;
-  if (Math.random() > 0.15) return;
-  const geo = new THREE.BoxGeometry(0.5 + Math.random(), 0.3, 0.5 + Math.random());
-  const mat = new THREE.MeshStandardMaterial({ color: 0xbbaa77, metalness: 0.6, roughness: 0.4 });
-  const m = new THREE.Mesh(geo, mat);
+  if (chipParticles.length > 40) return;
+  if (Math.random() > 0.1) return;
+  const m = new THREE.Mesh(chipGeo, chipMat);
+  const s = 0.5 + Math.random();
+  m.scale.set(s, 1, 0.5 + Math.random());
   m.position.set(x + (Math.random() - 0.5) * 3, y + (Math.random() - 0.5) * 3, z);
   m.userData.vel = new THREE.Vector3((Math.random() - 0.5) * 20, (Math.random() - 0.5) * 20, 5 + Math.random() * 15);
   m.userData.life = 1.5 + Math.random();
@@ -422,8 +424,6 @@ function updateChips(dt) {
     c.userData.life -= dt;
     if (c.userData.life <= 0 || c.position.z < stkBaseZ - 20) {
       scene.remove(c);
-      c.geometry.dispose();
-      c.material.dispose();
       chipParticles.splice(i, 1);
     }
   }
@@ -616,17 +616,19 @@ function populateListing(lines) {
   gcodeListing.hidden = false;
 }
 
+let lastHighlightedLine = -1;
 function highlightLine(lineIdx) {
+  if (lineIdx === lastHighlightedLine) return;
+  lastHighlightedLine = lineIdx;
   for (const el of lcdElements) el.classList.remove("active");
   for (const el of listingElements) el.classList.remove("active");
   if (lineIdx >= 0 && lineIdx < lcdElements.length) {
     lcdElements[lineIdx].classList.add("active");
-    const el = lcdElements[lineIdx];
-    el.scrollIntoView({ block: "center", behavior: "smooth" });
+    lcdElements[lineIdx].scrollIntoView({ block: "nearest" });
   }
   if (lineIdx >= 0 && lineIdx < listingElements.length) {
     listingElements[lineIdx].classList.add("active");
-    listingElements[lineIdx].scrollIntoView({ block: "center", behavior: "smooth" });
+    listingElements[lineIdx].scrollIntoView({ block: "nearest" });
   }
   lcdLineNo.textContent = `N${lineIdx}`;
 }
