@@ -103,6 +103,7 @@ router.post("/generate", (req, res) => {
     return res.status(400).json({ error: "prompt is required" });
   }
 
+  const userId = req.user?.id ?? null;
   const jobId = createJob();
 
   runJob(
