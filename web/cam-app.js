@@ -27,7 +27,17 @@ const camPreviewView = byId("cam-preview-view");
 const camSimOp = byId("cam-sim-op");
 const camSimProgress = byId("cam-sim-progress");
 const camSimPlay = byId("cam-sim-play");
+const camSimPause = byId("cam-sim-pause");
+const camSimReset = byId("cam-sim-reset");
 const camSimSpeedBtns = { 1: byId("cam-sim-1x"), 2: byId("cam-sim-2x"), 5: byId("cam-sim-5x") };
+const camLcdLines = byId("cam-lcd-lines");
+const camLcdLineNo = byId("cam-lcd-line-no");
+const camDroF = byId("cam-dro-f");
+const camDroS = byId("cam-dro-s");
+const camSpeedSlider = byId("cam-speed-slider");
+const camSpeedPct = byId("cam-speed-pct");
+const camFeedSlider = byId("cam-feed-slider");
+const camFeedPct = byId("cam-feed-pct");
 const camConfirmBtn = byId("cam-confirm-btn");
 const camRejectBtn = byId("cam-reject-btn");
 const camReviseBtn = byId("cam-revise-btn");
@@ -135,10 +145,12 @@ function resetSimLayout() {
   if (coordDisplay) coordDisplay.hidden = true;
 }
 
+let camSpeedMult = 1;
 function setSimSpeed(mult) {
+  camSpeedMult = mult;
   if (camSim) camSim.setSpeed(mult);
   Object.entries(camSimSpeedBtns).forEach(([m, btn]) => {
-    btn.classList.toggle("active", Number(m) === mult);
+    if (btn) btn.classList.toggle("active", Number(m) === mult);
   });
 }
 
@@ -161,57 +173,97 @@ async function loadModelPreview() {
   }
 }
 
+let camLcdLineEls = [];
+let camGcodeLineEls = [];
+let camLastLineIdx = -1;
+
 async function setupSimulation(simulationUrl) {
   const response = await fetch(simulationUrl);
   const data = await readJson(response);
   const { initViewer, loadSimulation } = await import("./viewer.js");
   if (!viewer) viewer = initViewer(viewerContainer);
 
-  let lastLineIdx = -1;
-  let gcodeLineEls = [];
+  camLastLineIdx = -1;
+  camLcdLineEls = [];
+  camGcodeLineEls = [];
 
   camSim = loadSimulation(viewer, data ?? { toolpaths: [] }, {
     onUpdate: ({ progress, op, x, y, z, f, lineIndex }) => {
       camSimProgress.value = String(Math.round(progress * 1000));
-      camSimOp.textContent = `Operasyon: ${op || "—"}`;
-      if (camSim && !camSim.isPlaying()) camSimPlay.textContent = "▶ Oynat";
-      if (progress >= 1) camSimPlay.textContent = "▶ Tekrar Oynat";
+      const camSimOp = byId("cam-sim-op");
+      if (camSimOp) camSimOp.textContent = `Operasyon: ${op || "—"}`;
+
+      if (camSim && !camSim.isPlaying()) {
+        camSimPlay.textContent = "▶ Cycle Start";
+        const cncStatus = byId("cnc-cam-status");
+        if (cncStatus && progress < 1) { cncStatus.textContent = "DURAKLATILDI"; }
+      }
+      if (progress >= 1) {
+        camSimPlay.textContent = "▶ Cycle Start";
+        const cncStatus = byId("cnc-cam-status");
+        if (cncStatus) { cncStatus.textContent = "BİTTİ"; }
+      }
+
+      const cncX = byId("cnc-cam-x");
+      const cncY = byId("cnc-cam-y");
+      const cncZ = byId("cnc-cam-z");
+      if (cncX) cncX.textContent = x != null ? x.toFixed(3) : "0.000";
+      if (cncY) cncY.textContent = y != null ? y.toFixed(3) : "0.000";
+      if (cncZ) cncZ.textContent = z != null ? z.toFixed(3) : "0.000";
+      if (camDroF) camDroF.textContent = f != null ? String(Math.round(f)) : "0";
+      if (camDroS) camDroS.textContent = "1000";
+
       if (coordX) {
         coordX.textContent = x != null ? x.toFixed(3) : "0.000";
         coordY.textContent = y != null ? y.toFixed(3) : "0.000";
         coordZ.textContent = z != null ? z.toFixed(3) : "0.000";
         coordF.textContent = f != null ? String(Math.round(f)) : "0";
       }
-      const cncX = byId("cnc-cam-x");
-      const cncY = byId("cnc-cam-y");
-      const cncZ = byId("cnc-cam-z");
-      if (cncX) {
-        cncX.textContent = x != null ? x.toFixed(3) : "0.000";
-        cncY.textContent = y != null ? y.toFixed(3) : "0.000";
-        cncZ.textContent = z != null ? z.toFixed(3) : "0.000";
-      }
-      if (lineIndex !== lastLineIdx && gcodeLineEls.length > 0) {
-        if (lastLineIdx >= 0 && lastLineIdx < gcodeLineEls.length) gcodeLineEls[lastLineIdx].classList.remove("active");
-        if (lineIndex >= 0 && lineIndex < gcodeLineEls.length) {
-          gcodeLineEls[lineIndex].classList.add("active");
-          const el = gcodeLineEls[lineIndex];
-          const panel = gcodeLinesEl;
-          if (panel) { const elTop = el.offsetTop - panel.offsetTop; panel.scrollTop = elTop - panel.clientHeight / 2 + el.clientHeight / 2; }
+
+      if (lineIndex !== camLastLineIdx) {
+        if (camLcdLineEls.length > 0) {
+          if (camLastLineIdx >= 0 && camLastLineIdx < camLcdLineEls.length) camLcdLineEls[camLastLineIdx].classList.remove("active");
+          if (lineIndex >= 0 && lineIndex < camLcdLineEls.length) {
+            camLcdLineEls[lineIndex].classList.add("active");
+            camLcdLineEls[lineIndex].scrollIntoView({ block: "nearest" });
+          }
         }
-        lastLineIdx = lineIndex;
+        if (camGcodeLineEls.length > 0) {
+          if (camLastLineIdx >= 0 && camLastLineIdx < camGcodeLineEls.length) camGcodeLineEls[camLastLineIdx].classList.remove("active");
+          if (lineIndex >= 0 && lineIndex < camGcodeLineEls.length) {
+            camGcodeLineEls[lineIndex].classList.add("active");
+            const el = camGcodeLineEls[lineIndex];
+            const panel = gcodeLinesEl;
+            if (panel) { const elTop = el.offsetTop - panel.offsetTop; panel.scrollTop = elTop - panel.clientHeight / 2 + el.clientHeight / 2; }
+          }
+        }
+        if (camLcdLineNo) camLcdLineNo.textContent = `N${lineIndex}`;
+        camLastLineIdx = lineIndex;
       }
     },
   });
 
-  if (camSim.gcodeLines && gcodeLinesEl) {
-    gcodeLinesEl.innerHTML = "";
-    gcodeLineEls = camSim.gcodeLines.map((text, i) => {
-      const div = document.createElement("div");
-      div.className = "gcode-line";
-      div.innerHTML = `<span class="line-num">${i + 1}</span>${escapeHtml(text)}`;
-      gcodeLinesEl.appendChild(div);
-      return div;
-    });
+  if (camSim.gcodeLines) {
+    if (camLcdLines) {
+      camLcdLines.innerHTML = "";
+      camLcdLineEls = camSim.gcodeLines.slice(0, 200).map((text, i) => {
+        const div = document.createElement("div");
+        div.className = "cam-lcd-line";
+        div.textContent = text;
+        camLcdLines.appendChild(div);
+        return div;
+      });
+    }
+    if (gcodeLinesEl) {
+      gcodeLinesEl.innerHTML = "";
+      camGcodeLineEls = camSim.gcodeLines.map((text, i) => {
+        const div = document.createElement("div");
+        div.className = "gcode-line";
+        div.innerHTML = `<span class="line-num">${i + 1}</span>${escapeHtml(text)}`;
+        gcodeLinesEl.appendChild(div);
+        return div;
+      });
+    }
   }
 
   if (simWorkspace) simWorkspace.classList.add("sim-active");
@@ -220,10 +272,10 @@ async function setupSimulation(simulationUrl) {
   requestAnimationFrame(() => window.dispatchEvent(new Event("resize")));
 
   camSimProgress.value = "0";
-  camSimPlay.textContent = "▶ Oynat";
+  camSimPlay.textContent = "▶ Cycle Start";
   setSimSpeed(1);
   const cncStatus = byId("cnc-cam-status");
-  if (cncStatus) { cncStatus.textContent = "Hazır"; cncStatus.style.color = "#3ddc84"; }
+  if (cncStatus) cncStatus.textContent = "HAZIR";
 }
 
 async function loadCamStep(targetIndex) {
@@ -482,25 +534,63 @@ camSimPlay.addEventListener("click", () => {
   const cncStatus = byId("cnc-cam-status");
   if (camSim.isPlaying()) {
     camSim.pause();
-    camSimPlay.textContent = "▶ Oynat";
-    if (cncStatus) { cncStatus.textContent = "Duraklatıldı"; cncStatus.style.color = "#f0c040"; }
+    camSimPlay.textContent = "▶ Cycle Start";
+    if (cncStatus) cncStatus.textContent = "DURAKLATILDI";
   } else {
     camSim.play();
-    camSimPlay.textContent = "⏸ Duraklat";
-    if (cncStatus) { cncStatus.textContent = "Çalışıyor"; cncStatus.style.color = "#3ddc84"; }
+    camSimPlay.textContent = "⏸ Feed Hold";
+    if (cncStatus) cncStatus.textContent = "ÇALIŞIYOR";
   }
 });
+
+if (camSimPause) {
+  camSimPause.addEventListener("click", () => {
+    if (!camSim || !camSim.isPlaying()) return;
+    camSim.pause();
+    camSimPlay.textContent = "▶ Cycle Start";
+    const cncStatus = byId("cnc-cam-status");
+    if (cncStatus) cncStatus.textContent = "DURAKLATILDI";
+  });
+}
+
+if (camSimReset) {
+  camSimReset.addEventListener("click", () => {
+    if (!camSim) return;
+    camSim.pause();
+    camSim.seek(0);
+    camSimPlay.textContent = "▶ Cycle Start";
+    camSimProgress.value = "0";
+    const cncStatus = byId("cnc-cam-status");
+    if (cncStatus) cncStatus.textContent = "HAZIR";
+    camLastLineIdx = -1;
+    for (const el of camLcdLineEls) el.classList.remove("active");
+    for (const el of camGcodeLineEls) el.classList.remove("active");
+  });
+}
 
 camSimProgress.addEventListener("input", () => {
   if (!camSim) return;
   camSim.pause();
-  camSimPlay.textContent = "▶ Oynat";
+  camSimPlay.textContent = "▶ Cycle Start";
   camSim.seek(Number(camSimProgress.value) / 1000);
 });
 
 Object.entries(camSimSpeedBtns).forEach(([m, btn]) => {
-  btn.addEventListener("click", () => setSimSpeed(Number(m)));
+  if (btn) btn.addEventListener("click", () => setSimSpeed(Number(m)));
 });
+
+if (camSpeedSlider) {
+  camSpeedSlider.addEventListener("input", () => {
+    const v = camSpeedSlider.value;
+    if (camSpeedPct) camSpeedPct.textContent = `${v}%`;
+  });
+}
+if (camFeedSlider) {
+  camFeedSlider.addEventListener("input", () => {
+    const v = camFeedSlider.value;
+    if (camFeedPct) camFeedPct.textContent = `${v}%`;
+  });
+}
 
 camReviseBtn.addEventListener("click", () => { camReviseBox.hidden = !camReviseBox.hidden; });
 camReviseSubmit.addEventListener("click", () => { const change = camReviseInput.value.trim(); if (change) requestCamPlan(change); });

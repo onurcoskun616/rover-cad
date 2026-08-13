@@ -529,222 +529,269 @@ button.secondary:hover:not(:disabled) {
   gap: 0.5rem;
 }
 
-/* === CNC Simulation Panel — Siemens-inspired industrial design === */
+/* === CNC Simulation Panel — Fanuc-inspired industrial design === */
 .cam-preview-view {
   display: flex;
   flex-direction: column;
   gap: 0;
   margin-top: 0.75rem;
-  border: 2px solid #0a3d6b;
+  border: 2px solid #1a2a44;
   border-radius: 12px;
   overflow: hidden;
-  background: #0c1929;
-  box-shadow: 0 8px 32px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.04);
+  background: #080e1a;
+  box-shadow: 0 12px 48px rgba(0,0,0,.6);
 }
 
-.cnc-header {
+/* DRO Bar */
+.cam-dro {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 16px;
-  background: linear-gradient(180deg, #0f2844 0%, #0a1e38 100%);
-  border-bottom: 1px solid #1a4a7a;
-}
-.cnc-header-title {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin: 0;
-  font-size: 13px;
-  font-weight: 800;
-  color: #7fbfff;
-  letter-spacing: .06em;
-  text-transform: uppercase;
-}
-.cnc-header-title::before {
-  content: "";
-  display: block;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #3ddc84;
-  box-shadow: 0 0 8px #3ddc84aa;
-}
-.cnc-header-badge {
-  padding: 4px 10px;
-  border-radius: 6px;
-  background: #163a62;
-  color: #5ea8e6;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: .04em;
-}
-
-.cam-preview-note {
-  margin: 0;
-  padding: 10px 16px;
-  background: #0e2240;
-  border-bottom: 1px solid #1a3d66;
-  color: #8cb4d8;
-  font-size: 12px;
-  line-height: 1.5;
-}
-
-.cnc-info-strip {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
   gap: 1px;
-  background: #1a3d66;
-  border-bottom: 1px solid #1a3d66;
+  background: #1a2a44;
 }
-.cnc-info-item {
+.cam-dro-axis {
+  flex: 1;
   display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 10px 14px;
-  background: #0d2240;
+  align-items: baseline;
+  gap: 6px;
+  padding: 8px 12px;
+  background: #0a1424;
 }
-.cnc-info-label {
+.cam-dro-label {
   color: #5a8ab5;
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: .1em;
-  text-transform: uppercase;
+  font-size: 11px;
+  font-weight: 800;
+  font-family: "JetBrains Mono", "Fira Code", monospace;
 }
-.cnc-info-value {
-  color: #c8e4ff;
+.cam-dro-val {
+  color: #00ff88;
   font-size: 14px;
   font-weight: 700;
-  font-family: "JetBrains Mono", "Fira Code", "SF Mono", monospace;
+  font-family: "JetBrains Mono", "Fira Code", monospace;
 }
+.cam-dro-feed .cam-dro-val { color: #ffaa00; }
+.cam-dro-speed .cam-dro-val { color: #00ccff; }
 
-.cam-sim-controls {
+/* LCD Display */
+.cam-lcd {
+  margin: 10px;
+  border: 2px solid #1a3a20;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #0a1a0a;
+  box-shadow: inset 0 0 20px rgba(0,255,80,.05);
+}
+.cam-lcd-header {
   display: flex;
-  flex-direction: column;
-  gap: 0;
-  background: #0c1929;
+  justify-content: space-between;
+  padding: 6px 10px;
+  background: #0d200d;
+  border-bottom: 1px solid #1a3a20;
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  font-size: 10px;
+  font-weight: 800;
+  color: #33ff66;
 }
-
-.cam-sim-op {
-  margin: 0;
-  padding: 10px 16px;
-  font-size: 12px;
+.cam-lcd-lines {
+  min-height: 80px;
+  max-height: 120px;
+  overflow-y: auto;
+  padding: 4px 0;
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  font-size: 11px;
+  line-height: 1.6;
+  color: #22cc44;
+}
+.cam-lcd-line {
+  padding: 0 10px;
+  white-space: nowrap;
+  transition: background .1s;
+}
+.cam-lcd-line.active {
+  background: rgba(0,255,80,.12);
+  color: #66ff88;
   font-weight: 700;
-  color: #3ddc84;
-  background: #0d1f35;
-  border-bottom: 1px solid #1a3d66;
-  font-family: "JetBrains Mono", "Fira Code", "SF Mono", monospace;
 }
+.cam-lcd-footer {
+  display: flex;
+  justify-content: space-between;
+  padding: 4px 10px;
+  background: #0d200d;
+  border-top: 1px solid #1a3a20;
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  font-size: 9px;
+  color: #228844;
+}
+.cam-lcd-lines::-webkit-scrollbar { width: 4px; }
+.cam-lcd-lines::-webkit-scrollbar-track { background: transparent; }
+.cam-lcd-lines::-webkit-scrollbar-thumb { background: #1a3a20; border-radius: 2px; }
 
+/* Cycle Controls */
+.cam-cycle-row {
+  display: flex;
+  gap: 4px;
+  padding: 8px 10px;
+}
+.cam-cycle-btn {
+  flex: 1;
+  padding: 10px 6px;
+  border: none;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.cam-btn-green {
+  background: linear-gradient(180deg, #1a6b3a 0%, #0f4d28 100%);
+  color: #a8f0c6;
+  border: 1px solid #1a7a42;
+}
+.cam-btn-green:hover { background: linear-gradient(180deg, #1f8248 0%, #146435 100%); color: #fff; }
+.cam-btn-yellow {
+  background: linear-gradient(180deg, #6b5a1a 0%, #4d3f0f 100%);
+  color: #f0dca8;
+  border: 1px solid #7a6a1a;
+}
+.cam-btn-yellow:hover { background: linear-gradient(180deg, #827020 0%, #645418 100%); color: #fff; }
+.cam-btn-red {
+  background: linear-gradient(180deg, #5c2020 0%, #3e1515 100%);
+  color: #f0a8a8;
+  border: 1px solid #8b3030;
+}
+.cam-btn-red:hover { background: linear-gradient(180deg, #7a2828 0%, #521a1a 100%); color: #fff; }
+
+/* Progress Bar */
+.cam-progress-row {
+  padding: 4px 10px;
+}
 .cam-sim-progress {
-  width: calc(100% - 32px);
-  margin: 12px 16px 8px;
-  height: 6px;
+  width: 100%;
+  height: 4px;
   -webkit-appearance: none;
   appearance: none;
   background: #1a3558;
-  border-radius: 3px;
+  border: none;
+  border-radius: 2px;
   outline: none;
+  padding: 0;
 }
 .cam-sim-progress::-webkit-slider-thumb {
   -webkit-appearance: none;
-  width: 16px;
-  height: 16px;
+  width: 14px;
+  height: 14px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #4a9eff, #2070cc);
-  box-shadow: 0 0 8px #4a9eff88;
+  background: #4a8dff;
   cursor: pointer;
 }
 .cam-sim-progress::-moz-range-thumb {
-  width: 16px;
-  height: 16px;
+  width: 14px;
+  height: 14px;
   border: 0;
   border-radius: 50%;
-  background: linear-gradient(135deg, #4a9eff, #2070cc);
-  box-shadow: 0 0 8px #4a9eff88;
+  background: #4a8dff;
   cursor: pointer;
 }
-.cam-sim-progress::-webkit-slider-runnable-track {
-  height: 6px;
-  border-radius: 3px;
-}
 
-.cam-sim-buttons {
+/* Speed / Feed Sliders */
+.cam-slider-group { padding: 6px 10px; }
+.cam-slider-row {
   display: flex;
   align-items: center;
   gap: 8px;
-  flex-wrap: wrap;
-  padding: 10px 16px 14px;
+  padding: 4px 0;
 }
-
-.cam-sim-buttons button {
-  width: auto;
-  padding: 8px 18px;
-  border: 1px solid #1e4a78;
-  border-radius: 8px;
-  background: linear-gradient(180deg, #1a3a5e 0%, #122a48 100%);
-  color: #b0d4f1;
-  font-size: 12px;
-  font-weight: 700;
-  cursor: pointer;
-  transition: all .15s;
-}
-.cam-sim-buttons button:hover {
-  background: linear-gradient(180deg, #1e4a78 0%, #163862 100%);
-  border-color: #2a6aaa;
-  color: #fff;
-}
-.cam-sim-buttons button:first-child {
-  padding: 8px 24px;
-  background: linear-gradient(180deg, #1a6b3a 0%, #0f4d28 100%);
-  border-color: #1a7a42;
-  color: #a8f0c6;
-}
-.cam-sim-buttons button:first-child:hover {
-  background: linear-gradient(180deg, #1f8248 0%, #146435 100%);
-  color: #fff;
-}
-
-.cam-sim-speed-label {
+.cam-slider-row label {
   color: #5a8ab5;
+  font-size: 10px;
+  font-weight: 700;
+  min-width: 60px;
+}
+.cam-slider-row input[type="range"] {
+  flex: 1;
+  height: 4px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: #1a3558;
+  border: none;
+  border-radius: 2px;
+  outline: none;
+  padding: 0;
+}
+.cam-slider-row input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #4a8dff;
+  cursor: pointer;
+}
+.cam-slider-row input[type="range"]::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border: 0;
+  border-radius: 50%;
+  background: #4a8dff;
+  cursor: pointer;
+}
+.cam-slider-row span {
+  color: #8cc8ff;
   font-size: 11px;
   font-weight: 700;
-  margin-left: 4px;
-}
-
-.sim-speed {
+  font-family: "JetBrains Mono", monospace;
   min-width: 38px;
-  text-align: center;
-}
-.sim-speed.active {
-  background: linear-gradient(180deg, #2060a8 0%, #164888 100%) !important;
-  color: #fff !important;
-  border-color: #3a8add !important;
-  box-shadow: 0 0 10px #2060a844;
+  text-align: right;
 }
 
-.cnc-footer {
+/* Speed Presets */
+.cam-speed-presets {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 8px 16px;
-  background: linear-gradient(180deg, #0a1e38 0%, #081828 100%);
-  border-top: 1px solid #1a3d66;
+  gap: 6px;
+  padding: 4px 10px 8px;
 }
-.cnc-footer-actions {
+.cam-speed-label {
+  color: #5a8ab5;
+  font-size: 10px;
+  font-weight: 700;
+}
+.cam-speed-btn {
+  width: auto;
+  min-width: 38px;
+  padding: 4px 10px;
+  border: 1px solid #1e3a5e;
+  border-radius: 6px;
+  background: #0e1e34;
+  color: #6a8ab0;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+  text-align: center;
+}
+.cam-speed-btn:hover { background: #142a48; color: #a0c0e0; }
+.cam-speed-btn.active {
+  background: #1a3a6a;
+  color: #8cc8ff;
+  border-color: #2a5a8a;
+}
+
+/* Confirm/Reject Footer */
+.cam-sim-footer {
   display: flex;
   gap: 8px;
+  padding: 10px;
+  background: linear-gradient(180deg, #0a1e38 0%, #081828 100%);
+  border-top: 1px solid #1a2a44;
 }
-.cnc-footer-actions button {
+.cam-sim-footer button {
+  flex: 1;
+}
+.cnc-btn-approve {
   width: auto;
-  padding: 9px 20px;
+  padding: 10px 20px;
   border-radius: 8px;
   font-size: 12px;
   font-weight: 800;
   cursor: pointer;
   transition: all .15s;
-}
-.cnc-btn-approve {
   background: linear-gradient(180deg, #1a7a42 0%, #0f5c30 100%);
   border: 1px solid #22a858;
   color: #b8f5d0;
@@ -755,6 +802,13 @@ button.secondary:hover:not(:disabled) {
   box-shadow: 0 0 14px #22a85844;
 }
 .cnc-btn-reject {
+  width: auto;
+  padding: 10px 20px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+  transition: all .15s;
   background: linear-gradient(180deg, #5c2020 0%, #3e1515 100%);
   border: 1px solid #8b3030;
   color: #f0a8a8;
@@ -763,32 +817,13 @@ button.secondary:hover:not(:disabled) {
   background: linear-gradient(180deg, #7a2828 0%, #521a1a 100%);
   color: #fff;
 }
-.cnc-coord {
-  display: flex;
-  gap: 16px;
-  font-family: "JetBrains Mono", "Fira Code", "SF Mono", monospace;
-  font-size: 11px;
-  color: #5a8ab5;
-}
-.cnc-coord span {
-  color: #8cc8ff;
-}
 
-.collision-alert {
-  padding: 12px 16px;
-  margin: 0;
-  background: linear-gradient(180deg, #3a1010 0%, #2a0c0c 100%);
-  border-top: 1px solid #6b2020;
-  border-bottom: 1px solid #6b2020;
-  color: #ff8a80;
-  font-weight: 700;
-  font-size: 13px;
-  text-align: center;
-  animation: collisionPulse 1.5s ease-in-out infinite;
-}
-@keyframes collisionPulse {
-  0%,100% { background-color: #3a1010; }
-  50% { background-color: #4a1818; }
+/* Responsive CAM preview */
+@media (max-width: 520px) {
+  .cam-dro { flex-wrap: wrap; }
+  .cam-dro-axis { min-width: 30%; }
+  .cam-cycle-row { flex-wrap: wrap; }
+  .cam-sim-footer { flex-direction: column; }
 }
 
 .sim-downloads {

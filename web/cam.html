@@ -87,40 +87,66 @@
             </div>
 
             <div id="cam-preview-view" class="cam-preview-view" hidden>
-              <div class="cnc-header">
-                <p class="cnc-header-title">CNC Simülasyon</p>
-                <span class="cnc-header-badge">TopkapiAI CAM</span>
-              </div>
-              <p class="cam-preview-note">
-                Takım yolu yukarıdaki 3D görüntüleyicide gösteriliyor (mavi:
-                kesme, turuncu: hızlı hareket). Kırmızı takım, yolu sırayla
-                izler. İzleyip onaylayın.
-              </p>
-              <div class="cnc-info-strip">
-                <div class="cnc-info-item"><span class="cnc-info-label">Birim</span><span class="cnc-info-value">mm</span></div>
-                <div class="cnc-info-item"><span class="cnc-info-label">Koordinat</span><span class="cnc-info-value">G54</span></div>
-                <div class="cnc-info-item"><span class="cnc-info-label">Mod</span><span id="cnc-cam-mode" class="cnc-info-value">Frezeleme</span></div>
-                <div class="cnc-info-item"><span class="cnc-info-label">Durum</span><span id="cnc-cam-status" class="cnc-info-value" style="color:#3ddc84">Hazır</span></div>
+              <!-- DRO Bar -->
+              <div class="cam-dro">
+                <div class="cam-dro-axis"><span class="cam-dro-label">X</span><span id="cnc-cam-x" class="cam-dro-val">0.000</span></div>
+                <div class="cam-dro-axis"><span class="cam-dro-label">Y</span><span id="cnc-cam-y" class="cam-dro-val">0.000</span></div>
+                <div class="cam-dro-axis"><span class="cam-dro-label">Z</span><span id="cnc-cam-z" class="cam-dro-val">0.000</span></div>
+                <div class="cam-dro-axis cam-dro-feed"><span class="cam-dro-label">F</span><span id="cam-dro-f" class="cam-dro-val">0</span></div>
+                <div class="cam-dro-axis cam-dro-speed"><span class="cam-dro-label">S</span><span id="cam-dro-s" class="cam-dro-val">0</span></div>
               </div>
 
-              <div class="cam-sim-controls">
-                <p id="cam-sim-op" class="cam-sim-op">Operasyon: —</p>
+              <!-- LCD Display -->
+              <div class="cam-lcd">
+                <div class="cam-lcd-header">
+                  <span id="cnc-cam-status">HAZIR</span>
+                  <span id="cnc-cam-mode">FREZE</span>
+                </div>
+                <div id="cam-lcd-lines" class="cam-lcd-lines"></div>
+                <div class="cam-lcd-footer">
+                  <span id="cam-sim-op">Operasyon: —</span>
+                  <span id="cam-lcd-line-no">N0</span>
+                </div>
+              </div>
+
+              <!-- Cycle Controls -->
+              <div class="cam-cycle-row">
+                <button id="cam-sim-play" class="cam-cycle-btn cam-btn-green" type="button">▶ Cycle Start</button>
+                <button id="cam-sim-pause" class="cam-cycle-btn cam-btn-yellow" type="button">⏸ Feed Hold</button>
+                <button id="cam-sim-reset" class="cam-cycle-btn cam-btn-red" type="button">⏹ Reset</button>
+              </div>
+
+              <!-- Progress -->
+              <div class="cam-progress-row">
                 <input id="cam-sim-progress" class="cam-sim-progress" type="range" min="0" max="1000" value="0" />
-                <div class="cam-sim-buttons">
-                  <button id="cam-sim-play" type="button">▶ Oynat</button>
-                  <span class="cam-sim-speed-label">Hız:</span>
-                  <button id="cam-sim-1x" type="button" class="secondary sim-speed active">1x</button>
-                  <button id="cam-sim-2x" type="button" class="secondary sim-speed">2x</button>
-                  <button id="cam-sim-5x" type="button" class="secondary sim-speed">5x</button>
+              </div>
+
+              <!-- Speed / Feed Sliders -->
+              <div class="cam-slider-group">
+                <div class="cam-slider-row">
+                  <label>Hız:</label>
+                  <input id="cam-speed-slider" type="range" min="1" max="200" value="100" />
+                  <span id="cam-speed-pct">100%</span>
+                </div>
+                <div class="cam-slider-row">
+                  <label>İlerleme:</label>
+                  <input id="cam-feed-slider" type="range" min="10" max="200" value="100" />
+                  <span id="cam-feed-pct">100%</span>
                 </div>
               </div>
 
-              <div class="cnc-footer">
-                <div class="cnc-coord">X <span id="cnc-cam-x">0.000</span> Y <span id="cnc-cam-y">0.000</span> Z <span id="cnc-cam-z">0.000</span></div>
-                <div class="cnc-footer-actions">
-                  <button id="cam-confirm-btn" class="cnc-btn-approve" type="button">Onayla — G-code Üret</button>
-                  <button id="cam-reject-btn" class="cnc-btn-reject" type="button">Reddet</button>
-                </div>
+              <!-- Speed presets -->
+              <div class="cam-speed-presets">
+                <span class="cam-speed-label">Sim Hız:</span>
+                <button id="cam-sim-1x" type="button" class="cam-speed-btn active">1x</button>
+                <button id="cam-sim-2x" type="button" class="cam-speed-btn">2x</button>
+                <button id="cam-sim-5x" type="button" class="cam-speed-btn">5x</button>
+              </div>
+
+              <!-- Confirm/Reject Footer -->
+              <div class="cam-sim-footer">
+                <button id="cam-confirm-btn" class="cnc-btn-approve" type="button">Onayla — G-code Üret</button>
+                <button id="cam-reject-btn" class="cnc-btn-reject" type="button">Reddet</button>
               </div>
             </div>
           </div>
