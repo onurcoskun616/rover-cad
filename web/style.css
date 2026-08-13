@@ -103,7 +103,7 @@ main {
 
 .tabs {
   display: flex;
-  gap: 0.5rem;
+  gap: 0;
   border-bottom: 1px solid var(--border);
   margin-bottom: 0.25rem;
 }
@@ -1223,6 +1223,24 @@ main.sim-expanded {
 
   .gcode-lines {
     max-height: 200px;
+  }
+
+  .tabs {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0;
+    border-bottom: none;
+  }
+
+  .tab {
+    font-size: 0.85rem;
+    padding: 0.6rem 0.4rem;
+    text-align: center;
+    border-bottom: 2px solid var(--border);
+  }
+
+  .tab.active {
+    border-bottom-color: var(--accent);
   }
 }
 
