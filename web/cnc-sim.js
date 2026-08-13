@@ -329,10 +329,10 @@ function initMill() {
   const wrap = $("mill-canvas-wrap");
   scene = new THREE.Scene();
   scene.background = new THREE.Color(0x080e14);
-  scene.fog = new THREE.Fog(0x080e14, 600, 1200);
+  scene.fog = new THREE.Fog(0x080e14, 800, 2000);
 
-  camera = new THREE.PerspectiveCamera(38, wrap.clientWidth / (wrap.clientHeight || 500), 1, 5000);
-  camera.position.set(240, 180, 260);
+  camera = new THREE.PerspectiveCamera(50, wrap.clientWidth / (wrap.clientHeight || 500), 1, 5000);
+  camera.position.set(MW + 60, MTOP + 100, MD + 60);
 
   renderer = new THREE.WebGLRenderer({ antialias: true, logarithmicDepthBuffer: true });
   renderer.setSize(wrap.clientWidth, wrap.clientHeight || 500);
@@ -346,7 +346,7 @@ function initMill() {
   controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
   controls.dampingFactor = 0.08;
-  controls.target.set(MW / 2, MTOP / 2, MD / 2);
+  controls.target.set(MW / 2, MTOP * 0.6, MD / 2);
 
   // Lighting — dramatic
   scene.add(new THREE.AmbientLight(0xffffff, 0.35));
@@ -486,7 +486,7 @@ function buildTool() {
   tip.position.y = -1; spindleGrp.add(tip);
 
   toolGroup.rotation.x = Math.PI;
-  toolGroup.position.set(MW / 2, MTOP + 60, MD / 2);
+  toolGroup.position.set(MW / 2, MTOP + 30, MD / 2);
   scene.add(toolGroup);
 }
 
@@ -630,7 +630,7 @@ function millStartCycle() {
       dir *= -1;
     }
   }
-  passes.push({ type: "rapid", x: MW / 2, y: MTOP + 60, z: MD / 2 });
+  passes.push({ type: "rapid", x: MW / 2, y: MTOP + 30, z: MD / 2 });
   millAuto = passes; millAutoStep = 0;
 }
 
@@ -748,19 +748,19 @@ function keyAction(k, inputs) {
 function setMillCamera(view) {
   if (!camera || !controls) return;
   const t = controls.target;
-  const d = 240;
+  const d = 160;
   switch (view) {
     case "iso":
-      camera.position.set(t.x + d, t.y + d * 0.75, t.z + d);
+      camera.position.set(t.x + d, t.y + d * 0.7, t.z + d);
       break;
     case "top":
-      camera.position.set(t.x, t.y + d * 1.2, t.z + 0.01);
+      camera.position.set(t.x, t.y + d * 1.5, t.z + 0.01);
       break;
     case "front":
-      camera.position.set(t.x, t.y + d * 0.15, t.z + d);
+      camera.position.set(t.x, t.y + d * 0.2, t.z + d * 1.2);
       break;
     case "right":
-      camera.position.set(t.x + d, t.y + d * 0.15, t.z);
+      camera.position.set(t.x + d * 1.2, t.y + d * 0.2, t.z);
       break;
   }
   camera.lookAt(t); controls.update();
@@ -887,7 +887,7 @@ function wireEvents() {
     buildWorkpiece();
     millRunning = false; millAutoStep = 0; millAuto = null;
     millRemoved = 0;
-    toolGroup.position.set(MW / 2, MTOP + 60, MD / 2);
+    toolGroup.position.set(MW / 2, MTOP + 30, MD / 2);
   };
   $("mbtn-newp").addEventListener("click", resetMillWp);
 
