@@ -22,7 +22,7 @@ const MAX_ATTEMPTS = 3;
  *   stlPath?: string, bbox?: object, warning?: string,
  *   error?: string, lastError?: string}>}
  */
-export async function runBuildPipeline({ generate, verifyPrompt = "" }) {
+export async function runBuildPipeline({ generate, verifyPrompt = "", promptCache = null }) {
   let previousCode = null;
   let problem = null;
   let lastError = "Bilinmeyen hata";
@@ -35,7 +35,11 @@ export async function runBuildPipeline({ generate, verifyPrompt = "" }) {
     // 1. Generate (or re-generate with correction context).
     let code;
     try {
-      code = await generate(correction);
+      // A validated cache entry is only eligible on the first attempt. If its
+      // FreeCAD execution fails, the normal correction loop takes over.
+      code = !correction && promptCache?.mayReuse
+        ? promptCache.cachedCode
+        : await generate(correction);
     } catch (err) {
       lastError = err.message;
       // Nothing runnable came back (prose/empty/timeout). Retry fresh.
@@ -78,16 +82,30 @@ export async function runBuildPipeline({ generate, verifyPrompt = "" }) {
     }
 
     // 4. Success. PDF is deferred to /generate-pdf.
-    return {
+    const successfulResult = {
       ok: true,
       generatedCode: code,
       stepPath: out.stepPath,
       stlPath: out.stlPath,
       bbox,
+      anchors: out.anchors ?? null,
+      center: out.center ?? null,
       // If we're shipping on the final attempt despite a dimension mismatch,
       // surface it rather than silently returning a wrong-sized part.
       warning: check.ok ? undefined : check.reason,
     };
+    // The cache is deliberately fail-open: storage problems must not turn a
+    // successful FreeCAD build into a failed user request.
+    try {
+      promptCache?.recordValidated({
+        code,
+        bbox,
+        metadata: { warning: successfulResult.warning ?? null },
+      });
+    } catch (error) {
+      console.warn("[prompt-cache] dogrulama sonrasi kayit hatasi:", error.message);
+    }
+    return successfulResult;
   }
 
   return { ok: false, error: "Model uretilemedi", lastError, generatedCode: lastCode };

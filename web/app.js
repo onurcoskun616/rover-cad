@@ -1,9 +1,7 @@
 const API_BASE = "https://api.topkapikoleji.org";
-// NOTE: shipped in a public static site, so this is not a real secret -- it
-// only keeps casual/automated traffic off the endpoint, not a determined
-// attacker (anyone can read it via view-source). Must match API_KEY in the
-// backend's .env.
-const API_KEY = "1d48ec585a4b306db72a23be0b7ce8f56618c1275a3ea5efcee96df1106712f1";
+const sessionToken = localStorage.getItem("rover_session");
+if (!sessionToken) window.location.replace("login.html");
+const authHeaders = () => ({ Authorization: `Bearer ${sessionToken}` });
 
 const tabText = document.getElementById("tab-text");
 const tabImage = document.getElementById("tab-image");
@@ -38,47 +36,28 @@ const viewerContainer = document.getElementById("viewer-container");
 const generatedCodeEl = document.getElementById("generated-code");
 const camSection = document.getElementById("cam-section");
 const camBtn = document.getElementById("cam-btn");
-const camStatus = document.getElementById("cam-status");
-const camSpinner = document.getElementById("cam-spinner");
-const camStatusText = document.getElementById("cam-status-text");
-const gcodeLink = document.getElementById("gcode-link");
-const camAssistant = document.getElementById("cam-assistant");
-const camWizard = document.getElementById("cam-wizard");
-const camStepProgress = document.getElementById("cam-step-progress");
-const camStepTitle = document.getElementById("cam-step-title");
-const camStepIntro = document.getElementById("cam-step-intro");
-const camStepFields = document.getElementById("cam-step-fields");
-const camBackBtn = document.getElementById("cam-back-btn");
-const camNextBtn = document.getElementById("cam-next-btn");
-const camPlanBtn = document.getElementById("cam-plan-btn");
-const camPlanView = document.getElementById("cam-plan-view");
-const camPlanText = document.getElementById("cam-plan-text");
-const camPreviewBtn = document.getElementById("cam-preview-btn");
-const camPreviewView = document.getElementById("cam-preview-view");
-const camSimOp = document.getElementById("cam-sim-op");
-const camSimProgress = document.getElementById("cam-sim-progress");
-const camSimPlay = document.getElementById("cam-sim-play");
-const camSimSpeedBtns = {
-  1: document.getElementById("cam-sim-1x"),
-  2: document.getElementById("cam-sim-2x"),
-  5: document.getElementById("cam-sim-5x"),
+const tabSim = document.getElementById("tab-sim");
+const panelSim = document.getElementById("panel-sim");
+const simDemoBtn = document.getElementById("sim-demo-btn");
+const simPromptInput = document.getElementById("sim-prompt-input");
+const simGenerateBtn = document.getElementById("sim-generate-btn");
+const simCodeInput = document.getElementById("sim-code-input");
+const simRunBtn = document.getElementById("sim-run-btn");
+const simUndoBtn = document.getElementById("sim-undo-btn");
+const simStepIndicator = document.getElementById("sim-step-indicator");
+const simDownloads = document.getElementById("sim-downloads");
+const simDownloadParts = document.getElementById("sim-download-parts");
+const simDownloadAssembly = document.getElementById("sim-download-assembly");
+const kinSimView = document.getElementById("kin-sim-view");
+const kinSimStatus = document.getElementById("kin-sim-status");
+const kinSimProgress = document.getElementById("kin-sim-progress");
+const kinSimPlay = document.getElementById("kin-sim-play");
+const kinSimSpeedBtns = {
+  1: document.getElementById("kin-sim-1x"),
+  2: document.getElementById("kin-sim-2x"),
+  5: document.getElementById("kin-sim-5x"),
 };
-const camConfirmBtn = document.getElementById("cam-confirm-btn");
-const camRejectBtn = document.getElementById("cam-reject-btn");
-const camReviseBtn = document.getElementById("cam-revise-btn");
-const camReviseBox = document.getElementById("cam-revise-box");
-const camReviseInput = document.getElementById("cam-revise-input");
-const camReviseSubmit = document.getElementById("cam-revise-submit");
-const camQuote = document.getElementById("cam-quote");
-const camQuoteTime = document.getElementById("cam-quote-time");
-const camQuoteBtn = document.getElementById("cam-quote-btn");
-const camQuoteForm = document.getElementById("cam-quote-form");
-const quoteFieldsBasit = document.getElementById("quote-fields-basit");
-const quoteFieldsDetayli = document.getElementById("quote-fields-detayli");
-const camQuoteSubmit = document.getElementById("cam-quote-submit");
-const camQuoteResult = document.getElementById("cam-quote-result");
-const camQuoteBreakdown = document.getElementById("cam-quote-breakdown");
-const camQuotePdf = document.getElementById("cam-quote-pdf");
+const kinCollisionAlert = document.getElementById("kin-collision-alert");
 
 let viewer = null;
 let mode = "text"; // "text" | "image" | "step"
@@ -86,13 +65,21 @@ let lastStepPath = null;
 let lastGeneratedCode = null;
 let lastBbox = null;
 let lastPrompt = "";
-let camAnswers = {};
-let camStepIndex = 0;
-let camStepFieldNames = [];
-let camPreviewToken = null;
-let camEstimatedMinutes = null;
-let camSim = null; // active simulation controller
-let camPlan = null;
+let lastProjectId = null;
+let lastStlUrl = null;
+let lastContourUrl = null;
+let lastDimData = null;
+let dimEditInProgress = false;
+let dimEditQueue = [];
+let kinSim = null;
+let simCurrentCode = null;
+let simCurrentKinematics = null;
+let simCurrentPartsInline = null;
+let simCurrentPartSteps = null;
+let simCurrentAssemblyStep = null;
+let simSessionId = null;
+let simStepIndex = -1;
+let simTotalSteps = 0;
 
 function setMode(next) {
   mode = next;
@@ -100,6 +87,7 @@ function setMode(next) {
     [tabText, panelText, "text"],
     [tabImage, panelImage, "image"],
     [tabStep, panelStep, "step"],
+    [tabSim, panelSim, "sim"],
   ];
   for (const [tab, panel, name] of tabs) {
     const active = name === next;
@@ -107,12 +95,18 @@ function setMode(next) {
     tab.setAttribute("aria-selected", String(active));
     panel.hidden = !active;
   }
-  generateBtn.textContent = next === "step" ? "Yükle ve Önizle" : "Oluştur";
+  if (next === "sim") {
+    generateBtn.hidden = true;
+  } else {
+    generateBtn.hidden = false;
+    generateBtn.textContent = next === "step" ? "Yükle ve Önizle" : "Oluştur";
+  }
 }
 
 tabText.addEventListener("click", () => setMode("text"));
 tabImage.addEventListener("click", () => setMode("image"));
 tabStep.addEventListener("click", () => setMode("step"));
+tabSim.addEventListener("click", () => setMode("sim"));
 
 imageInput.addEventListener("change", () => {
   const file = imageInput.files?.[0];
@@ -158,39 +152,47 @@ function resetResult() {
   lastGeneratedCode = null;
   lastBbox = null;
   lastPrompt = "";
+  lastProjectId = null;
+  lastDimData = null;
+  dimEditInProgress = false;
+  dimEditQueue = [];
   generatedCodeEl.textContent = "";
   camSection.hidden = true;
-  camStatus.hidden = true;
-  gcodeLink.hidden = true;
-  resetCamAssistant();
+  lastStlUrl = null;
+  lastContourUrl = null;
+  resetKinSim();
+  if (viewer) {
+    import("./viewer.js").then(({ clearDimensions }) => clearDimensions(viewer)).catch(() => {});
+  }
   lastStepPath = null;
 }
 
-function resetCamAssistant() {
-  camAssistant.hidden = true;
-  camWizard.hidden = true;
-  camStepFields.innerHTML = "";
-  camStepIntro.hidden = true;
-  camBackBtn.hidden = true;
-  camPlanBtn.hidden = true;
-  camPlanView.hidden = true;
-  camPlanText.textContent = "";
-  camPreviewView.hidden = true;
-  camReviseBox.hidden = true;
-  camReviseInput.value = "";
-  camQuote.hidden = true;
-  camQuoteForm.hidden = true;
-  camQuoteResult.hidden = true;
-  camQuotePdf.hidden = true;
-  camAnswers = {};
-  camStepIndex = 0;
-  camStepFieldNames = [];
-  camPreviewToken = null;
-  camEstimatedMinutes = null;
-  if (camSim) camSim.pause();
-  camSim = null;
-  camPlan = null;
+function resetKinSim(keepContext) {
+  if (kinSim) kinSim.pause();
+  kinSim = null;
+  kinSimView.hidden = true;
+  kinSimPlay.textContent = "Oynat";
+  kinSimProgress.value = "0";
+  kinSimStatus.textContent = "Durum: Hazir";
+  kinCollisionAlert.hidden = true;
+  Object.values(kinSimSpeedBtns).forEach((b) => b.classList.remove("active"));
+  if (kinSimSpeedBtns[1]) kinSimSpeedBtns[1].classList.add("active");
+  simDownloads.hidden = true;
+  simDownloadParts.innerHTML = "";
+  simDownloadAssembly.hidden = true;
+  if (!keepContext) {
+    simCurrentCode = null;
+    simCurrentKinematics = null;
+    simCurrentPartsInline = null;
+    simCurrentPartSteps = null;
+    simCurrentAssemblyStep = null;
+    simSessionId = null;
+    simStepIndex = -1;
+    simTotalSteps = 0;
+  }
+  updateSimStepUI();
 }
+
 
 async function readJson(response) {
   try {
@@ -200,8 +202,8 @@ async function readJson(response) {
   }
 }
 
-const POLL_INTERVAL_MS = 2500;
-const POLL_TIMEOUT_MS = 8 * 60 * 1000; // give long builds plenty of room
+const POLL_INTERVAL_MS = 1500;
+const POLL_TIMEOUT_MS = 7 * 60 * 1000;
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -241,7 +243,7 @@ async function runAsyncJob(url, options, onTick) {
     let statusData;
     try {
       statusResp = await fetch(`${API_BASE}/jobs/${jobId}`, {
-        headers: { "x-api-key": API_KEY },
+        headers: authHeaders(),
       });
       statusData = await readJson(statusResp);
     } catch {
@@ -255,6 +257,7 @@ async function runAsyncJob(url, options, onTick) {
       continue;
     }
     if (statusData.status === "pending") {
+      if (onTick && statusData.elapsed != null) onTick(statusData.elapsed);
       continue;
     }
     if (statusData.status === "error") {
@@ -281,12 +284,12 @@ async function handleGenerate() {
       showError("Lütfen bir istek yazın.");
       return;
     }
-    baseMessage = "FreeCAD'de model oluşturuluyor";
+    baseMessage = "3D model oluşturuluyor";
     lastPrompt = prompt;
     url = `${API_BASE}/generate`;
     options = {
       method: "POST",
-      headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
+      headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify({ prompt }),
     };
   } else if (mode === "image") {
@@ -303,7 +306,7 @@ async function handleGenerate() {
       form.append("prompt", lastPrompt);
     }
     url = `${API_BASE}/generate-from-image`;
-    options = { method: "POST", headers: { "x-api-key": API_KEY }, body: form };
+    options = { method: "POST", headers: authHeaders(), body: form };
   } else {
     // STEP/IGES/DXF upload: import in FreeCAD, preview, then jump into CAM.
     const file = stepInput.files?.[0];
@@ -311,7 +314,7 @@ async function handleGenerate() {
       showError("Lütfen bir CAD dosyası seçin.");
       return;
     }
-    baseMessage = "Dosya yükleniyor ve FreeCAD'e aktarılıyor";
+    baseMessage = "Dosya yükleniyor ve CAD motoruna aktarılıyor";
     lastPrompt = "";
     const form = new FormData();
     form.append("file", file);
@@ -322,7 +325,7 @@ async function handleGenerate() {
     } else {
       url = `${API_BASE}/upload-step`;
     }
-    options = { method: "POST", headers: { "x-api-key": API_KEY }, body: form };
+    options = { method: "POST", headers: authHeaders(), body: form };
   }
 
   setLoading(true, `${baseMessage}, bu biraz zaman alabilir…`);
@@ -371,9 +374,10 @@ function showResult(data) {
   if (data.stlUrl) {
     stlLink.href = data.stlUrl;
     stlLink.hidden = false;
+    lastStlUrl = data.stlUrl;
     loadStlPreview(data.stlUrl);
   } else if (data.contourUrl) {
-    // 2D DXF (no thickness): show the contour as lines instead of a solid.
+    lastContourUrl = data.contourUrl;
     loadContourPreview(data.contourUrl);
   }
   if (data.generatedCode) {
@@ -381,9 +385,14 @@ function showResult(data) {
   }
 
   lastGeneratedCode = data.generatedCode ?? null;
+  if (data.projectId) lastProjectId = data.projectId;
   lastBbox = data.bbox ?? null;
-  // The PDF is generated on demand to keep /generate fast.
+  // The PDF is generated on demand to keep /generate fast. Reset any stale
+  // PDF link so the user re-generates with the current dimensions.
+  pdfLink.hidden = true;
   pdfBtn.hidden = false;
+  pdfBtn.textContent = "Teknik Resim (PDF)";
+  pdfBtn.disabled = false;
   // Allow iterative editing once we have code to revise.
   reviseSection.hidden = !lastGeneratedCode;
 
@@ -392,6 +401,10 @@ function showResult(data) {
   // CAM assistant (questions -> plan -> confirm).
   if (lastStepPath) {
     camSection.hidden = false;
+  }
+
+  if (data.anchors && data.anchors.length) {
+    showAnchors(data.anchors, data.center);
   }
 }
 
@@ -412,8 +425,13 @@ async function handleRevise() {
       `${API_BASE}/revise`,
       {
         method: "POST",
-        headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
-        body: JSON.stringify({ prompt: instruction, previousCode, basePrompt: base }),
+        headers: { "Content-Type": "application/json", ...authHeaders() },
+        body: JSON.stringify({
+          prompt: instruction,
+          previousCode,
+          basePrompt: base,
+          projectId: lastProjectId,
+        }),
       },
       (seconds) => setLoading(true, `Tasarım güncelleniyor… (${seconds} sn)`),
     );
@@ -449,7 +467,7 @@ async function handlePdf() {
       `${API_BASE}/generate-pdf`,
       {
         method: "POST",
-        headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
+        headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify({
           stepPath: lastStepPath,
           code: lastGeneratedCode,
@@ -478,406 +496,6 @@ async function handlePdf() {
   }
 }
 
-function setCamStatus(message, busy) {
-  camStatus.hidden = !message;
-  camSpinner.hidden = !busy;
-  camStatusText.textContent = message ?? "";
-}
-
-async function handleCam() {
-  if (!lastStepPath) return;
-  camBtn.disabled = true;
-  gcodeLink.hidden = true;
-  resetCamAssistant();
-  camAssistant.hidden = false;
-
-  // Every part goes through the sequential CAM wizard. Nothing is planned or
-  // machined until every step is answered.
-  try {
-    camStepIndex = 0;
-    await loadCamStep(0);
-  } finally {
-    camBtn.disabled = false;
-  }
-}
-
-// Fetch and render one wizard step. `targetIndex` selects the step; the backend
-// shapes its recommendations from the answers gathered so far.
-async function loadCamStep(targetIndex) {
-  setCamStatus("Adım hazırlanıyor…", true);
-  try {
-    const response = await fetch(`${API_BASE}/cam-step`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
-      body: JSON.stringify({
-        stepPath: lastStepPath,
-        prompt: lastPrompt,
-        answers: camAnswers,
-        targetIndex,
-      }),
-    });
-    const data = await readJson(response);
-    if (!response.ok || !data) {
-      setCamStatus(data?.error ?? "Adım alınamadı.", false);
-      return;
-    }
-    setCamStatus("", false);
-    if (data.done) {
-      // All information collected → allow the plan to be generated.
-      camWizard.hidden = true;
-      camPlanBtn.hidden = false;
-      return;
-    }
-    renderCamStep(data);
-    camWizard.hidden = false;
-    camPlanBtn.hidden = true;
-  } catch (err) {
-    setCamStatus(`Sunucuya bağlanılamadı: ${err.message}`, false);
-  }
-}
-
-function renderCamStep(data) {
-  const step = data.step;
-  camStepIndex = data.index;
-  camStepFieldNames = step.fields.map((f) => f.name);
-
-  camStepProgress.textContent = `Adım ${data.index + 1} / ${data.total}`;
-  camStepTitle.textContent = step.title;
-  if (step.intro) {
-    camStepIntro.textContent = step.intro;
-    camStepIntro.hidden = false;
-  } else {
-    camStepIntro.hidden = true;
-  }
-
-  camStepFields.innerHTML = "";
-  step.fields.forEach((f) => {
-    const wrap = document.createElement("div");
-    wrap.className = "cam-field";
-    const inputId = `camf-${f.name}`;
-
-    const label = document.createElement("label");
-    label.setAttribute("for", inputId);
-    label.textContent = f.unit ? `${f.label} (${f.unit})` : f.label;
-    wrap.appendChild(label);
-
-    let input;
-    if (f.type === "select") {
-      input = document.createElement("select");
-      (f.options || []).forEach((opt) => {
-        const o = document.createElement("option");
-        o.value = opt;
-        o.textContent = opt;
-        if (String(opt) === String(f.value)) o.selected = true;
-        input.appendChild(o);
-      });
-    } else {
-      input = document.createElement("input");
-      input.type = f.type === "number" ? "number" : "text";
-      if (f.type === "number") input.step = "any";
-      input.value = f.value ?? "";
-    }
-    input.id = inputId;
-    input.name = f.name;
-    input.dataset.type = f.type;
-    wrap.appendChild(input);
-    camStepFields.appendChild(wrap);
-  });
-
-  camBackBtn.hidden = camStepIndex === 0;
-  camNextBtn.textContent = data.index + 1 >= data.total ? "Tamam" : "İleri";
-}
-
-// Read the current step's inputs into camAnswers (numbers coerced to Number).
-function collectCurrentStep() {
-  camStepFields.querySelectorAll("input, select").forEach((el) => {
-    let value = el.value;
-    if (el.dataset.type === "number") {
-      const n = Number(value);
-      if (Number.isFinite(n)) value = n;
-    }
-    camAnswers[el.name] = value;
-  });
-}
-
-async function handleCamNext() {
-  collectCurrentStep();
-  await loadCamStep(camStepIndex + 1);
-}
-
-async function handleCamBack() {
-  collectCurrentStep();
-  if (camStepIndex === 0) return;
-  await loadCamStep(camStepIndex - 1);
-}
-
-async function requestCamPlan(changeRequest) {
-  const body = { stepPath: lastStepPath, answers: camAnswers, prompt: lastPrompt };
-  if (changeRequest && camPlan) {
-    body.previousPlan = camPlan;
-    body.changeRequest = changeRequest;
-  }
-  setCamStatus("İşleme planı oluşturuluyor…", true);
-  camPlanBtn.disabled = true;
-  try {
-    const result = await runAsyncJob(
-      `${API_BASE}/cam-plan`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
-        body: JSON.stringify(body),
-      },
-      (seconds) => setCamStatus(`İşleme planı oluşturuluyor… (${seconds}s)`, true),
-    );
-    if (result.error || !result.body?.plan) {
-      setCamStatus(result.error ?? "Plan oluşturulamadı.", false);
-      return;
-    }
-    const plan = result.body.plan;
-    camPlan = plan;
-    setCamStatus("", false);
-    camPlanText.textContent = plan.planText || JSON.stringify(plan, null, 2);
-    camPlanView.hidden = false;
-    camReviseBox.hidden = true;
-    camReviseInput.value = "";
-    // A new plan invalidates any previous simulation/approval/quote.
-    if (camSim) camSim.pause();
-    camSim = null;
-    camPreviewView.hidden = true;
-    camPreviewToken = null;
-    camEstimatedMinutes = null;
-    camQuote.hidden = true;
-    camQuoteForm.hidden = true;
-    camQuoteResult.hidden = true;
-    gcodeLink.hidden = true;
-  } catch (err) {
-    setCamStatus(`Sunucuya bağlanılamadı: ${err.message}`, false);
-  } finally {
-    camPlanBtn.disabled = false;
-  }
-}
-
-async function handleCamPlan() {
-  // camAnswers is already fully populated by the wizard.
-  await requestCamPlan(null);
-}
-
-// Build the Path operations and show an animated toolpath simulation in the 3D
-// viewer. No G-code is produced until the user approves this simulation.
-async function handleCamPreview() {
-  if (!camPlan) return;
-  camPreviewBtn.disabled = true;
-  camReviseBtn.disabled = true;
-  camPreviewView.hidden = true;
-  camPreviewToken = null;
-  gcodeLink.hidden = true;
-  setCamStatus("Takım yolu simülasyonu hesaplanıyor…", true);
-  try {
-    const result = await runAsyncJob(
-      `${API_BASE}/cam-simulate`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
-        body: JSON.stringify({
-          stepPath: lastStepPath,
-          answers: camAnswers,
-          plan: camPlan,
-          prompt: lastPrompt,
-        }),
-      },
-      (seconds) => setCamStatus(`Takım yolu simülasyonu hesaplanıyor… (${seconds} sn)`, true),
-    );
-
-    if (result.error || !result.ok || !result.body?.simulationUrl) {
-      setCamStatus(result.error ?? result.body?.error ?? "Simülasyon üretilemedi.", false);
-      return;
-    }
-    camPreviewToken = result.body.token ?? null;
-    camEstimatedMinutes = result.body.estimatedMinutes ?? null;
-    await setupSimulation(result.body.simulationUrl);
-    setCamStatus("", false);
-    camPreviewView.hidden = false;
-    // The toolpath (and its estimated time) is known → enable the quote engine.
-    if (camEstimatedMinutes != null) {
-      camQuoteTime.textContent = `Tahmini işleme süresi: ${camEstimatedMinutes} dk`;
-      camQuote.hidden = false;
-      camQuoteForm.hidden = true;
-      camQuoteResult.hidden = true;
-    }
-  } catch (err) {
-    setCamStatus(`Sunucuya bağlanılamadı: ${err.message}`, false);
-  } finally {
-    camPreviewBtn.disabled = false;
-    camReviseBtn.disabled = false;
-  }
-}
-
-function setSimSpeed(mult) {
-  if (camSim) camSim.setSpeed(mult);
-  Object.entries(camSimSpeedBtns).forEach(([m, btn]) => {
-    btn.classList.toggle("active", Number(m) === mult);
-  });
-}
-
-async function setupSimulation(simulationUrl) {
-  const response = await fetch(simulationUrl);
-  const data = await readJson(response);
-  const { initViewer, loadSimulation } = await import("./viewer.js");
-  if (!viewer) viewer = initViewer(viewerContainer);
-  camSim = loadSimulation(viewer, data ?? { toolpaths: [] }, {
-    onUpdate: ({ progress, op }) => {
-      camSimProgress.value = String(Math.round(progress * 1000));
-      camSimOp.textContent = `Operasyon: ${op || "—"}`;
-      if (camSim && !camSim.isPlaying()) camSimPlay.textContent = "Oynat";
-      if (progress >= 1) camSimPlay.textContent = "Tekrar Oynat";
-    },
-  });
-  camSimProgress.value = "0";
-  camSimPlay.textContent = "Oynat";
-  setSimSpeed(1);
-}
-
-function handleCamReject() {
-  // Reject the previewed toolpath: return to the plan so it can be revised.
-  if (camSim) camSim.pause();
-  camPreviewView.hidden = true;
-  camPreviewToken = null;
-  setCamStatus("Takım yolu reddedildi. Planı değiştirip tekrar simüle edin.", false);
-}
-
-async function handleCamConfirm() {
-  if (!camPlan || !camPreviewToken) return;
-  camConfirmBtn.disabled = true;
-  camRejectBtn.disabled = true;
-  setCamStatus("Takım yolu onaylandı, G-code üretiliyor…", true);
-  try {
-    const result = await runAsyncJob(
-      `${API_BASE}/cam-confirm`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
-        body: JSON.stringify({
-          stepPath: lastStepPath,
-          answers: camAnswers,
-          plan: camPlan,
-          prompt: lastPrompt,
-          token: camPreviewToken,
-        }),
-      },
-      (seconds) => setCamStatus(`G-code üretiliyor… (${seconds} sn)`, true),
-    );
-
-    if (result.error || !result.ok || !result.body?.gcodeUrl) {
-      setCamStatus(result.error ?? result.body?.error ?? "G-code üretilemedi.", false);
-      return;
-    }
-    setCamStatus("G-code hazır.", false);
-    gcodeLink.href = result.body.gcodeUrl;
-    gcodeLink.hidden = false;
-  } catch (err) {
-    setCamStatus(`Sunucuya bağlanılamadı: ${err.message}`, false);
-  } finally {
-    camConfirmBtn.disabled = false;
-    camRejectBtn.disabled = false;
-  }
-}
-
-function setQuoteMode(mode) {
-  const detailed = mode === "detayli";
-  quoteFieldsBasit.hidden = detailed;
-  quoteFieldsDetayli.hidden = !detailed;
-}
-
-function currentQuoteMode() {
-  const checked = camQuoteForm.querySelector('input[name="quote-mode"]:checked');
-  return checked ? checked.value : "basit";
-}
-
-function numVal(id) {
-  const el = document.getElementById(id);
-  if (!el) return undefined;
-  const v = el.value.trim();
-  return v === "" ? undefined : Number(v);
-}
-
-function collectQuoteInputs(mode) {
-  if (mode === "detayli") {
-    return {
-      materialPrice: numVal("q-materialPrice-d"),
-      materialPriceUnit: document.getElementById("q-materialUnit-d").value,
-      amortHourly: numVal("q-amortHourly"),
-      energyPrice: numVal("q-energyPrice"),
-      powerKw: numVal("q-powerKw"),
-      toolCost: numVal("q-toolCost"),
-      toolLifeParts: numVal("q-toolLifeParts"),
-      consumableHourly: numVal("q-consumableHourly"),
-      consumablePerPart: numVal("q-consumablePerPart"),
-      overheadPct: numVal("q-overheadPct"),
-      scrapPct: numVal("q-scrapPct"),
-      profitPct: numVal("q-profitPct-d"),
-    };
-  }
-  return {
-    hourlyRate: numVal("q-hourlyRate"),
-    materialPrice: numVal("q-materialPrice-b"),
-    materialPriceUnit: document.getElementById("q-materialUnit-b").value,
-    profitPct: numVal("q-profitPct-b"),
-  };
-}
-
-function renderQuoteBreakdown(quote) {
-  const lines = [`Tahmini süre: ${quote.minutes} dk`, ""];
-  const pad = (s, n) => String(s).padEnd(n);
-  for (const it of quote.items) {
-    lines.push(`${pad(it.label, 34)} ${Number(it.amount).toLocaleString("tr-TR")} TL`);
-  }
-  lines.push("");
-  lines.push(`${pad("TOPLAM", 34)} ${Number(quote.total).toLocaleString("tr-TR")} TL`);
-  return lines.join("\n");
-}
-
-async function handleQuoteSubmit() {
-  if (camEstimatedMinutes == null) {
-    setCamStatus("Önce takım yolu önizlemesi oluşturun.", false);
-    return;
-  }
-  const mode = currentQuoteMode();
-  camQuoteSubmit.disabled = true;
-  setCamStatus("Teklif hesaplanıyor…", true);
-  try {
-    const response = await fetch(`${API_BASE}/cam-quote`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-api-key": API_KEY },
-      body: JSON.stringify({
-        mode,
-        minutes: camEstimatedMinutes,
-        answers: camAnswers,
-        bbox: lastBbox,
-        material: camAnswers.material,
-        partName: lastPrompt || "Parca",
-        inputs: collectQuoteInputs(mode),
-      }),
-    });
-    const data = await readJson(response);
-    if (!response.ok || !data?.quote) {
-      setCamStatus(data?.error ?? "Teklif oluşturulamadı.", false);
-      return;
-    }
-    setCamStatus("", false);
-    camQuoteBreakdown.textContent = renderQuoteBreakdown(data.quote);
-    if (data.pdfUrl) {
-      camQuotePdf.href = data.pdfUrl;
-      camQuotePdf.hidden = false;
-    } else {
-      camQuotePdf.hidden = true;
-    }
-    camQuoteResult.hidden = false;
-  } catch (err) {
-    setCamStatus(`Sunucuya bağlanılamadı: ${err.message}`, false);
-  } finally {
-    camQuoteSubmit.disabled = false;
-  }
-}
 
 async function loadStlPreview(stlUrl) {
   try {
@@ -886,9 +504,203 @@ async function loadStlPreview(stlUrl) {
       viewer = initViewer(viewerContainer);
     }
     loadStl(viewer, stlUrl);
+    if (lastStepPath && !lastDimData) {
+      fetchAndShowDimensions();
+    }
   } catch (err) {
     console.error("3D önizleme yüklenemedi:", err);
   }
+}
+
+async function showAnchors(anchors, center) {
+  if (!anchors || !anchors.length) return;
+  try {
+    const c = center || [0, 0, 0];
+    const dimData = {
+      dimensions: anchors.map((a) => ({
+        id: a.paramName,
+        paramName: a.paramName,
+        label: a.label,
+        value: a.value,
+        unit: a.unit || "mm",
+        editable: a.editable !== false,
+        symbol: a.symbol || null,
+        count: a.count || 1,
+        p1: a.p1,
+        p2: a.p2,
+        ext1: a.ext1 || null,
+        ext2: a.ext2 || null,
+      })),
+      center: c,
+    };
+    lastDimData = dimData;
+    const { initViewer, loadDimensions } = await import("./viewer.js");
+    if (!viewer) viewer = initViewer(viewerContainer);
+    loadDimensions(viewer, dimData, { onEdit: handleDimensionEdit });
+  } catch (err) {
+    console.error("Anchor etiketleri yüklenemedi:", err);
+  }
+}
+
+async function fetchAndShowDimensions() {
+  if (!lastStepPath) return;
+  try {
+    const resp = await fetch(`${API_BASE}/extract-dimensions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify({ stepPath: lastStepPath }),
+    });
+    const data = await readJson(resp);
+    if (!resp.ok || !data?.dimensions) return;
+    lastDimData = data;
+    const { initViewer, loadDimensions } = await import("./viewer.js");
+    if (!viewer) viewer = initViewer(viewerContainer);
+    loadDimensions(viewer, data, { onEdit: handleDimensionEdit });
+  } catch (err) {
+    console.error("Ölçü etiketleri yüklenemedi:", err);
+  }
+}
+
+function codeHasParamBlock(code) {
+  return code && code.includes("# ROVER_PARAMS_START") && code.includes("# ROVER_PARAMS_END");
+}
+
+function findParamForDim(code, dim) {
+  if (!code) return null;
+  const lines = code.split("\n");
+  let inBlock = false;
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed === "# ROVER_PARAMS_START") { inBlock = true; continue; }
+    if (trimmed === "# ROVER_PARAMS_END") break;
+    if (!inBlock) continue;
+    const m = trimmed.match(/^(\w+)\s*=\s*([\d.eE+-]+)\s*(?:#\s*(.*))?$/);
+    if (m) {
+      const paramValue = parseFloat(m[2]);
+      if (Math.abs(paramValue - dim.value) < 0.01) return m[1];
+    }
+  }
+  return null;
+}
+
+function setDimLock(locked) {
+  document.querySelectorAll(".dim-label").forEach((el) => {
+    if (locked) el.classList.add("dim-updating");
+    else el.classList.remove("dim-updating");
+  });
+}
+
+async function handleDimensionEdit(dim, newValue) {
+  if (dimEditInProgress) {
+    dimEditQueue.push({ dim, newValue });
+    return;
+  }
+  dimEditInProgress = true;
+  setDimLock(true);
+
+  const code = lastGeneratedCode || buildSyntheticCode();
+  if (!code) {
+    showError("Ölçü düzenlemesi için model kodu gereklidir.");
+    dimEditInProgress = false;
+    setDimLock(false);
+    return;
+  }
+
+  const paramName = dim.paramName
+    ? dim.paramName
+    : (codeHasParamBlock(code) ? findParamForDim(code, dim) : null);
+  const useDeterministic = !!paramName;
+
+  const { clearDimensions } = await import("./viewer.js");
+  clearDimensions(viewer);
+  setLoading(true, `Ölçü güncelleniyor: ${dim.label} → ${newValue} mm…`);
+
+  try {
+    let result;
+    if (useDeterministic) {
+      result = await runAsyncJob(
+        `${API_BASE}/param-edit`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...authHeaders() },
+          body: JSON.stringify({
+            code,
+            paramName,
+            newValue,
+            projectId: lastProjectId,
+            basePrompt: lastPrompt,
+          }),
+        },
+        (seconds) => setLoading(true, `Ölçü güncelleniyor… (${seconds} sn)`),
+      );
+    } else {
+      const prefix = dim.symbol === "dia" ? "çapı" : "";
+      const label = dim.label.toLowerCase();
+      const countNote = dim.count > 1 ? ` (${dim.count} adet)` : "";
+      let instruction;
+      if (dim.symbol === "dia") {
+        instruction = `${dim.label}${countNote} ${prefix} ${dim.value} mm olan ölçüyü ${newValue} mm yap`;
+      } else {
+        instruction = `${label} ölçüsünü ${dim.value} mm'den ${newValue} mm'ye değiştir`;
+      }
+      result = await runAsyncJob(
+        `${API_BASE}/revise`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...authHeaders() },
+          body: JSON.stringify({
+            prompt: instruction,
+            previousCode: code,
+            basePrompt: lastPrompt,
+            projectId: lastProjectId,
+          }),
+        },
+        (seconds) => setLoading(true, `Ölçü güncelleniyor… (${seconds} sn)`),
+      );
+      if (result.ok) {
+        lastPrompt = lastPrompt ? `${lastPrompt} ; ${instruction}` : instruction;
+      }
+    }
+
+    if (result.error || !result.ok) {
+      showError(result.error ?? result.body?.error ?? "Ölçü güncellenemedi.");
+      fetchAndShowDimensions();
+      return;
+    }
+    showResult(result.body);
+  } catch (err) {
+    showError(`Sunucuya bağlanılamadı: ${err.message}`);
+    fetchAndShowDimensions();
+  } finally {
+    setLoading(false);
+    dimEditInProgress = false;
+    setDimLock(false);
+    if (dimEditQueue.length > 0) {
+      const next = dimEditQueue.shift();
+      handleDimensionEdit(next.dim, next.newValue);
+    }
+  }
+}
+
+function buildSyntheticCode() {
+  if (!lastStepPath) return null;
+  const lines = [
+    "import FreeCAD as App",
+    "import Part",
+    'doc = App.newDocument("RoverCAD")',
+    `Part.insert(${JSON.stringify(lastStepPath)}, doc.Name)`,
+    "doc.recompute()",
+  ];
+  if (lastDimData?.dimensions?.length) {
+    lines.push("");
+    lines.push("# ROVER_DIMENSIONS: Mevcut olculer");
+    for (const d of lastDimData.dimensions) {
+      const prefix = d.symbol === "dia" ? "Cap " : "";
+      const count = d.count > 1 ? ` (${d.count} adet)` : "";
+      lines.push(`# ${d.label}: ${prefix}${d.value} ${d.unit}${count}`);
+    }
+  }
+  return lines.join("\n");
 }
 
 // 2D contour preview (DXF without thickness): draw the contour as lines.
@@ -927,7 +739,7 @@ function showView(view) {
 async function apiJson(url, options) {
   const resp = await fetch(url, {
     ...options,
-    headers: { "Content-Type": "application/json", "x-api-key": API_KEY, ...(options?.headers || {}) },
+    headers: { "Content-Type": "application/json", ...authHeaders(), ...(options?.headers || {}) },
   });
   return { ok: resp.ok, data: await readJson(resp) };
 }
@@ -1054,48 +866,538 @@ document.getElementById("t-add").addEventListener("click", addToolProfile);
 generateBtn.addEventListener("click", handleGenerate);
 reviseBtn.addEventListener("click", handleRevise);
 pdfBtn.addEventListener("click", handlePdf);
-camBtn.addEventListener("click", handleCam);
-camNextBtn.addEventListener("click", handleCamNext);
-camBackBtn.addEventListener("click", handleCamBack);
-camPlanBtn.addEventListener("click", handleCamPlan);
-camPreviewBtn.addEventListener("click", handleCamPreview);
-camConfirmBtn.addEventListener("click", handleCamConfirm);
-camRejectBtn.addEventListener("click", handleCamReject);
-camSimPlay.addEventListener("click", () => {
-  if (!camSim) return;
-  if (camSim.isPlaying()) {
-    camSim.pause();
-    camSimPlay.textContent = "Oynat";
+camBtn.addEventListener("click", () => {
+  if (!lastStepPath) return;
+  sessionStorage.setItem("rover_cam_data", JSON.stringify({
+    stepPath: lastStepPath,
+    prompt: lastPrompt,
+    projectId: lastProjectId,
+    bbox: lastBbox,
+    generatedCode: lastGeneratedCode,
+    stlUrl: lastStlUrl,
+    contourUrl: lastContourUrl,
+  }));
+  window.location.href = "cam.html";
+});
+
+// --- Kinematic simulation ---------------------------------------------------
+
+function downloadBase64(filename, base64Data, mime) {
+  const bin = atob(base64Data);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  const blob = new Blob([bytes], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function showSimDownloads(partsInline, partSteps, assemblyStepBase64) {
+  simCurrentPartsInline = partsInline;
+  simCurrentPartSteps = partSteps || [];
+  simCurrentAssemblyStep = assemblyStepBase64 || null;
+
+  simDownloadParts.innerHTML = "";
+  if (!partsInline?.length) {
+    simDownloads.hidden = true;
+    return;
+  }
+
+  const stepMap = {};
+  for (const ps of simCurrentPartSteps) {
+    stepMap[ps.name] = ps.stepBase64;
+  }
+
+  for (const part of partsInline) {
+    const group = document.createElement("div");
+    group.className = "sim-part-group";
+
+    const nameEl = document.createElement("span");
+    nameEl.className = "sim-part-name";
+    nameEl.textContent = part.name;
+    group.appendChild(nameEl);
+
+    const btns = document.createElement("div");
+    btns.className = "sim-part-btns";
+
+    const stlBtn = document.createElement("button");
+    stlBtn.type = "button";
+    stlBtn.className = "secondary";
+    stlBtn.textContent = "STL";
+    stlBtn.addEventListener("click", () => {
+      downloadBase64(`${part.name}.stl`, part.stlBase64, "model/stl");
+    });
+    btns.appendChild(stlBtn);
+
+    if (stepMap[part.name]) {
+      const stepBtn = document.createElement("button");
+      stepBtn.type = "button";
+      stepBtn.className = "secondary";
+      stepBtn.textContent = "STEP";
+      stepBtn.addEventListener("click", () => {
+        downloadBase64(`${part.name}.step`, stepMap[part.name], "model/step");
+      });
+      btns.appendChild(stepBtn);
+    }
+
+    group.appendChild(btns);
+    simDownloadParts.appendChild(group);
+  }
+
+  if (simCurrentAssemblyStep) {
+    simDownloadAssembly.hidden = false;
   } else {
-    camSim.play();
-    camSimPlay.textContent = "Duraklat";
+    simDownloadAssembly.hidden = true;
+  }
+
+  simDownloads.hidden = false;
+}
+
+function updateSimStepUI() {
+  if (simStepIndex >= 0 && simTotalSteps > 0) {
+    simStepIndicator.textContent = `Adim ${simStepIndex + 1} / ${simTotalSteps}`;
+    simStepIndicator.hidden = false;
+  } else {
+    simStepIndicator.hidden = true;
+  }
+  simUndoBtn.hidden = simStepIndex <= 0;
+}
+
+async function handleSimUndo() {
+  if (!simSessionId || simStepIndex <= 0) return;
+  clearError();
+  simUndoBtn.disabled = true;
+  simUndoBtn.textContent = "Geri aliniyor…";
+  try {
+    const resp = await fetch(`${API_BASE}/simulate/undo`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify({ sessionId: simSessionId }),
+    });
+    const data = await readJson(resp);
+    if (!resp.ok || !data?.ok) {
+      showError(data?.error ?? "Geri alma basarisiz.");
+      return;
+    }
+
+    const { partsInline, kinematicsData, generatedCode, stepIndex, totalSteps } = data;
+    simCurrentCode = generatedCode;
+    simCurrentKinematics = kinematicsData;
+    simStepIndex = stepIndex;
+    simTotalSteps = totalSteps;
+    if (generatedCode) simCodeInput.value = generatedCode;
+
+    if (kinSim) kinSim.pause();
+    kinSim = null;
+    kinSimView.hidden = true;
+    kinSimPlay.textContent = "Oynat";
+    kinCollisionAlert.hidden = true;
+
+    resultSection.hidden = false;
+    const { initViewer } = await import("./viewer.js");
+    if (!viewer) viewer = initViewer(viewerContainer);
+
+    const { loadKinematicSim } = await import("./kinematicPlayer.js");
+    kinSim = await loadKinematicSim(viewer, partsInline, kinematicsData, {
+      onUpdate: ({ angle, playing, collided }) => {
+        kinSimProgress.value = String(Math.round(angle * 10) % 3600);
+        kinSimStatus.textContent = collided
+          ? "Durum: Carpma!"
+          : playing
+            ? `Durum: Calisiyor (${Math.round(angle % 360)}°)`
+            : `Durum: Durdu (${Math.round(angle % 360)}°)`;
+        if (!playing) kinSimPlay.textContent = "Oynat";
+      },
+      onCollision: (pairs) => {
+        kinCollisionAlert.hidden = false;
+        kinCollisionAlert.textContent = `Carpma algilandi: ${pairs.map((p) => p.join(" <-> ")).join(", ")}. Simulasyon durduruldu.`;
+        kinSimPlay.textContent = "Oynat";
+      },
+    });
+
+    kinSimView.hidden = false;
+    kinSimPlay.textContent = "Oynat";
+    kinCollisionAlert.hidden = true;
+    setKinSimSpeed(1);
+    showSimDownloads(partsInline, data.partSteps, data.assemblyStepBase64);
+    updateSimStepUI();
+    simGenerateBtn.textContent = simCurrentCode ? "Parcayi Ekle / Degistir" : "Mekanizma Olustur";
+    simPromptInput.placeholder = simCurrentCode
+      ? "Ornek: Bu diske X ekseninde hareket eden bir biyel kolu bagla"
+      : "Ornek: Merkezde Z ekseninde donen 50mm capinda bir disk olustur";
+    window.dispatchEvent(new Event("resize"));
+  } catch (err) {
+    showError(`Geri alma basarisiz: ${err.message}`);
+  } finally {
+    simUndoBtn.disabled = false;
+    simUndoBtn.textContent = "Geri Al";
+  }
+}
+
+async function handleSimDemo() {
+  clearError();
+  resetKinSim();
+  simSessionId = crypto.randomUUID();
+  simDemoBtn.disabled = true;
+  simDemoBtn.textContent = "TopkapiAl'de olusturuluyor…";
+  setLoading(true, "Simulasyon parcalari TopkapiAl'de olusturuluyor…");
+  try {
+    const result = await runAsyncJob(
+      `${API_BASE}/simulate/demo`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders() },
+        body: JSON.stringify({ sessionId: simSessionId }),
+      },
+      (seconds) => {
+        simDemoBtn.textContent = `TopkapiAl calisiyor… (${seconds} sn)`;
+        setLoading(true, `Simulasyon parcalari olusturuluyor… (${seconds} sn)`);
+      },
+    );
+
+    if (result.error || !result.ok) {
+      showError(result.error ?? result.body?.error ?? "Simulasyon basarisiz.");
+      simDemoBtn.textContent = "HATA - tekrar dene";
+      return;
+    }
+
+    const { partsInline, partStlUrls, kinematicsData, kinematicsUrl } = result.body;
+    let parts = partsInline || partStlUrls;
+    if (!parts?.length) {
+      showError("Simulasyon verisi eksik (STL yok).");
+      simDemoBtn.textContent = "HATA - tekrar dene";
+      return;
+    }
+    parts = parts.filter((p) => (p.stlBase64 && p.stlBase64.length > 0) || p.url);
+    if (!parts.length) {
+      showError("STL dosyalari bos veya bozuk.");
+      simDemoBtn.textContent = "HATA - tekrar dene";
+      return;
+    }
+
+    let kinData = kinematicsData;
+    if (!kinData && kinematicsUrl) {
+      simDemoBtn.textContent = "Kinematik veri yukleniyor…";
+      const kinResp = await fetch(kinematicsUrl);
+      kinData = await kinResp.json();
+    }
+    if (!kinData) {
+      showError("Kinematik veri alinamadi.");
+      simDemoBtn.textContent = "HATA - tekrar dene";
+      return;
+    }
+
+    simDemoBtn.textContent = "3D sahne hazirlaniyor…";
+    resultSection.hidden = false;
+    const { initViewer } = await import("./viewer.js");
+    if (!viewer) viewer = initViewer(viewerContainer);
+
+    simDemoBtn.textContent = "STL parcalar yukleniyor…";
+    const { loadKinematicSim } = await import("./kinematicPlayer.js");
+    kinSim = await loadKinematicSim(viewer, parts, kinData, {
+      onUpdate: ({ angle, playing, collided }) => {
+        kinSimProgress.value = String(Math.round(angle * 10) % 3600);
+        kinSimStatus.textContent = collided
+          ? "Durum: Carpma!"
+          : playing
+            ? `Durum: Calisiyor (${Math.round(angle % 360)}°)`
+            : `Durum: Durdu (${Math.round(angle % 360)}°)`;
+        if (!playing) kinSimPlay.textContent = "Oynat";
+      },
+      onCollision: (pairs) => {
+        kinCollisionAlert.hidden = false;
+        kinCollisionAlert.textContent = `Carpma algilandi: ${pairs.map((p) => p.join(" <-> ")).join(", ")}. Simulasyon durduruldu.`;
+        kinSimPlay.textContent = "Oynat";
+      },
+    });
+
+    simCurrentKinematics = kinData;
+    if (result.body.generatedCode) simCurrentCode = result.body.generatedCode;
+    if (result.body.stepIndex != null) {
+      simStepIndex = result.body.stepIndex;
+      simTotalSteps = result.body.totalSteps;
+    }
+    kinSimView.hidden = false;
+    kinSimPlay.textContent = "Oynat";
+    kinCollisionAlert.hidden = true;
+    setKinSimSpeed(1);
+    showSimDownloads(parts, result.body.partSteps, result.body.assemblyStepBase64);
+    updateSimStepUI();
+    simDemoBtn.textContent = "Demo: Krank-Piston Simulasyonu";
+    simGenerateBtn.textContent = "Parcayi Ekle / Degistir";
+    simPromptInput.placeholder = "Ornek: Pistona bir yay ekle veya krank hizini artir";
+    window.dispatchEvent(new Event("resize"));
+  } catch (err) {
+    showError(`Simulasyon basarisiz: ${err.message}`);
+    simDemoBtn.textContent = `HATA: ${err.message}`;
+  } finally {
+    setLoading(false);
+    simDemoBtn.disabled = false;
+  }
+}
+
+function setKinSimSpeed(mult) {
+  if (kinSim) kinSim.setSpeed(mult);
+  Object.entries(kinSimSpeedBtns).forEach(([m, btn]) => {
+    btn.classList.toggle("active", Number(m) === mult);
+  });
+}
+
+simDemoBtn.addEventListener("click", handleSimDemo);
+
+async function handleSimGenerate() {
+  const prompt = simPromptInput.value.trim();
+  if (!prompt) {
+    showError("Lutfen bir mekanizma tarifi yazin.");
+    return;
+  }
+  clearError();
+  resetKinSim(true);
+  if (!simSessionId) simSessionId = crypto.randomUUID();
+  simGenerateBtn.disabled = true;
+  simGenerateBtn.textContent = "Kod uretiliyor…";
+  setLoading(true, "Yapay zeka mekanizma kodu uretiyor…");
+  try {
+    const result = await runAsyncJob(
+      `${API_BASE}/simulate/generate`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders() },
+        body: JSON.stringify({
+          prompt,
+          previousCode: simCurrentCode || undefined,
+          previousKinematics: simCurrentKinematics || undefined,
+          sessionId: simSessionId,
+        }),
+      },
+      (seconds) => {
+        const phase = seconds < 20 ? "Kod uretiliyor" : seconds < 60 ? "TopkapiAl calistiriliyor" : "Islem devam ediyor";
+        simGenerateBtn.textContent = `${phase}… (${seconds} sn)`;
+        setLoading(true, `${phase}… (${seconds} sn)`);
+      },
+    );
+
+    if (result.error || !result.ok) {
+      showError(result.error ?? result.body?.error ?? "Simulasyon basarisiz.");
+      if (result.body?.generatedCode) {
+        simCodeInput.value = result.body.generatedCode;
+      }
+      simGenerateBtn.textContent = "Mekanizma Olustur";
+      return;
+    }
+
+    let { partsInline, kinematicsData, generatedCode } = result.body;
+    if (!partsInline?.length) {
+      showError("Simulasyon verisi eksik (STL yok).");
+      simGenerateBtn.textContent = "Mekanizma Olustur";
+      return;
+    }
+    partsInline = partsInline.filter((p) => p.stlBase64 && p.stlBase64.length > 0);
+    if (!partsInline.length) {
+      showError("STL dosyalari bos veya bozuk.");
+      simGenerateBtn.textContent = "Mekanizma Olustur";
+      return;
+    }
+    if (!kinematicsData) {
+      showError("Kinematik veri alinamadi.");
+      simGenerateBtn.textContent = "Mekanizma Olustur";
+      return;
+    }
+
+    simCurrentCode = generatedCode;
+    simCurrentKinematics = kinematicsData;
+    if (generatedCode) simCodeInput.value = generatedCode;
+
+    simGenerateBtn.textContent = "3D sahne hazirlaniyor…";
+    resultSection.hidden = false;
+    const { initViewer } = await import("./viewer.js");
+    if (!viewer) viewer = initViewer(viewerContainer);
+
+    simGenerateBtn.textContent = "STL parcalar yukleniyor…";
+    const { loadKinematicSim } = await import("./kinematicPlayer.js");
+    kinSim = await loadKinematicSim(viewer, partsInline, kinematicsData, {
+      onUpdate: ({ angle, playing, collided }) => {
+        kinSimProgress.value = String(Math.round(angle * 10) % 3600);
+        kinSimStatus.textContent = collided
+          ? "Durum: Carpma!"
+          : playing
+            ? `Durum: Calisiyor (${Math.round(angle % 360)}°)`
+            : `Durum: Durdu (${Math.round(angle % 360)}°)`;
+        if (!playing) kinSimPlay.textContent = "Oynat";
+      },
+      onCollision: (pairs) => {
+        kinCollisionAlert.hidden = false;
+        kinCollisionAlert.textContent = `Carpma algilandi: ${pairs.map((p) => p.join(" <-> ")).join(", ")}. Simulasyon durduruldu.`;
+        kinSimPlay.textContent = "Oynat";
+      },
+    });
+
+    if (result.body.stepIndex != null) {
+      simStepIndex = result.body.stepIndex;
+      simTotalSteps = result.body.totalSteps;
+    }
+    kinSimView.hidden = false;
+    kinSimPlay.textContent = "Oynat";
+    kinCollisionAlert.hidden = true;
+    setKinSimSpeed(1);
+    showSimDownloads(partsInline, result.body.partSteps, result.body.assemblyStepBase64);
+    updateSimStepUI();
+    simGenerateBtn.textContent = simCurrentCode ? "Parcayi Ekle / Degistir" : "Mekanizma Olustur";
+    simPromptInput.value = "";
+    simPromptInput.placeholder = simCurrentCode
+      ? "Ornek: Bu diske X ekseninde hareket eden bir biyel kolu bagla"
+      : simPromptInput.placeholder;
+    window.dispatchEvent(new Event("resize"));
+  } catch (err) {
+    showError(`Simulasyon basarisiz: ${err.message}`);
+    simGenerateBtn.textContent = "Mekanizma Olustur";
+  } finally {
+    setLoading(false);
+    simGenerateBtn.disabled = false;
+  }
+}
+
+simGenerateBtn.addEventListener("click", handleSimGenerate);
+simUndoBtn.addEventListener("click", handleSimUndo);
+simDownloadAssembly.addEventListener("click", () => {
+  if (simCurrentAssemblyStep) {
+    downloadBase64("assembly.step", simCurrentAssemblyStep, "model/step");
   }
 });
-camSimProgress.addEventListener("input", () => {
-  if (!camSim) return;
-  camSim.pause();
-  camSimPlay.textContent = "Oynat";
-  camSim.seek(Number(camSimProgress.value) / 1000);
+
+async function handleSimCustom() {
+  const code = simCodeInput.value.trim();
+  if (!code) {
+    showError("Lutfen bir TopkapiAl Python scripti yazin.");
+    return;
+  }
+  clearError();
+  resetKinSim();
+  simRunBtn.disabled = true;
+  simRunBtn.textContent = "TopkapiAl'de calistiriliyor…";
+  setLoading(true, "Simulasyon scripti TopkapiAl'de calistiriliyor…");
+  try {
+    const result = await runAsyncJob(
+      `${API_BASE}/simulate`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders() },
+        body: JSON.stringify({ code }),
+      },
+      (seconds) => {
+        simRunBtn.textContent = `TopkapiAl calisiyor… (${seconds} sn)`;
+        setLoading(true, `Simulasyon calistiriliyor… (${seconds} sn)`);
+      },
+    );
+
+    if (result.error || !result.ok) {
+      showError(result.error ?? result.body?.error ?? "Simulasyon basarisiz.");
+      simRunBtn.textContent = "Simulasyonu Calistir";
+      return;
+    }
+
+    const { partsInline, partStlUrls, kinematicsData, kinematicsUrl } = result.body;
+    let parts = partsInline || partStlUrls;
+    if (!parts?.length) {
+      showError("Simulasyon verisi eksik (STL yok).");
+      simRunBtn.textContent = "Simulasyonu Calistir";
+      return;
+    }
+    parts = parts.filter((p) => (p.stlBase64 && p.stlBase64.length > 0) || p.url);
+    if (!parts.length) {
+      showError("STL dosyalari bos veya bozuk.");
+      simRunBtn.textContent = "Simulasyonu Calistir";
+      return;
+    }
+
+    let kinData = kinematicsData;
+    if (!kinData && kinematicsUrl) {
+      simRunBtn.textContent = "Kinematik veri yukleniyor…";
+      const kinResp = await fetch(kinematicsUrl);
+      kinData = await kinResp.json();
+    }
+    if (!kinData) {
+      showError("Kinematik veri alinamadi.");
+      simRunBtn.textContent = "Simulasyonu Calistir";
+      return;
+    }
+
+    simRunBtn.textContent = "3D sahne hazirlaniyor…";
+    resultSection.hidden = false;
+    const { initViewer } = await import("./viewer.js");
+    if (!viewer) viewer = initViewer(viewerContainer);
+
+    simRunBtn.textContent = "STL parcalar yukleniyor…";
+    const { loadKinematicSim } = await import("./kinematicPlayer.js");
+    kinSim = await loadKinematicSim(viewer, parts, kinData, {
+      onUpdate: ({ angle, playing, collided }) => {
+        kinSimProgress.value = String(Math.round(angle * 10) % 3600);
+        kinSimStatus.textContent = collided
+          ? "Durum: Carpma!"
+          : playing
+            ? `Durum: Calisiyor (${Math.round(angle % 360)}°)`
+            : `Durum: Durdu (${Math.round(angle % 360)}°)`;
+        if (!playing) kinSimPlay.textContent = "Oynat";
+      },
+      onCollision: (pairs) => {
+        kinCollisionAlert.hidden = false;
+        kinCollisionAlert.textContent = `Carpma algilandi: ${pairs.map((p) => p.join(" <-> ")).join(", ")}. Simulasyon durduruldu.`;
+        kinSimPlay.textContent = "Oynat";
+      },
+    });
+
+    kinSimView.hidden = false;
+    kinSimPlay.textContent = "Oynat";
+    kinCollisionAlert.hidden = true;
+    setKinSimSpeed(1);
+    showSimDownloads(parts, result.body.partSteps, result.body.assemblyStepBase64);
+    simRunBtn.textContent = "Simulasyonu Calistir";
+    window.dispatchEvent(new Event("resize"));
+  } catch (err) {
+    showError(`Simulasyon basarisiz: ${err.message}`);
+    simRunBtn.textContent = "Simulasyonu Calistir";
+  } finally {
+    setLoading(false);
+    simRunBtn.disabled = false;
+  }
+}
+
+simRunBtn.addEventListener("click", handleSimCustom);
+
+kinSimPlay.addEventListener("click", () => {
+  if (!kinSim) return;
+  const cncKinStatus = document.getElementById("cnc-kin-status");
+  if (kinSim.isPlaying()) {
+    kinSim.pause();
+    kinSimPlay.textContent = "▶ Oynat";
+    if (cncKinStatus) { cncKinStatus.textContent = "Duraklatıldı"; cncKinStatus.style.color = "#f0c040"; }
+  } else {
+    if (!kinCollisionAlert.hidden) {
+      kinSim.reset();
+      kinCollisionAlert.hidden = true;
+    }
+    kinSim.play();
+    kinSimPlay.textContent = "⏸ Duraklat";
+    if (cncKinStatus) { cncKinStatus.textContent = "Çalışıyor"; cncKinStatus.style.color = "#3ddc84"; }
+  }
 });
-Object.entries(camSimSpeedBtns).forEach(([m, btn]) => {
-  btn.addEventListener("click", () => setSimSpeed(Number(m)));
+
+kinSimProgress.addEventListener("input", () => {
+  if (!kinSim) return;
+  kinSim.pause();
+  kinSimPlay.textContent = "Oynat";
+  kinSim.seek(Number(kinSimProgress.value) / 10);
 });
-camReviseBtn.addEventListener("click", () => {
-  camReviseBox.hidden = !camReviseBox.hidden;
+
+Object.entries(kinSimSpeedBtns).forEach(([m, btn]) => {
+  btn.addEventListener("click", () => setKinSimSpeed(Number(m)));
 });
-camReviseSubmit.addEventListener("click", () => {
-  const change = camReviseInput.value.trim();
-  if (change) requestCamPlan(change);
-});
-camQuoteBtn.addEventListener("click", () => {
-  camQuoteForm.hidden = false;
-  camQuoteResult.hidden = true;
-  setQuoteMode(currentQuoteMode());
-});
-camQuoteForm.querySelectorAll('input[name="quote-mode"]').forEach((radio) => {
-  radio.addEventListener("change", () => setQuoteMode(radio.value));
-});
-camQuoteSubmit.addEventListener("click", handleQuoteSubmit);
+
 promptInput.addEventListener("keydown", (event) => {
   if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
     handleGenerate();

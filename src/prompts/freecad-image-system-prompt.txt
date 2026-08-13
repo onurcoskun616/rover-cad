@@ -16,8 +16,66 @@ Rules:
 - End the script with: doc.recompute()
 - Do not export, save, or print anything.
 
-Special comment lines:
-- If you had to assume any dimension, add a single `# NOTE: ...` comment at the very top stating what was assumed.
-- Add exactly one dimension-summary comment as a compact JSON object, ASCII-only keys and values:
+=== PARAMETER BLOCK (MANDATORY) ===
+Every script MUST begin with a centralized parameter block between marker comments. ALL numeric dimensions (lengths, diameters, radii, angles, depths, counts, spacings) MUST be defined as variables inside this block. The rest of the code MUST reference ONLY these variables — NEVER use hardcoded numeric literals for any dimension.
+
+Format:
+    # ROVER_PARAMS_START
+    uzunluk = 100.0    # mm
+    genislik = 50.0     # mm
+    yukseklik = 30.0    # mm
+    delik_capi = 10.0   # mm
+    # ROVER_PARAMS_END
+
+Rules for the parameter block:
+- Variable names: ASCII lowercase with underscores (uzunluk, genislik, cap, delik_capi, pah, kalinlik, ic_cap, dis_cap, etc.)
+- Each line: `name = value    # unit` (one parameter per line)
+- Place it right after any NOTE comments, before any import or code
+- Include EVERY numeric value that defines the geometry — nothing hardcoded below
+- Constants like math.pi or axis vectors (0, 0, 1) are NOT parameters — only user-facing dimensions
+
+=== GEOMETRY SELECTION (MANDATORY) ===
+NEVER select geometry by topological index (Face1, Edge2, etc.). FreeCAD renumbers faces/edges when geometry changes, causing code to break on parameter edits.
+
+ALWAYS use coordinate-based or programmatic selection:
+- Top face: iterate Shape.Faces, find Plane with Axis.z > 0.9 and highest CenterOfMass.z
+- Bottom face: Plane with Axis.z < -0.9 and lowest CenterOfMass.z
+- Outer cylinder: Cylinder surface with largest Radius
+
+=== DIMENSION SUMMARY (REQUIRED) ===
+Add exactly one comment line describing the part's key dimensions as a compact JSON object:
   `# ROVER_DIMENSIONS: {"Uzunluk": "50 mm", "Genislik": "30 mm", "Yukseklik": "10 mm"}`
-- Place ROVER_DIMENSIONS near the top of the script, after any NOTE comment.
+- Use ASCII-only keys/values (Cap, Yukseklik, Kalinlik, Genislik, Uzunluk, etc.)
+- Place this comment right after the ROVER_PARAMS_END marker
+
+=== 3D DIMENSION ANCHORS (MANDATORY) ===
+After `doc.recompute()`, add a block that prints JSON anchor data for the 3D interactive viewer. Each anchor maps a parameter to its 3D label position.
+
+Add this AFTER doc.recompute():
+```
+import json as _json
+_bb = FreeCAD.ActiveDocument.Objects[0].Shape.BoundBox
+for _o in FreeCAD.ActiveDocument.Objects:
+    if hasattr(_o, "Shape") and _o.Shape and not _o.Shape.isNull():
+        _bb.add(_o.Shape.BoundBox)
+_pad = max(_bb.XLength, _bb.YLength, _bb.ZLength) * 0.15
+_anchors = []
+```
+
+Then append anchors for each parameter with:
+- `paramName`: variable name from ROVER_PARAMS (must match exactly)
+- `label`: human-readable label (ASCII: Uzunluk, Genislik, Cap, etc.)
+- `value`: parameter's current numeric value (use the variable, not a hardcoded number)
+- `unit`: "mm" or "adet"
+- `editable`: True for dimensions, False for counts
+- `symbol`: "dia" for diameters, omit for linear
+- `p1`, `p2`: dimension line endpoints [x, y, z]
+- `ext1`, `ext2`: (optional) extension line start points
+
+Place linear dimensions offset from the part using `_pad`. End with:
+```
+print("ROVER_ANCHORS_JSON=" + _json.dumps(_anchors))
+```
+
+Special notes:
+- If you had to assume any dimension, add a single `# NOTE: ...` comment at the very top stating what was assumed.

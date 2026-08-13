@@ -1,9 +1,11 @@
 import path from "node:path";
 import { Router } from "express";
 import { apiKeyAuth } from "./apiKeyAuth.js";
-import { promptToFreecadCode } from "../services/promptToCodeService.js";
+import { promptToFreecadCode, TEXT_PROMPT_FILE } from "../services/promptToCodeService.js";
 import { runBuildPipeline } from "../services/buildPipeline.js";
 import { createJob, runJob } from "../services/jobStore.js";
+import { preparePromptCache } from "../services/promptCacheService.js";
+import { archiveProjectBuildFailOpen } from "../services/projectArchiveService.js";
 
 function makeFileUrl(proto, host, filePath) {
   if (!filePath) return null;
@@ -18,7 +20,7 @@ router.use(apiKeyAuth);
 // build can exceed Cloudflare's 100s edge timeout, so we never hold the HTTP
 // request open for it — the frontend polls GET /jobs/:id instead.
 router.post("/", (req, res) => {
-  const { prompt } = req.body ?? {};
+  const { prompt, projectId, projectName } = req.body ?? {};
 
   if (typeof prompt !== "string" || prompt.trim().length === 0) {
     return res
@@ -28,14 +30,22 @@ router.post("/", (req, res) => {
 
   const proto = req.protocol;
   const host = req.get("host");
+  const userId = req.user?.id ?? null;
   const jobId = createJob();
 
   runJob(
     jobId,
     async () => {
+      const promptCache = preparePromptCache({
+        prompt,
+        operation: "cad-text",
+        userId,
+        systemPromptFile: TEXT_PROMPT_FILE,
+      });
       const result = await runBuildPipeline({
         generate: (correction) => promptToFreecadCode(prompt, correction),
         verifyPrompt: prompt,
+        promptCache,
       });
 
       if (!result.ok) {
@@ -49,6 +59,18 @@ router.post("/", (req, res) => {
         };
       }
 
+      const archived = archiveProjectBuildFailOpen({
+        userId,
+        projectId,
+        projectName,
+        operation: "cad-generate",
+        prompt,
+        generatedCode: result.generatedCode,
+        stepPath: result.stepPath,
+        stlPath: result.stlPath,
+        bbox: result.bbox,
+      });
+
       // The CAM assistant (/cam-step) and the technical drawing
       // (/generate-pdf) are produced on demand, so no extra FreeCAD round-trip
       // here.
@@ -60,8 +82,11 @@ router.post("/", (req, res) => {
           stepUrl: makeFileUrl(proto, host, result.stepPath),
           stlUrl: makeFileUrl(proto, host, result.stlPath),
           bbox: result.bbox,
+          anchors: result.anchors,
+          center: result.center,
           warning: result.warning,
           generatedCode: result.generatedCode,
+          ...(archived ?? {}),
         },
       };
     },

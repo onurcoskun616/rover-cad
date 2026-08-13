@@ -68,10 +68,61 @@ function exportEpiloguePy(outputDir, stepPath, stlPath) {
     'print("BBOX_X=" + str(bb.XLength))',
     'print("BBOX_Y=" + str(bb.YLength))',
     'print("BBOX_Z=" + str(bb.ZLength))',
+    'print("BBOX_CX=" + str(bb.Center.x))',
+    'print("BBOX_CY=" + str(bb.Center.y))',
+    'print("BBOX_CZ=" + str(bb.Center.z))',
   ].join("\n");
 }
 
-function freshDocPy() {
+/**
+ * Fix common type errors in LLM-generated FreeCAD Python before execution.
+ * GPT-4o passes float values where FreeCAD expects int (range args, list
+ * indices, tessellate segments). Operates on the code string — no runtime
+ * monkey-patching needed.
+ */
+export function sanitizeFreeCADCode(code) {
+  let result = code;
+
+  // Restore builtins.range if a prior preamble corrupted it
+  result = "import builtins as _BI\nif hasattr(_BI, '_ROVER_orig_range'):\n    _BI.range = _BI._ROVER_orig_range\n    del _BI._ROVER_orig_range\nif hasattr(_BI, '_ROVER_PATCHED'):\n    del _BI._ROVER_PATCHED\n\n" + result;
+
+  // --- Core fix: convert integer-like float literals to int everywhere ---
+  // FreeCAD float properties accept int (auto-promote), but int properties
+  // reject float. So 1.0 → 1 is always safe. Matches 1.0, 10.0, 100.00 etc.
+  // but NOT 1.5, 0.001, 3.14.
+  result = result.replace(/\b(\d+)\.0+\b/g, "$1");
+
+  // range() with variable args: range(n) → range(int(n))
+  result = result.replace(
+    /\brange\s*\(([^)]+)\)/g,
+    (_match, inner) => {
+      const args = inner.split(",").map((a) => {
+        const t = a.trim();
+        if (!t) return a;
+        if (/^\d+$/.test(t)) return a;
+        if (/^int\s*\(/.test(t)) return a;
+        return a.replace(t, `int(${t})`);
+      }).join(",");
+      return `range(${args})`;
+    },
+  );
+
+  // list/group indexing with variable: Group[i] → Group[int(i)]
+  // Only for patterns like .Group[var] or Tools.Group[expr]
+  result = result.replace(
+    /\.Group\[([^\]]+)\]/g,
+    (_m, idx) => {
+      const t = idx.trim();
+      if (/^\d+$/.test(t)) return `.Group[${t}]`;
+      if (/^int\s*\(/.test(t)) return `.Group[${t}]`;
+      return `.Group[int(${t})]`;
+    },
+  );
+
+  return result;
+}
+
+export function freshDocPy() {
   return [
     "import FreeCAD",
     "if FreeCAD.ActiveDocument is not None:",
@@ -91,7 +142,7 @@ function buildRunExportCode(outputDir, baseName, generatedCode) {
     freshDocPy(),
     "",
     "# --- generated model code ---",
-    generatedCode,
+    sanitizeFreeCADCode(generatedCode),
     "",
     "# --- export + measure epilogue (single round-trip) ---",
     exportEpiloguePy(outputDir, stepPath, stlPath),
@@ -232,6 +283,14 @@ export async function runGeneratedCodeAndExport(generatedCode) {
   const x = text.match(/BBOX_X=([-\d.eE+]+)/);
   const y = text.match(/BBOX_Y=([-\d.eE+]+)/);
   const z = text.match(/BBOX_Z=([-\d.eE+]+)/);
+  const cx = text.match(/BBOX_CX=([-\d.eE+]+)/);
+  const cy = text.match(/BBOX_CY=([-\d.eE+]+)/);
+  const cz = text.match(/BBOX_CZ=([-\d.eE+]+)/);
+  const anchorsMatch = text.match(/ROVER_ANCHORS_JSON=(.+)/);
+  let anchors = null;
+  if (anchorsMatch) {
+    try { anchors = JSON.parse(anchorsMatch[1]); } catch { /* ignore */ }
+  }
 
   return {
     ok: true,
@@ -243,6 +302,10 @@ export async function runGeneratedCodeAndExport(generatedCode) {
       y: y ? Number(y[1]) : null,
       z: z ? Number(z[1]) : null,
     },
+    center: cx && cy && cz
+      ? [Number(cx[1]), Number(cy[1]), Number(cz[1])]
+      : null,
+    anchors,
   };
 }
 
@@ -339,10 +402,10 @@ export async function runImportDxfAndExport(uploadedPath, thickness = 0) {
 }
 
 // The model is asked to emit a `# ROVER_DIMENSIONS: {"Cap": "30 mm", ...}` JSON
-// comment describing the part's key dimensions. We can't draw real TechDraw
-// dimension lines on arbitrary generated geometry (they need stable edge
-// references we don't have), so instead we render this dict as a plain text
-// table in the corner of the drawing. Returns [] if no valid comment is present.
+// comment describing the part's key dimensions. The TechDraw PDF uses proper
+// dimension lines (DistanceX/DistanceY/Diameter) placed via projected vertex
+// enumeration, with a text-table fallback when vertex access fails.
+// Returns [] if no valid comment is present.
 export function parseRoverDimensions(code) {
   if (typeof code !== "string") return [];
   const match = code.match(/#\s*ROVER_DIMENSIONS:\s*(\{.*\})/);
@@ -399,7 +462,8 @@ function computeScale(bbox) {
 }
 
 function buildTechDrawCode(pdfPath, bbox, dimensions) {
-  const scale = computeScale(bbox);
+  // Scale down 15% to leave room for dimension lines and arrows outside views.
+  const scale = Number((computeScale(bbox) * 0.85).toFixed(3));
   const x = Math.max(bbox.x || 1, 1);
   const y = Math.max(bbox.y || 1, 1);
   const z = Math.max(bbox.z || 1, 1);
@@ -468,15 +532,118 @@ function buildTechDrawCode(pdfPath, bbox, dimensions) {
     "",
   ];
 
+  // Recompute to project geometry, then create proper dimension lines.
+  lines.push(
+    "doc.recompute()",
+    "import time",
+    "time.sleep(2)",
+    "doc.recompute()",
+    "",
+    "def get_view_vertices(view):",
+    "    verts = []",
+    "    for i in range(500):",
+    "        try:",
+    "            v = view.getVertexByIndex(i)",
+    "            verts.append((i, v.X, v.Y))",
+    "        except Exception:",
+    "            break",
+    "    return verts",
+    "",
+    "def get_circular_edges(view):",
+    "    circles = []",
+    "    for i in range(500):",
+    "        try:",
+    "            e = view.getEdgeByIndex(i)",
+    "            if hasattr(e, 'Curve') and hasattr(e.Curve, 'Radius'):",
+    "                circles.append((i, e.Curve.Radius))",
+    "        except Exception:",
+    "            break",
+    "    return circles",
+    "",
+    "dim_ok = False",
+    "try:",
+    '    print("DIM_DEBUG: starting dimension creation")',
+    "    fverts = get_view_vertices(front)",
+    '    print("DIM_DEBUG: front vertices = " + str(len(fverts)))',
+    "    if len(fverts) >= 2:",
+    "        by_x = sorted(fverts, key=lambda v: v[1])",
+    "        by_y = sorted(fverts, key=lambda v: v[2])",
+    "        x_span = by_x[-1][1] - by_x[0][1]",
+    "        y_span = by_y[-1][2] - by_y[0][2]",
+    '        print("DIM_DEBUG: x_span=" + str(round(x_span,2)) + " y_span=" + str(round(y_span,2)))',
+    "        if x_span > 0.1:",
+    '            d = doc.addObject("TechDraw::DrawViewDimension", "DimW")',
+    "            page.addView(d)",
+    '            d.Type = "DistanceX"',
+    "            d.References2D = [(front, 'Vertex' + str(by_x[0][0])), (front, 'Vertex' + str(by_x[-1][0]))]",
+    '            d.FormatSpec = "%.2f"',
+    "            doc.recompute()",
+    "            dim_ok = True",
+    '            print("DIM_DEBUG: width dim OK")',
+    "        if y_span > 0.1:",
+    '            d = doc.addObject("TechDraw::DrawViewDimension", "DimH")',
+    "            page.addView(d)",
+    '            d.Type = "DistanceY"',
+    "            d.References2D = [(front, 'Vertex' + str(by_y[0][0])), (front, 'Vertex' + str(by_y[-1][0]))]",
+    '            d.FormatSpec = "%.2f"',
+    "            doc.recompute()",
+    "            dim_ok = True",
+    '            print("DIM_DEBUG: height dim OK")',
+    "",
+    "    tverts = get_view_vertices(top)",
+    '    print("DIM_DEBUG: top vertices = " + str(len(tverts)))',
+    "    if len(tverts) >= 2:",
+    "        by_y = sorted(tverts, key=lambda v: v[2])",
+    "        y_span = by_y[-1][2] - by_y[0][2]",
+    "        if y_span > 0.1:",
+    '            d = doc.addObject("TechDraw::DrawViewDimension", "DimD")',
+    "            page.addView(d)",
+    '            d.Type = "DistanceY"',
+    "            d.References2D = [(top, 'Vertex' + str(by_y[0][0])), (top, 'Vertex' + str(by_y[-1][0]))]",
+    '            d.FormatSpec = "%.2f"',
+    "            doc.recompute()",
+    "            dim_ok = True",
+    '            print("DIM_DEBUG: depth dim OK")',
+    "",
+    "    circles = get_circular_edges(front)",
+    '    print("DIM_DEBUG: circular edges = " + str(len(circles)))',
+    "    seen = set()",
+    "    ci = 0",
+    "    for edge_idx, radius in circles:",
+    "        rk = round(radius, 1)",
+    "        if rk in seen or ci >= 3:",
+    "            continue",
+    "        seen.add(rk)",
+    '        d = doc.addObject("TechDraw::DrawViewDimension", "DimDia" + str(ci))',
+    "        page.addView(d)",
+    '        d.Type = "Diameter"',
+    "        d.References2D = [(front, 'Edge' + str(edge_idx))]",
+    '        d.FormatSpec = "%.2f"',
+    "        doc.recompute()",
+    "        dim_ok = True",
+    "        ci += 1",
+    "",
+    "except Exception as dim_err:",
+    '    print("DIM_WARN: " + str(dim_err))',
+    "    import traceback",
+    "    traceback.print_exc()",
+    "",
+    'print("DIM_DEBUG: dim_ok=" + str(dim_ok))',
+    "",
+  );
+
+  // Fallback: text annotation if dimension lines could not be created.
   if (dimLines.length) {
     const pyList = "[" + dimLines.map((l) => pyStr(l)).join(", ") + "]";
     lines.push(
-      'ann = doc.addObject("TechDraw::DrawViewAnnotation", "DimTable")',
-      "page.addView(ann)",
-      `ann.Text = ${pyList}`,
-      "ann.TextSize = 3.0",
-      `ann.X = ${(PAGE_W - 45).toFixed(2)}`,
-      `ann.Y = ${(PAGE_H - 25).toFixed(2)}`,
+      "if not dim_ok:",
+      '    print("DIM_DEBUG: falling back to text annotation")',
+      '    ann = doc.addObject("TechDraw::DrawViewAnnotation", "DimTable")',
+      "    page.addView(ann)",
+      `    ann.Text = ${pyList}`,
+      "    ann.TextSize = 3.0",
+      `    ann.X = ${(PAGE_W - 45).toFixed(2)}`,
+      `    ann.Y = ${(PAGE_H - 25).toFixed(2)}`,
       "",
     );
   }
@@ -531,6 +698,8 @@ export async function exportTechDrawPdfFromStep(stepPath, bbox, dimensions = [])
       [config.freecadMcp.toolParam]: code,
     });
     const text = extractResultText(result);
+    const dimDebug = text.split("\n").filter(l => l.startsWith("DIM_")).join(" | ");
+    if (dimDebug) console.log("[TechDraw]", dimDebug);
     const match = text.match(/PDF_PATH=(.+)/);
     if (result?.isError || !match) {
       return { pdfPath: null, error: text || "TechDraw PDF olusturulamadi" };

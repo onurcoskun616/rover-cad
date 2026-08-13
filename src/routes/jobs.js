@@ -1,9 +1,11 @@
 import { Router } from "express";
+import cors from "cors";
 import { apiKeyAuth } from "./apiKeyAuth.js";
 import { getJob } from "../services/jobStore.js";
 
 const router = Router();
 
+router.use(cors({ origin: true }));
 router.use(apiKeyAuth);
 
 // Poll a job started by one of the async POST routes. Responses:
@@ -19,7 +21,8 @@ router.get("/:id", (req, res) => {
     return res.status(404).json({ status: "not_found", error: "job not found" });
   }
   if (job.status === "pending") {
-    return res.json({ status: "pending" });
+    const elapsed = Math.round((Date.now() - job.createdAt) / 1000);
+    return res.json({ status: "pending", elapsed });
   }
   if (job.status === "error") {
     return res.json({ status: "error", error: job.error });

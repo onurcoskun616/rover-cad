@@ -7,6 +7,7 @@ import {
 } from "../services/promptToCodeService.js";
 import { runBuildPipeline } from "../services/buildPipeline.js";
 import { createJob, runJob } from "../services/jobStore.js";
+import { archiveProjectBuildFailOpen } from "../services/projectArchiveService.js";
 
 function makeFileUrl(proto, host, filePath) {
   if (!filePath) return null;
@@ -20,7 +21,7 @@ router.use(apiKeyAuth);
 // Iterative editing: takes the current design's code plus a change request and
 // rebuilds an updated model. Async (polled via /jobs/:id) like /generate.
 router.post("/", (req, res) => {
-  const { prompt, previousCode, basePrompt } = req.body ?? {};
+  const { prompt, previousCode, basePrompt, projectId, projectName } = req.body ?? {};
 
   if (typeof prompt !== "string" || prompt.trim().length === 0) {
     return res
@@ -36,6 +37,7 @@ router.post("/", (req, res) => {
   const base = typeof basePrompt === "string" ? basePrompt : "";
   const proto = req.protocol;
   const host = req.get("host");
+  const userId = req.user?.id ?? null;
   const jobId = createJob();
 
   runJob(
@@ -67,6 +69,18 @@ router.post("/", (req, res) => {
         };
       }
 
+      const archived = archiveProjectBuildFailOpen({
+        userId,
+        projectId,
+        projectName,
+        operation: "cad-revise",
+        prompt: base ? `${base} ; ${prompt}` : prompt,
+        generatedCode: result.generatedCode,
+        stepPath: result.stepPath,
+        stlPath: result.stlPath,
+        bbox: result.bbox,
+      });
+
       return {
         ok: true,
         body: {
@@ -75,8 +89,11 @@ router.post("/", (req, res) => {
           stepUrl: makeFileUrl(proto, host, result.stepPath),
           stlUrl: makeFileUrl(proto, host, result.stlPath),
           bbox: result.bbox,
+          anchors: result.anchors,
+          center: result.center,
           warning: result.warning,
           generatedCode: result.generatedCode,
+          ...(archived ?? {}),
         },
       };
     },

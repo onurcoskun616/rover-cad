@@ -2,9 +2,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { runClaudeCli, stripCodeFence } from "./claudeCli.js";
+import { runLlm, stripCodeFence } from "./claudeCli.js";
 import { callFreecadTool, extractResultText } from "./freecadMcpClient.js";
 import { config } from "../config.js";
+import { sanitizeFreeCADCode } from "./exportService.js";
 import { resolveStepPath, describeStepGeometry } from "./camService.js";
 import { camParamsBlock } from "./camWizardService.js";
 import {
@@ -12,6 +13,13 @@ import {
   detectThreadMethod,
   threadGuidanceBlock,
 } from "./threadSpec.js";
+import { transformToSinumerik, isSinumerik } from "./sinumerikTransformer.js";
+import { transformToHeidenhain, isHeidenhain, heidenhainVersion } from "./heidenhainTransformer.js";
+import {
+  transformToMeldas, isMitsubishi,
+  transformToMazak, isMazak,
+  transformToOkumaOSP, isOkuma,
+} from "./industrialTransformers.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const promptFile = (name) => path.join(__dirname, "..", "prompts", name);
@@ -56,7 +64,7 @@ export function parseJsonLoose(raw) {
   }
 }
 
-const JSON_ATTEMPTS = 3;
+const JSON_ATTEMPTS = 2;
 
 // Call the CLI expecting JSON, validating/normalising with `shape`. Retries
 // with increasingly firm reminders if the response doesn't parse.
@@ -65,17 +73,13 @@ async function runClaudeJson(input, systemPromptFile, shape) {
   let lastRaw = "";
   for (let attempt = 1; attempt <= JSON_ATTEMPTS; attempt++) {
     let attemptInput = input;
-    if (attempt === 2) {
+    if (attempt >= 2) {
       attemptInput +=
-        "\n\n[HATIRLATMA]: Onceki cevabin gecerli degildi. SADECE istenen formatta ham JSON dondur, baska hicbir sey yazma.";
-    } else if (attempt >= 3) {
-      attemptInput +=
-        '\n\n[SON UYARI]: Aciklama, yorum, code fence YAZMA. Ciktinin ilk karakteri { olmali. Ornek: {"summary":"...","steps":[...],"notes":"..."}';
+        '\n\n[SON UYARI]: Onceki cevabin gecerli degildi. Aciklama, yorum, code fence YAZMA. Ciktinin ilk karakteri { olmali. SADECE ham JSON dondur.';
     }
     try {
-      const raw = await runClaudeCli(attemptInput, {
+      const raw = await runLlm(attemptInput, {
         systemPromptFile,
-        allowRead: false,
       });
       lastRaw = raw;
       const parsed = parseJsonLoose(raw);
@@ -100,18 +104,14 @@ function geomBlock(geometry) {
  * @returns {Promise<{summary: string, steps: object[], notes: string, planText: string}>}
  */
 export async function generateCamPlan(stepPath, answers, opts = {}) {
+  const t0 = Date.now();
   const geometry = await describeStepGeometry(stepPath);
+  console.log(`generateCamPlan: geometry in ${Date.now() - t0}ms`);
 
   // Build the input with the INSTRUCTION first, then data. This order is
   // critical: when the input starts with raw geometry JSON, some models treat
   // it as shared data and describe it instead of generating a plan.
-  let instruction = `Sen bir CNC/CAM proses plancisindir. Asagidaki geometri ve parametreleri kullanarak bir CAM isleme plani OLUSTUR.
-CIKTI FORMATI: Yanit olarak SADECE ham JSON nesnesi dondur. Ilk karakter { son karakter } olmali.
-Code fence (\`\`\`), aciklama, yorum, soru YAZMA. Sadece JSON.
-JSON yapisi: {"summary":"<Turkce genel yaklasim>","steps":[{"step":1,"operation":"<islem adi>","tool":"<takim>","description":"<Turkce aciklama>"}],"notes":"<Turkce notlar>"}
-Tum metinler Turkce ve ASCII olmali (aksan karakteri yok).
-
-`;
+  let instruction = `SADECE ham JSON dondur. Ilk karakter { son karakter } olmali. Fence/aciklama YAZMA.\n\n`;
 
   let data = geomBlock(geometry) + camParamsBlock(answers, geometry);
 
@@ -129,7 +129,10 @@ Tum metinler Turkce ve ASCII olmali (aksan karakteri yok).
 
   const input = instruction + data;
 
+  const t1 = Date.now();
+  console.log(`generateCamPlan: calling Claude CLI (input ${input.length} chars)`);
   return runClaudeJson(input, PLAN_PROMPT, (parsed) => {
+    console.log(`generateCamPlan: Claude CLI done in ${Date.now() - t1}ms`);
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
       throw new Error("Plan bir nesne olmali");
     }
@@ -166,7 +169,7 @@ export function planToText(plan) {
   return lines.join("\n");
 }
 
-const GCODE_ATTEMPTS = 3;
+const GCODE_ATTEMPTS = 2;
 
 // Common G-code / M-code command tokens; if any appears as a literal inside the
 // generated Python, the model is hand-writing G-code instead of letting FreeCAD
@@ -207,9 +210,17 @@ export function validateCamCode(code) {
 function postModuleCandidates(postName) {
   const p = String(postName || "").toLowerCase();
   let list;
-  if (p.includes("mach")) list = ["mach3_mach4", "mach3", "mach4"];
+  if (p.includes("mach4")) list = ["mach3_mach4", "mach4", "mach3"];
+  else if (p.includes("mach")) list = ["mach3_mach4", "mach3", "mach4"];
   else if (p.includes("linux")) list = ["linuxcnc", "linuxcnc_post"];
-  else if (p.includes("fanuc")) list = ["fanuc", "fanuc_post", "refactored_grbl"];
+  else if (p.includes("fanuc")) list = ["fanuc", "fanuc_post", "refactored_fanuc"];
+  else if (p.includes("siemens") || p.includes("sinumerik")) list = ["sinumerik", "siemens", "fanuc"];
+  else if (p.includes("heidenhain")) list = ["heidenhain", "klartext", "fanuc"];
+  else if (p.includes("haas")) list = ["haas", "fanuc", "refactored_fanuc"];
+  else if (p.includes("mitsubishi") || p.includes("meldas")) list = ["mitsubishi", "meldas", "fanuc"];
+  else if (p.includes("mazak")) list = ["mazak", "mazatrol", "fanuc"];
+  else if (p.includes("okuma") || p.includes("osp")) list = ["okuma", "osp", "fanuc"];
+  else if (p.includes("doosan")) list = ["doosan", "fanuc", "refactored_fanuc"];
   else list = ["grbl_post", "grbl"];
   if (!list.includes("grbl_post")) list.push("grbl_post");
   return list;
@@ -245,7 +256,9 @@ function previewEpiloguePy(previewJsonPath, defaultFeed) {
     "    for _c in _p.Commands:",
     "        _pr = _c.Parameters",
     "        if 'F' in _pr:",
-    "            try: _feed = float(_pr['F'])",
+    "            try:",
+    "                _fv = float(_pr['F'])",
+    "                _feed = _fv * 60.0 if _fv < 50 else _fv",
     "            except Exception: pass",
     "        _nx = float(_pr['X']) if 'X' in _pr else _x",
     "        _ny = float(_pr['Y']) if 'Y' in _pr else _y",
@@ -300,6 +313,49 @@ function postEpiloguePy(gcodePath, postName) {
   ].join("\n");
 }
 
+/**
+ * If the selected controller needs a dialect-specific format (Sinumerik cycles,
+ * Heidenhain Klartext, …), read the generated Fanuc G-code, transform it, and
+ * overwrite the file.
+ */
+function applyControllerTransform(gcodePath, postName, stepPath, answers) {
+  const partName = path.basename(stepPath || "PART", path.extname(stepPath || ""));
+  let label;
+  let transformed;
+  try {
+    const raw = fs.readFileSync(gcodePath, "utf-8");
+    if (isSinumerik(postName)) {
+      transformed = transformToSinumerik(raw, partName);
+      label = "Sinumerik";
+    } else if (isHeidenhain(postName)) {
+      const version = heidenhainVersion(postName);
+      transformed = transformToHeidenhain(raw, partName, {
+        stockX: Number(answers?.stockX) || 0,
+        stockY: Number(answers?.stockY) || 0,
+        stockZ: Number(answers?.stockZ) || 0,
+        wcs: answers?.wcs || "",
+        version,
+      });
+      label = "Heidenhain Klartext";
+    } else if (isMitsubishi(postName)) {
+      transformed = transformToMeldas(raw, partName);
+      label = "Mitsubishi Meldas";
+    } else if (isMazak(postName)) {
+      transformed = transformToMazak(raw, partName);
+      label = "Mazak EIA/ISO";
+    } else if (isOkuma(postName)) {
+      transformed = transformToOkumaOSP(raw, partName);
+      label = "Okuma OSP";
+    }
+    if (transformed) {
+      fs.writeFileSync(gcodePath, transformed, "utf-8");
+      console.log(`${label} donusumu uygulandi:`, path.basename(gcodePath));
+    }
+  } catch (err) {
+    console.warn(`${label || "Controller"} donusumu uygulanamadi:`, err.message);
+  }
+}
+
 // Build the shared prompt input asking the model to translate the plan into Path
 // operations assigned to `job` — with no G-code, no export, no file I/O.
 function buildPathCodeInput(abs, geometry, answers, plan, threadGuidance) {
@@ -309,7 +365,7 @@ function buildPathCodeInput(abs, geometry, answers, plan, threadGuidance) {
     camParamsBlock(answers, geometry) +
     `\n[ONAYLANAN_PLAN]: ${JSON.stringify(plan)}` +
     threadGuidance +
-    "\n[GOREV]: Bu plani FreeCAD Path (CAM) operasyonlarina cevir ve olusturdugun Path Job'u tam olarak `job` adli degiskene ata. [CAM_PARAMETRELERI]'ndeki takim capi, spindle hizi, ilerlemeler, stepdown, stepover, stock-to-leave, kesme yonu (climb/conventional), WCS ve calisma duzlemini KULLAN. Kaba ve finis AYRI operasyonlar olsun. Post-processor CALISTIRMA, export ETME, dosya ACMA, G-code YAZMA, hicbir sey print ETME — bunlari sistem yapacak."
+    "\n[GOREV]: Plani FreeCAD Path operasyonlarina cevir. `job` degiskenine ata. Parametreleri kullan. Kaba/finis ayri. Export/G-code/print YAPMA."
   );
 }
 
@@ -323,8 +379,10 @@ async function generateAndRunPathCode({ abs, geometry, answers, plan, threadGuid
   let lastError = "Bilinmeyen hata";
   let previousCode = null;
   let problem = null;
+  const t0 = Date.now();
 
   for (let attempt = 1; attempt <= GCODE_ATTEMPTS; attempt++) {
+    console.log(`Path code attempt ${attempt}/${GCODE_ATTEMPTS} (elapsed ${Math.round((Date.now() - t0) / 1000)}s)`);
     let input = baseInput;
     if (previousCode) {
       input +=
@@ -335,7 +393,7 @@ async function generateAndRunPathCode({ abs, geometry, answers, plan, threadGuid
 
     let code;
     try {
-      const raw = await runClaudeCli(input, { systemPromptFile: CODE_PROMPT, allowRead: false });
+      const raw = await runLlm(input, { systemPromptFile: CODE_PROMPT });
       code = stripCodeFence(raw);
       if (!code) throw new Error("Bos kod dondu");
     } catch (err) {
@@ -356,7 +414,7 @@ async function generateAndRunPathCode({ abs, geometry, answers, plan, threadGuid
     let text = "";
     try {
       const result = await callFreecadTool(config.freecadMcp.toolName, {
-        [config.freecadMcp.toolParam]: code + "\n" + epiloguePy,
+        [config.freecadMcp.toolParam]: sanitizeFreeCADCode(code) + "\n" + epiloguePy,
       });
       text = extractResultText(result);
       if (result?.isError || text.startsWith("Failed to execute code")) {
@@ -364,8 +422,12 @@ async function generateAndRunPathCode({ abs, geometry, answers, plan, threadGuid
       }
     } catch (err) {
       lastError = err.message;
+      const isTimeout = /timed?\s*out|timeout|-32001/i.test(err.message);
       previousCode = code;
-      problem = `FreeCAD Path kodunu calistirirken hata olustu:\n${err.message}`;
+      problem = isTimeout
+        ? "FreeCAD zaman asimina ugradi — kod cok yavas. DAHA BASIT operasyonlar kullan: Adaptive KULLANMA, Surface KULLANMA. Sadece Pocket ve Profile kullan. Operasyon sayisini minimize et. Her sey tek doc.recompute() ile bitsin."
+        : `FreeCAD Path kodunu calistirirken hata olustu:\n${err.message}`;
+      console.warn(`FreeCAD ${isTimeout ? "TIMEOUT" : "error"} (attempt ${attempt}): ${err.message.slice(0, 200)}`);
       continue;
     }
 
@@ -419,11 +481,13 @@ function threadGuidanceFor(answers, context) {
  * @returns {Promise<{previewPath:string, token:string}>}
  */
 export async function generateCamPreview(stepPath, answers, plan, context = "") {
+  const t0 = Date.now();
   const abs = resolveStepPath(stepPath);
   if (!fs.existsSync(abs)) {
     throw new Error("STEP dosyasi bulunamadi: " + path.basename(abs));
   }
   const geometry = await describeStepGeometry(stepPath);
+  console.log(`generateCamPreview: geometry in ${Date.now() - t0}ms`);
   const previewPath = abs.replace(/\.(step|stp)$/i, "") + "_toolpath.json";
   try {
     fs.unlinkSync(previewPath);
@@ -447,6 +511,7 @@ export async function generateCamPreview(stepPath, answers, plan, context = "") 
   const estMatch = text.match(/EST_MINUTES=([-\d.eE+]+)/);
   const estimatedMinutes = estMatch ? Number(estMatch[1]) : null;
   const token = storePathCode(code);
+  console.log(`generateCamPreview: total ${Math.round((Date.now() - t0) / 1000)}s`);
   return { previewPath, token, estimatedMinutes };
 }
 
@@ -474,13 +539,14 @@ export async function generateCamGcodeFromPlan(stepPath, answers, plan, context 
   if (stored) {
     // Reuse the approved toolpaths verbatim: run the stored code + post epilogue.
     const result = await callFreecadTool(config.freecadMcp.toolName, {
-      [config.freecadMcp.toolParam]: stored + "\n" + epiloguePy,
+      [config.freecadMcp.toolParam]: sanitizeFreeCADCode(stored) + "\n" + epiloguePy,
     });
     const text = extractResultText(result);
     if ((result?.isError || !text.includes("GCODE_PATH=")) && !fs.existsSync(gcodePath)) {
       throw new Error("G-code uretilemedi: " + (text || "bilinmeyen hata"));
     }
     if (!fs.existsSync(gcodePath)) throw new Error("G-code dosyasi olusmadi");
+    applyControllerTransform(gcodePath, postName, abs, answers);
     return { gcodePath };
   }
 
@@ -496,5 +562,6 @@ export async function generateCamGcodeFromPlan(stepPath, answers, plan, context 
     successMarker: "GCODE_PATH=",
   });
   if (!fs.existsSync(gcodePath)) throw new Error("G-code dosyasi olusmadi");
+  applyControllerTransform(gcodePath, postName, abs, answers);
   return { gcodePath };
 }

@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="tr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CAM Asistanı · Topkapı Okulları</title>
+    <link rel="stylesheet" href="style.css" />
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+          "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="account-strip">
+        <a href="index.html" class="cam-back-link">← Ana Sayfa</a>
+        <a href="dashboard.html">Hesabım</a>
+        <a id="admin-link" href="admin.html" hidden>Yönetim</a>
+        <button id="logout-btn" class="link-button" type="button">Çıkış</button>
+      </div>
+      <img src="logo.png" alt="Topkapı Okulları logosu" class="logo" />
+      <h1 class="brand-title">CAM Asistanı</h1>
+      <p class="brand-subtitle">Topkapı Okulları · Yapay Zeka Destekli CAD/CAM</p>
+      <p class="subtitle">
+        CAM sihirbazı ile işleme planı oluşturun, takım yolu simülasyonunu
+        izleyin ve G-code üretin.
+      </p>
+    </header>
+
+    <main>
+      <section id="error-section" class="error-section" hidden>
+        <p id="error-text"></p>
+      </section>
+
+      <section id="result-section" class="result-section">
+        <div id="sim-workspace" class="sim-workspace">
+          <div class="sim-viewer-wrap">
+            <div id="viewer-container" class="viewer-container"></div>
+            <div id="coord-display" class="coord-display" hidden>
+              <div class="coord-row"><span class="coord-label">X</span><span id="coord-x" class="coord-val">0.000</span></div>
+              <div class="coord-row"><span class="coord-label">Y</span><span id="coord-y" class="coord-val">0.000</span></div>
+              <div class="coord-row"><span class="coord-label">Z</span><span id="coord-z" class="coord-val">0.000</span></div>
+              <div class="coord-row coord-feed"><span class="coord-label">F</span><span id="coord-f" class="coord-val">0</span></div>
+            </div>
+          </div>
+          <div id="gcode-panel" class="gcode-panel" hidden>
+            <div class="gcode-header">G-Code</div>
+            <div id="gcode-lines" class="gcode-lines"></div>
+          </div>
+        </div>
+
+        <div id="cam-status" class="status-section" hidden>
+          <div id="cam-spinner" class="spinner" hidden></div>
+          <p id="cam-status-text"></p>
+        </div>
+
+        <div id="cam-assistant" class="cam-assistant">
+          <h3 class="cam-assistant-title">CAM Asistanı</h3>
+
+          <div id="cam-wizard" class="cam-wizard" hidden>
+            <p id="cam-step-progress" class="cam-step-progress"></p>
+            <h4 id="cam-step-title" class="cam-step-title"></h4>
+            <p id="cam-step-intro" class="cam-step-intro" hidden></p>
+            <form id="cam-step-fields" class="cam-step-fields"></form>
+            <div class="cam-wizard-nav">
+              <button id="cam-back-btn" type="button" class="secondary" hidden>Geri</button>
+              <button id="cam-next-btn" type="button">İleri</button>
+            </div>
+          </div>
+
+          <button id="cam-plan-btn" type="button" hidden>Plan Oluştur</button>
+
+          <div id="cam-plan-view" class="cam-plan" hidden>
+            <h4>Önerilen İşleme Planı</h4>
+            <pre id="cam-plan-text"></pre>
+            <div class="cam-plan-actions">
+              <button id="cam-preview-btn" type="button">Simülasyonu Görüntüle</button>
+              <button id="cam-revise-btn" type="button" class="secondary">Planı Değiştir</button>
+            </div>
+            <div id="cam-revise-box" class="cam-revise-box" hidden>
+              <textarea id="cam-revise-input" rows="2" placeholder="Planda neyi değiştirmek istersiniz? (örn: dış konturu son adıma al)"></textarea>
+              <button id="cam-revise-submit" type="button">Yeni Plan Oluştur</button>
+            </div>
+
+            <div id="cam-preview-view" class="cam-preview-view" hidden>
+              <div class="cnc-header">
+                <p class="cnc-header-title">CNC Simülasyon</p>
+                <span class="cnc-header-badge">TopkapiAI CAM</span>
+              </div>
+              <p class="cam-preview-note">
+                Takım yolu yukarıdaki 3D görüntüleyicide gösteriliyor (mavi:
+                kesme, turuncu: hızlı hareket). Kırmızı takım, yolu sırayla
+                izler. İzleyip onaylayın.
+              </p>
+              <div class="cnc-info-strip">
+                <div class="cnc-info-item"><span class="cnc-info-label">Birim</span><span class="cnc-info-value">mm</span></div>
+                <div class="cnc-info-item"><span class="cnc-info-label">Koordinat</span><span class="cnc-info-value">G54</span></div>
+                <div class="cnc-info-item"><span class="cnc-info-label">Mod</span><span id="cnc-cam-mode" class="cnc-info-value">Frezeleme</span></div>
+                <div class="cnc-info-item"><span class="cnc-info-label">Durum</span><span id="cnc-cam-status" class="cnc-info-value" style="color:#3ddc84">Hazır</span></div>
+              </div>
+
+              <div class="cam-sim-controls">
+                <p id="cam-sim-op" class="cam-sim-op">Operasyon: —</p>
+                <input id="cam-sim-progress" class="cam-sim-progress" type="range" min="0" max="1000" value="0" />
+                <div class="cam-sim-buttons">
+                  <button id="cam-sim-play" type="button">▶ Oynat</button>
+                  <span class="cam-sim-speed-label">Hız:</span>
+                  <button id="cam-sim-1x" type="button" class="secondary sim-speed active">1x</button>
+                  <button id="cam-sim-2x" type="button" class="secondary sim-speed">2x</button>
+                  <button id="cam-sim-5x" type="button" class="secondary sim-speed">5x</button>
+                </div>
+              </div>
+
+              <div class="cnc-footer">
+                <div class="cnc-coord">X <span id="cnc-cam-x">0.000</span> Y <span id="cnc-cam-y">0.000</span> Z <span id="cnc-cam-z">0.000</span></div>
+                <div class="cnc-footer-actions">
+                  <button id="cam-confirm-btn" class="cnc-btn-approve" type="button">Onayla — G-code Üret</button>
+                  <button id="cam-reject-btn" class="cnc-btn-reject" type="button">Reddet</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <a id="gcode-link" class="file-link" href="#" target="_blank" rel="noopener" hidden>G-code dosyasını indir</a>
+
+        <div id="cam-quote" class="cam-quote" hidden>
+          <h4>Teklif / Maliyet</h4>
+          <p id="cam-quote-time" class="cam-quote-time"></p>
+          <button id="cam-quote-btn" type="button">Teklif Oluştur</button>
+
+          <div id="cam-quote-form" class="cam-quote-form" hidden>
+            <div class="cam-quote-mode">
+              <label class="cam-option">
+                <input type="radio" name="quote-mode" value="basit" checked />
+                <span>Basit</span>
+              </label>
+              <label class="cam-option">
+                <input type="radio" name="quote-mode" value="detayli" />
+                <span>Detaylı</span>
+              </label>
+            </div>
+
+            <div id="quote-fields-basit" class="quote-fields">
+              <div class="cam-field">
+                <label for="q-hourlyRate">Saatlik makine ücreti (TL/saat)</label>
+                <input id="q-hourlyRate" type="number" step="any" value="500" />
+              </div>
+              <div class="cam-field">
+                <label for="q-materialPrice-b">Malzeme birim fiyatı</label>
+                <input id="q-materialPrice-b" type="number" step="any" placeholder="0" />
+              </div>
+              <div class="cam-field">
+                <label for="q-materialUnit-b">Malzeme fiyat birimi</label>
+                <select id="q-materialUnit-b">
+                  <option value="cm3">TL/cm³</option>
+                  <option value="kg">TL/kg</option>
+                </select>
+              </div>
+              <div class="cam-field">
+                <label for="q-profitPct-b">Kâr marjı (%)</label>
+                <input id="q-profitPct-b" type="number" step="any" value="20" />
+              </div>
+            </div>
+
+            <div id="quote-fields-detayli" class="quote-fields" hidden>
+              <div class="cam-field">
+                <label for="q-materialPrice-d">Malzeme birim fiyatı</label>
+                <input id="q-materialPrice-d" type="number" step="any" placeholder="0" />
+              </div>
+              <div class="cam-field">
+                <label for="q-materialUnit-d">Malzeme fiyat birimi</label>
+                <select id="q-materialUnit-d">
+                  <option value="cm3">TL/cm³</option>
+                  <option value="kg">TL/kg</option>
+                </select>
+              </div>
+              <div class="cam-field">
+                <label for="q-amortHourly">Makine amortisman payı (TL/saat)</label>
+                <input id="q-amortHourly" type="number" step="any" placeholder="0" />
+              </div>
+              <div class="cam-field">
+                <label for="q-energyPrice">Enerji birim fiyatı (TL/kWh)</label>
+                <input id="q-energyPrice" type="number" step="any" placeholder="0" />
+              </div>
+              <div class="cam-field">
+                <label for="q-powerKw">Makine güç tüketimi (kW)</label>
+                <input id="q-powerKw" type="number" step="any" placeholder="0" />
+              </div>
+              <div class="cam-field">
+                <label for="q-toolCost">Takım maliyeti (TL/takım)</label>
+                <input id="q-toolCost" type="number" step="any" placeholder="0" />
+              </div>
+              <div class="cam-field">
+                <label for="q-toolLifeParts">Takım ömrü (parça)</label>
+                <input id="q-toolLifeParts" type="number" step="any" placeholder="0" />
+              </div>
+              <div class="cam-field">
+                <label for="q-consumableHourly">Sarf malzeme (TL/saat)</label>
+                <input id="q-consumableHourly" type="number" step="any" placeholder="0" />
+              </div>
+              <div class="cam-field">
+                <label for="q-consumablePerPart">Sarf malzeme (TL/parça)</label>
+                <input id="q-consumablePerPart" type="number" step="any" placeholder="0" />
+              </div>
+              <div class="cam-field">
+                <label for="q-overheadPct">Genel gider payı (%)</label>
+                <input id="q-overheadPct" type="number" step="any" placeholder="0" />
+              </div>
+              <div class="cam-field">
+                <label for="q-scrapPct">Fire/hata payı (%)</label>
+                <input id="q-scrapPct" type="number" step="any" placeholder="0" />
+              </div>
+              <div class="cam-field">
+                <label for="q-profitPct-d">Kâr marjı (%)</label>
+                <input id="q-profitPct-d" type="number" step="any" placeholder="0" />
+              </div>
+            </div>
+
+            <button id="cam-quote-submit" type="button">Hesapla ve Teklif Oluştur</button>
+          </div>
+
+          <div id="cam-quote-result" class="cam-quote-result" hidden>
+            <pre id="cam-quote-breakdown"></pre>
+            <a id="cam-quote-pdf" class="file-link" href="#" target="_blank" rel="noopener" hidden>Teklif Formu (PDF) indir</a>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <p>Topkapı Okulları Yapay Zeka</p>
+    </footer>
+
+    <script type="module" src="cam-app.js"></script>
+    <script type="module" src="session-nav.js"></script>
+  </body>
+</html>

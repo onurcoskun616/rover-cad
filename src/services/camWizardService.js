@@ -32,7 +32,12 @@ export const MATERIAL_OPTIONS = [
   "Diger",
 ];
 const AXIS_OPTIONS = ["3 eksen", "4 eksen", "5 eksen"];
-const POST_OPTIONS = ["GRBL", "Mach3", "LinuxCNC", "Fanuc"];
+const POST_OPTIONS = [
+  "GRBL", "Mach3", "Mach4", "LinuxCNC",
+  "Fanuc", "Siemens (Sinumerik)",
+  "Heidenhain (TNC 640)", "Heidenhain (iTNC 530)", "Heidenhain (TNC 426/430)",
+  "Haas", "Mitsubishi (Meldas)", "Mazak", "Okuma (OSP)", "Doosan",
+];
 const WORKHOLDING_OPTIONS = [
   "Mengene",
   "Vakum tablasi",
@@ -55,6 +60,16 @@ const FACE_TOP_OPTIONS = [
   "Evet, ust yuzey yuzeylensin (Face)",
   "Hayir, gerekli degil",
 ];
+const MACHINE_CLASS_OPTIONS = [
+  "Hobi / masaustu CNC",
+  "Endustriyel CNC",
+];
+const ENTRY_METHOD_OPTIONS = [
+  "Ramp (acili giris)",
+  "Helix (helisel giris)",
+  "Disaridan giris (outside-in)",
+  "Plunge (dikey giris)",
+];
 const MILLING_DIR_OPTIONS = [
   "Climb (ters yonlu)",
   "Conventional (duz yonlu)",
@@ -75,9 +90,12 @@ const GROUP_REPEATED_OPTIONS = [
 /**
  * Recommend spindle speed, feeds, stepdown and stepover from material + tool
  * diameter using the standard formulas: rpm = Vc*1000/(pi*D), feed = rpm*fz*z.
+ * @param {string} material
+ * @param {number} toolDiameterMm
+ * @param {string} [machineClass] "Hobi / masaustu CNC" or "Endustriyel CNC"
  * @returns {{spindleRpm:number, horizFeed:number, vertFeed:number, stepdown:number, stepover:number}}
  */
-export function recommendCuttingParams(material, toolDiameterMm) {
+export function recommendCuttingParams(material, toolDiameterMm, machineClass) {
   const d = MATERIAL_DATA[material] ?? MATERIAL_DATA.Aluminyum;
   const D = Number(toolDiameterMm) > 0 ? Number(toolDiameterMm) : 6;
   let rpm = Math.round((d.vc * 1000) / (Math.PI * D));
@@ -85,7 +103,9 @@ export function recommendCuttingParams(material, toolDiameterMm) {
   const horizFeed = Math.max(50, Math.round(rpm * d.fz * DEFAULT_FLUTES));
   const vertFeed = Math.max(20, Math.round(horizFeed * 0.3));
   const stepdown = Math.max(0.2, Math.round(d.apFactor * D * 10) / 10);
-  const stepover = Math.max(0.1, Math.round(0.4 * D * 10) / 10);
+  const isHobby = String(machineClass || "").toLowerCase().includes("hobi");
+  const stepoverFactor = isHobby ? 0.18 : 0.4;
+  const stepover = Math.max(0.1, Math.round(stepoverFactor * D * 10) / 10);
   return { spindleRpm: rpm, horizFeed, vertFeed, stepdown, stepover };
 }
 
@@ -117,6 +137,29 @@ function recommendEndmill(geometry) {
   if (minXY < 15) return 3;
   if (minXY < 40) return 6;
   return 8;
+}
+
+// Recommend a face mill diameter for the Face operation based on stock width.
+function recommendFaceMill(geometry) {
+  const bb = geometry?.boundingBoxMm ?? {};
+  const maxXY = Math.max(Number(bb.x) || 40, Number(bb.y) || 40);
+  if (maxXY <= 20) return 12;
+  if (maxXY <= 35) return 16;
+  if (maxXY <= 50) return 20;
+  if (maxXY <= 80) return 25;
+  return 32;
+}
+
+// Recommend entry method based on material and machine class.
+function recommendEntryMethod(material) {
+  const m = String(material || "").toLowerCase();
+  if (m.includes("alumin") || m.includes("pirinc") || m.includes("bronz")) {
+    return ENTRY_METHOD_OPTIONS[0]; // Ramp
+  }
+  if (m.includes("plastik") || m.includes("ahsap")) {
+    return ENTRY_METHOD_OPTIONS[0]; // Ramp
+  }
+  return ENTRY_METHOD_OPTIONS[1]; // Helix for steel etc.
 }
 
 // Group cylindrical faces by radius; radii present 2+ times are repeated
@@ -200,7 +243,7 @@ function buildApplicableSteps({ geometry, threads, answers }) {
   const margin = pick(a, "stockMargin", 5);
   const stock = recommendStock(geometry, margin);
   const endmill = pick(a, "endmillDiameter", recommendEndmill(geometry));
-  const params = recommendCuttingParams(a.material, endmill);
+  const params = recommendCuttingParams(a.material, endmill, a.machineClass);
   const isStepped = (geometry?.horizontalLevelCount ?? 0) > 2;
   const is2D = isTwoDGeometry(geometry);
   const repeats = repeatedFeatures(geometry);
@@ -251,12 +294,13 @@ function buildApplicableSteps({ geometry, threads, answers }) {
       "Kayitli makinelerinizden secin (eksen/post-processor otomatik dolar) veya 'Elle gir' ile asagidan girin.";
   }
   machineFields.push(
+    selectField("machineClass", "Tezgah sinifi", MACHINE_CLASS_OPTIONS, pick(a, "machineClass", MACHINE_CLASS_OPTIONS[0])),
     selectField("axisCount", "Tezgah ekseni", AXIS_OPTIONS, pick(a, "axisCount", AXIS_OPTIONS[0])),
     selectField("postProcessor", "Post-processor / kontrolcu", POST_OPTIONS, pick(a, "postProcessor", POST_OPTIONS[0])),
   );
   steps.push({
     id: "machine",
-    title: "3. Tezgah ekseni ve post-processor",
+    title: "3. Tezgah sinifi, ekseni ve post-processor",
     intro: machineIntro,
     fields: machineFields,
   });
@@ -298,8 +342,12 @@ function buildApplicableSteps({ geometry, threads, answers }) {
     toolIntro =
       `${toolIntro} Envanterinizde kayitli takim yok; onerilen O${endmill}mm.`.trim();
   }
+  const faceMillDia = pick(a, "faceMillDiameter", recommendFaceMill(geometry));
+  toolIntro += ` Yuzey tarama (face) icin onerilen face mill: O${faceMillDia}mm.`;
   toolFields.push(
     numberField("endmillDiameter", "Ana freze capi", "mm", endmill),
+    numberField("faceMillDiameter", "Face mill (yuzey tarama) capi", "mm", faceMillDia),
+    selectField("entryMethod", "Giris yontemi (malzemeye dalma sekli)", ENTRY_METHOD_OPTIONS, pick(a, "entryMethod", recommendEntryMethod(a.material))),
     selectField(
       "cutterComp",
       "Takim yaricap kompanzasyonu (torna: kesici ucu yaricapi)",
@@ -334,7 +382,7 @@ function buildApplicableSteps({ geometry, threads, answers }) {
   steps.push({
     id: "cutting",
     title: "8. Kesme parametreleri (kaba + finis)",
-    intro: `Onerilenler ${a.material ?? MATERIAL_OPTIONS[0]} + O${endmill}mm takima gore. Kaba ve finis ayri operasyon planlanir.`,
+    intro: `Onerilenler ${a.material ?? MATERIAL_OPTIONS[0]} + O${endmill}mm takima gore (${(a.machineClass || MACHINE_CLASS_OPTIONS[0]).includes("Hobi") ? "hobi tezgah, muhafazakar stepover" : "endustriyel tezgah"}). Kaba ve finis ayri operasyon planlanir.`,
     fields: [
       numberField("spindleRpm", "Spindle hizi", "rpm", pick(a, "spindleRpm", params.spindleRpm)),
       numberField("horizFeed", "Yatay ilerleme", "mm/min", pick(a, "horizFeed", params.horizFeed)),
@@ -438,6 +486,9 @@ export function camParamsBlock(answers, geometry) {
     `- Calisma duzlemi: ${a.workPlane ?? "G17 / XY"}`,
     a._toolName ? `- Takim profili: ${a._toolName} (${a._toolMaterial ?? ""}, ${a._toolFlutes ?? "?"} agiz)` : null,
     `- Ana freze capi: ${a.endmillDiameter ?? "?"} mm`,
+    a.faceMillDiameter ? `- Face mill (yuzey tarama) capi: ${a.faceMillDiameter} mm` : null,
+    `- Giris yontemi: ${a.entryMethod ?? "Ramp (acili giris)"}`,
+    `- Tezgah sinifi: ${a.machineClass ?? "Hobi / masaustu CNC"}`,
     `- Takim yaricap kompanzasyonu: ${a.cutterComp ?? "Yok"}`,
     a.threadMethod ? `- Dis yontemi: ${a.threadMethod}` : null,
     `- Operasyon esleştirme: ${a.operationMapping ?? "otomatik"}`,

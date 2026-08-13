@@ -1,14 +1,25 @@
-import { config } from "../config.js";
+import { ensureProfile } from "../services/accountStore.js";
+import { runWithLlmContext } from "../services/llmRequestContext.js";
+import { getSupabaseUser } from "../services/supabaseAuth.js";
 
-// Shared x-api-key gate for every endpoint except /health. The key is a shared
-// secret baked into the (public) frontend — it only keeps casual/automated
-// traffic out, it is not a real authentication boundary.
-export function apiKeyAuth(req, res, next) {
-  if (!config.apiKey) {
-    return res.status(500).json({ error: "Server misconfigured: API_KEY is not set" });
+// User session gate and monthly usage reservation for protected endpoints.
+export async function apiKeyAuth(req, res, next) {
+  if (req.method === "OPTIONS") return next();
+  const token = req.get("authorization")?.replace(/^Bearer\s+/i, "");
+  try {
+    const authUser = await getSupabaseUser(token);
+    if (!authUser) return res.status(401).json({ error: "Oturum açmanız gerekiyor" });
+    const user = await ensureProfile(authUser);
+    if (user.status !== "active") return res.status(403).json({ error: "Hesabınız kullanıma kapalı" });
+    req.user = user;
+    const feature = `${req.method} ${req.originalUrl.split("?")[0]}`;
+    return runWithLlmContext({ userId: user.id, feature }, next);
+  } catch (error) {
+    return next(error);
   }
-  if (req.get("x-api-key") !== config.apiKey) {
-    return res.status(401).json({ error: "Unauthorized" });
-  }
+}
+
+export function requireAdmin(req, res, next) {
+  if (req.user?.role !== "admin") return res.status(403).json({ error: "Yönetici yetkisi gerekiyor" });
   next();
 }
