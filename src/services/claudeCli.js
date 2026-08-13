@@ -147,11 +147,17 @@ export function runClaudeCli(input, { systemPromptFile, allowRead = false }) {
       }
 
       if (exitCode !== 0) {
-        reject(
-          new Error(
-            `Claude Code CLI exited with code ${exitCode}: ${stderr || stdout || "no output"}`,
-          ),
-        );
+        const raw = stderr || stdout || "no output";
+        let message = `Claude Code CLI exited with code ${exitCode}: ${raw}`;
+        try {
+          const parsed = JSON.parse(outTrimmed || raw);
+          if (parsed.api_error_status === 429) {
+            message = "Yapay zeka servisi şu an meşgul. Lütfen birkaç dakika sonra tekrar deneyin.";
+          } else if (parsed.result) {
+            message = parsed.result;
+          }
+        } catch {}
+        reject(new Error(message));
         return;
       }
 
