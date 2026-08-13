@@ -1,142 +1,292 @@
 <!doctype html>
-<html lang="tr">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>CNC Simülatör · Topkapı Okulları</title>
-    <link rel="stylesheet" href="style.css" />
-    <script type="importmap">
-      {
-        "imports": {
-          "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-          "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
-        }
-      }
-    </script>
-    <link rel="stylesheet" href="cnc-sim.css" />
-  </head>
-  <body>
-    <header class="site-header" style="padding:1.5rem 1.5rem 0.75rem">
-      <div class="account-strip">
-        <a href="cam.html" class="cam-back-link">← CAM Asistanı</a>
-        <a href="index.html">Ana Sayfa</a>
-        <button id="logout-btn" class="link-button" type="button">Çıkış</button>
-      </div>
-    </header>
+<html lang="tr" class="bg-zinc-900">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>CNC Simülatör · Topkapı Okulları</title>
+<link rel="stylesheet" href="style.css" />
+<script src="https://cdn.tailwindcss.com"></script>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+}}
+</script>
+<style>
+  @keyframes spin-slow { to { transform: rotate(360deg); } }
+  .animate-spin-slow { animation: spin-slow 2s linear infinite; display:inline-block; }
+  .mdi-key{display:flex;align-items:center;justify-content:center;border-radius:3px;border:1px solid rgba(9,9,11,.6);
+    background-image:linear-gradient(to bottom,#e4e4e7,#a1a1aa);color:#27272a;font-weight:700;
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.6),0 1px 2px rgba(0,0,0,.5);transition:transform .05s;cursor:pointer;}
+  .mdi-key:active{transform:translateY(1px);background-image:linear-gradient(to bottom,#d4d4d8,#71717a);}
+  input[type="range"]{accent-color:#06b6d4;}
+  .tb-btn{display:flex;align-items:center;justify-content:center;border:1px solid #2b6f9c;border-radius:6px;
+    background:linear-gradient(to bottom,#1f6fa0,#124b70);color:#e6f4ff;box-shadow:inset 0 1px 0 rgba(255,255,255,.25);cursor:pointer;}
+  .tb-btn:hover{filter:brightness(1.15);} .tb-btn:active{transform:translateY(1px);}
+  .tb-icn{display:flex;align-items:center;justify-content:center;border:1px solid #3f5a2f;border-radius:6px;
+    background:linear-gradient(to bottom,#4a7a2c,#2f5017);color:#eaffd6;cursor:pointer;}
+  .tb-icn:hover{filter:brightness(1.15);}
+</style>
+</head>
+<body class="text-zinc-100">
+<main class="flex min-h-screen flex-col bg-zinc-900 p-2 lg:h-screen lg:overflow-hidden">
 
-    <main class="cnc-main">
-      <div class="cnc-simulator">
-        <!-- Machine tabs -->
-        <div class="cnc-machine-tabs">
-          <button id="tab-freze" class="cnc-machine-tab active" type="button">
-            <span class="cnc-tab-icon">⚙</span> Freze (CNC Mill)
-          </button>
-          <button id="tab-torna" class="cnc-machine-tab" type="button">
-            <span class="cnc-tab-icon">🔩</span> Torna (CNC Lathe)
-          </button>
+  <!-- ÜST BAR -->
+  <header class="mb-2 flex items-center justify-between rounded-md bg-zinc-800 px-3 py-2">
+    <div class="flex items-center gap-3">
+      <a href="cam.html" class="text-[11px] text-cyan-400 hover:text-cyan-300">← CAM</a>
+      <a href="index.html" class="text-[11px] text-zinc-400 hover:text-zinc-300">Ana Sayfa</a>
+      <h1 class="text-sm font-bold tracking-wide">CNC Simülatör</h1>
+    </div>
+    <div class="flex overflow-hidden rounded-md border border-zinc-600">
+      <button id="tab-mill" class="px-4 py-1.5 text-[12px] font-bold">Freze (3B)</button>
+      <button id="tab-lathe" class="px-4 py-1.5 text-[12px] font-bold">Torna (2B)</button>
+    </div>
+    <div class="flex items-center gap-3">
+      <p class="hidden text-[11px] text-zinc-400 lg:block">AUTO + CYCLE START otomatik · MANUAL jog/MDI ile elle</p>
+      <button id="logout-btn" class="text-[11px] text-zinc-400 hover:text-zinc-300" type="button">Çıkış</button>
+    </div>
+  </header>
+
+  <div class="min-h-0 flex-1">
+
+    <!-- ============================  FREZE (3B)  ========================== -->
+    <div id="view-mill" class="flex h-full w-full flex-col gap-2 lg:flex-row">
+      <section class="relative flex-1 overflow-hidden rounded-md border border-zinc-700 bg-black">
+        <div id="mill-canvas-wrap" class="absolute inset-0"></div>
+        <div class="pointer-events-none absolute left-2 top-2 z-10 rounded bg-black/50 px-2 py-1 font-mono text-[10px] text-emerald-300 leading-tight">
+          <div id="m-stat-pos">X 0.000 Y 0.000 Z 0.000</div>
+          <div id="m-stat-tool">tool_selected = 1</div>
+          <div id="m-stat-cut">cutting_status = 0</div>
+          <div id="m-stat-fps" class="text-cyan-300">FPS: 0</div>
         </div>
+        <div class="absolute right-2 top-2 z-10 flex gap-2">
+          <button id="m-play" title="Cycle Start" class="tb-btn h-10 w-10 text-lg">▶</button>
+          <button id="m-pause" title="Feed Hold" class="tb-btn h-10 w-10 text-lg">⏸</button>
+          <button id="m-stop" title="Stop" class="tb-btn h-10 w-10 text-lg">⏹</button>
+          <button id="m-new" title="Yeni Parça" class="tb-btn h-10 w-10 text-base">⤓</button>
+          <button id="m-mute" title="Ses" class="tb-btn h-10 w-10 text-base">🔊</button>
+        </div>
+        <div class="absolute left-2 top-24 z-10 flex flex-col gap-2">
+          <button data-view="iso" title="İzometrik" class="tb-icn h-9 w-9 text-sm">⬛</button>
+          <button data-view="top" title="Üstten" class="tb-icn h-9 w-9 text-sm">▦</button>
+          <button data-view="front" title="Önden" class="tb-icn h-9 w-9 text-sm">▭</button>
+          <button data-view="right" title="Yandan" class="tb-icn h-9 w-9 text-sm">◨</button>
+          <button id="m-wire" title="Tel kafes" class="tb-icn h-9 w-9 text-sm">◇</button>
+        </div>
+      </section>
 
-        <div class="cnc-body">
-          <!-- LEFT: Viewport -->
-          <div class="cnc-viewport-col">
-            <div class="cnc-viewport-header">
-              <span id="cnc-machine-label" class="cnc-machine-label">FANUC 0i-MF — Freze</span>
-              <div class="cnc-camera-btns">
-                <button id="cam-iso" type="button" class="cnc-cam-btn active">İzo</button>
-                <button id="cam-top" type="button" class="cnc-cam-btn">Üst</button>
-                <button id="cam-front" type="button" class="cnc-cam-btn">Ön</button>
-                <button id="cam-right" type="button" class="cnc-cam-btn">Sağ</button>
+      <!-- FREZE PANELİ -->
+      <aside class="w-full shrink-0 overflow-y-auto lg:w-[380px]" style="max-height:calc(100vh - 70px)">
+        <div class="flex h-full flex-col gap-2 rounded-md bg-zinc-800 p-2 text-zinc-200">
+          <!-- LCD -->
+          <div class="rounded-sm border-4 border-zinc-500 bg-zinc-900 p-1.5">
+            <div class="rounded-sm bg-[#0f261b] p-2 font-mono text-[11px] text-[#5be08a]">
+              <div class="flex items-center justify-between bg-[#0d4a6b] px-1 text-[#cfe8ff]">
+                <span>ACTUAL POSITION</span><span>O0002</span><span>N0010</span>
               </div>
-            </div>
-            <!-- 3D milling viewport -->
-            <div id="viewport-freze" class="cnc-viewport"></div>
-            <!-- 2D lathe viewport -->
-            <canvas id="viewport-torna" class="cnc-viewport" hidden></canvas>
-
-            <div class="cnc-dro">
-              <div class="cnc-dro-axis"><span class="cnc-dro-label">X</span><span id="dro-x" class="cnc-dro-val">0.000</span></div>
-              <div class="cnc-dro-axis"><span class="cnc-dro-label">Y</span><span id="dro-y" class="cnc-dro-val">0.000</span></div>
-              <div class="cnc-dro-axis"><span class="cnc-dro-label">Z</span><span id="dro-z" class="cnc-dro-val">0.000</span></div>
-              <div class="cnc-dro-axis cnc-dro-feed"><span class="cnc-dro-label">F</span><span id="dro-f" class="cnc-dro-val">0</span></div>
-              <div class="cnc-dro-axis cnc-dro-speed"><span class="cnc-dro-label">S</span><span id="dro-s" class="cnc-dro-val">0</span></div>
-              <div class="cnc-dro-axis cnc-dro-tool"><span class="cnc-dro-label">T</span><span id="dro-t" class="cnc-dro-val">01</span></div>
+              <div class="my-2 space-y-1 px-1">
+                <div class="flex items-baseline justify-between"><span class="text-base text-[#7effb0]">X</span><span id="ml-x" class="text-xl tabular-nums text-[#eaffef]">0.000</span></div>
+                <div class="flex items-baseline justify-between"><span class="text-base text-[#7effb0]">Y</span><span id="ml-y" class="text-xl tabular-nums text-[#eaffef]">0.000</span></div>
+                <div class="flex items-baseline justify-between"><span class="text-base text-[#7effb0]">Z</span><span id="ml-z" class="text-xl tabular-nums text-[#eaffef]">0.000</span></div>
+              </div>
+              <div class="grid grid-cols-2 gap-x-3 gap-y-0.5 border-t border-[#1f5c42] px-1 pt-1 text-[10px] text-[#59c98e]">
+                <span id="ml-actf">ACT.F 0</span><span id="ml-rpm" class="text-right">S 0</span>
+                <span id="ml-tool">T01</span><span id="ml-ovr" class="text-right">OVR 100%</span>
+                <span id="ml-removed" class="col-span-2">REMOVED 0%</span>
+              </div>
+              <div class="mt-1 flex items-center justify-between border-t border-[#1f5c42] px-1 pt-1 text-[10px]">
+                <span id="ml-mode" class="text-[#59c98e]">MANUAL</span>
+                <span id="ml-alarm" class="text-[#59c98e]">READY</span>
+                <span id="ml-run" class="text-[#59c98e]">STOP</span>
+              </div>
             </div>
           </div>
 
-          <!-- RIGHT: Controller panel -->
-          <div class="cnc-controller-col">
-            <!-- LCD display -->
-            <div class="cnc-lcd">
-              <div class="cnc-lcd-header">
-                <span id="cnc-mode-label">AUTO</span>
-                <span id="cnc-program-name">O0001</span>
-              </div>
-              <div id="cnc-lcd-lines" class="cnc-lcd-lines"></div>
-              <div class="cnc-lcd-footer">
-                <span id="cnc-lcd-status">HAZIR</span>
-                <span id="cnc-lcd-line">N0</span>
-              </div>
-            </div>
+          <!-- MDI + spindle/feed -->
+          <div class="grid grid-cols-2 gap-2">
+            <fieldset class="rounded border border-zinc-600 bg-zinc-900/60 p-2">
+              <legend class="px-1 text-[9px] font-bold uppercase text-cyan-300">MDI Position</legend>
+              <label class="mb-1 flex items-center gap-1 text-[10px]"><span class="w-3 text-[#7effb0]">X</span><input id="me-x" inputmode="decimal" placeholder="0" class="w-full rounded bg-zinc-950 px-1.5 py-0.5 font-mono text-[11px] text-[#eaffef] outline-none ring-1 ring-zinc-700 focus:ring-cyan-400"/></label>
+              <label class="mb-1 flex items-center gap-1 text-[10px]"><span class="w-3 text-[#7effb0]">Y</span><input id="me-y" inputmode="decimal" placeholder="0" class="w-full rounded bg-zinc-950 px-1.5 py-0.5 font-mono text-[11px] text-[#eaffef] outline-none ring-1 ring-zinc-700 focus:ring-cyan-400"/></label>
+              <label class="mb-2 flex items-center gap-1 text-[10px]"><span class="w-3 text-[#7effb0]">Z</span><input id="me-z" inputmode="decimal" placeholder="0" class="w-full rounded bg-zinc-950 px-1.5 py-0.5 font-mono text-[11px] text-[#eaffef] outline-none ring-1 ring-zinc-700 focus:ring-cyan-400"/></label>
+              <button id="me-go" class="w-full rounded bg-cyan-600 py-1 text-[10px] font-bold text-white hover:bg-cyan-500 disabled:opacity-40">INPUT → MOVE</button>
+            </fieldset>
+            <fieldset class="rounded border border-zinc-600 bg-zinc-900/60 p-2">
+              <legend class="px-1 text-[9px] font-bold uppercase text-cyan-300">Spindle / Feed</legend>
+              <div class="mb-1 flex justify-between text-[10px]"><span>Spindle</span><span id="mlbl-rpm" class="font-mono text-[#7effb0]">6000 rpm</span></div>
+              <input id="mrng-rpm" type="range" min="0" max="12000" step="100" value="6000" class="mb-2 w-full"/>
+              <div class="mb-1 flex justify-between text-[10px]"><span>Feed</span><span id="mlbl-feed" class="font-mono text-[#7effb0]">400 mm/m</span></div>
+              <input id="mrng-feed" type="range" min="1" max="2000" step="1" value="400" class="mb-2 w-full"/>
+              <div class="mb-1 flex justify-between text-[10px]"><span>Override</span><span id="mlbl-ovr" class="font-mono text-[#7effb0]">100%</span></div>
+              <input id="mrng-ovr" type="range" min="0" max="1.2" step="0.05" value="1" class="w-full"/>
+            </fieldset>
+          </div>
 
-            <!-- Mode selector -->
-            <div class="cnc-mode-row">
-              <button id="mode-auto" class="cnc-mode-btn active" type="button">AUTO</button>
-              <button id="mode-mdi" class="cnc-mode-btn" type="button">MDI</button>
-              <button id="mode-manual" class="cnc-mode-btn" type="button">MANUAL</button>
-            </div>
-
-            <!-- Cycle controls -->
-            <div class="cnc-cycle-row">
-              <button id="btn-cycle-start" class="cnc-cycle-btn cnc-green" type="button">▶ Cycle Start</button>
-              <button id="btn-feed-hold" class="cnc-cycle-btn cnc-yellow" type="button">⏸ Feed Hold</button>
-              <button id="btn-reset" class="cnc-cycle-btn cnc-red" type="button">⏹ Reset</button>
-            </div>
-
-            <!-- Speed sliders -->
-            <div class="cnc-slider-group">
-              <div class="cnc-slider-row">
-                <label>Hız:</label>
-                <input id="speed-slider" type="range" min="1" max="200" value="100" />
-                <span id="speed-pct">100%</span>
+          <!-- mode + jog -->
+          <div class="grid grid-cols-2 gap-2">
+            <div class="rounded border border-zinc-600 bg-zinc-900/60 p-2">
+              <div class="mb-1 text-[9px] font-bold uppercase text-cyan-300">Mode</div>
+              <div class="grid grid-cols-2 gap-1">
+                <button id="mmode-manual" class="rounded py-2 text-[10px] font-bold">JOG / MDI</button>
+                <button id="mmode-auto" class="rounded py-2 text-[10px] font-bold">AUTO</button>
               </div>
-              <div class="cnc-slider-row">
-                <label>İlerleme:</label>
-                <input id="feed-override" type="range" min="10" max="200" value="100" />
-                <span id="feed-pct">100%</span>
+              <div class="mt-2 flex items-center justify-between">
+                <span class="text-[9px] uppercase text-zinc-400">Tool</span>
+                <div class="flex items-center gap-1">
+                  <button id="mtool-minus" class="mdi-key h-6 w-6 text-[10px]">−</button>
+                  <span id="mlbl-tool" class="w-8 text-center font-mono text-[12px] text-[#7effb0]">T01</span>
+                  <button id="mtool-plus" class="mdi-key h-6 w-6 text-[10px]">+</button>
+                </div>
               </div>
             </div>
+            <div class="rounded border border-zinc-600 bg-zinc-900/60 p-2">
+              <div class="mb-1 text-[9px] font-bold uppercase text-cyan-300">Jog Axis</div>
+              <div class="grid grid-cols-3 gap-1">
+                <span></span>
+                <button class="mjog rounded bg-zinc-700 py-1.5 text-[10px] font-bold hover:bg-zinc-600 active:bg-emerald-600" data-a="z" data-d="-1">+Y</button>
+                <button class="mjog rounded bg-zinc-700 py-1.5 text-[10px] font-bold hover:bg-zinc-600 active:bg-emerald-600" data-a="y" data-d="1">+Z</button>
+                <button class="mjog rounded bg-zinc-700 py-1.5 text-[10px] font-bold hover:bg-zinc-600 active:bg-emerald-600" data-a="x" data-d="-1">−X</button>
+                <span class="flex items-center justify-center text-zinc-500">✛</span>
+                <button class="mjog rounded bg-zinc-700 py-1.5 text-[10px] font-bold hover:bg-zinc-600 active:bg-emerald-600" data-a="x" data-d="1">+X</button>
+                <span></span>
+                <button class="mjog rounded bg-zinc-700 py-1.5 text-[10px] font-bold hover:bg-zinc-600 active:bg-emerald-600" data-a="z" data-d="1">−Y</button>
+                <button class="mjog rounded bg-zinc-700 py-1.5 text-[10px] font-bold hover:bg-zinc-600 active:bg-emerald-600" data-a="y" data-d="-1">−Z</button>
+              </div>
+            </div>
+          </div>
 
-            <!-- E-Stop -->
-            <button id="btn-estop" class="cnc-estop" type="button">
-              <span class="cnc-estop-icon">⚠</span> E-STOP
+          <!-- op buttons -->
+          <div class="grid grid-cols-3 items-center gap-2 rounded border border-zinc-600 bg-zinc-900/60 p-2">
+            <button id="mbtn-spindle" class="flex flex-col items-center gap-1 rounded bg-zinc-700 py-2 text-[10px] font-bold hover:bg-zinc-600">
+              <span id="mspindle-icon" class="text-base">✳</span><span id="mspindle-label">SPINDLE OFF</span>
             </button>
+            <button id="mbtn-cycle" class="flex flex-col items-center gap-1 rounded bg-green-600 py-2 text-[10px] font-bold text-white hover:bg-green-500 disabled:opacity-40">
+              <span class="h-4 w-4 rounded-full bg-green-300 shadow-[0_0_6px_rgba(120,255,160,.9)]"></span>CYCLE START
+            </button>
+            <button id="mbtn-hold" class="flex flex-col items-center gap-1 rounded bg-amber-500 py-2 text-[10px] font-bold text-zinc-900 hover:bg-amber-400">
+              <span class="h-4 w-4 rounded-full bg-amber-200"></span>FEED HOLD
+            </button>
+          </div>
 
-            <!-- G-code input -->
-            <div class="cnc-gcode-input-area">
-              <label class="cnc-gcode-label">G-Code Programı</label>
-              <textarea id="gcode-input" class="cnc-gcode-textarea" rows="8" placeholder="G90 G21&#10;G00 X0 Y0 Z5&#10;G01 Z-1 F200&#10;G01 X50 F300&#10;G02 X50 Y50 R25&#10;..."></textarea>
-              <div class="cnc-gcode-actions">
-                <button id="btn-load-gcode" type="button">Yükle</button>
-                <button id="btn-demo-freze" type="button" class="secondary">Demo: Freze</button>
-                <button id="btn-demo-torna" type="button" class="secondary">Demo: Torna</button>
-              </div>
-            </div>
+          <!-- MDI keypad -->
+          <div class="rounded border border-zinc-600 bg-zinc-700/40 p-2">
+            <div id="mmdi" class="grid grid-cols-6 gap-1"></div>
+          </div>
 
-            <!-- G-code listing (auto mode) -->
-            <div id="gcode-listing" class="cnc-gcode-listing" hidden>
-              <div class="cnc-gcode-listing-header">Program Listesi</div>
-              <div id="gcode-listing-lines" class="cnc-gcode-listing-lines"></div>
+          <!-- emergency -->
+          <div class="mt-auto flex items-center gap-3 rounded border border-zinc-600 bg-zinc-900/60 p-2">
+            <button id="mbtn-emg" aria-label="Emergency stop" class="flex h-16 w-16 shrink-0 items-center justify-center rounded-full border-4 border-yellow-400 bg-red-600 shadow-[0_4px_10px_rgba(0,0,0,.6)] active:translate-y-0.5">
+              <span class="h-9 w-9 rounded-full bg-red-500 shadow-inner"></span>
+            </button>
+            <div class="flex flex-1 flex-col gap-1">
+              <span class="text-[9px] font-bold uppercase text-red-400">Emergency Stop</span>
+              <button id="mbtn-reset" class="rounded bg-yellow-300 py-1.5 text-[10px] font-bold text-zinc-900 hover:bg-yellow-200">RESET / CLEAR ALARM</button>
+              <button id="mbtn-newp" class="rounded bg-zinc-600 py-1.5 text-[10px] font-bold hover:bg-zinc-500">NEW WORKPIECE</button>
             </div>
           </div>
         </div>
-      </div>
-    </main>
+      </aside>
+    </div>
 
-    <footer class="site-footer" style="padding:0.75rem">
-      <p>Topkapı Okulları Yapay Zeka · CNC Simülatör</p>
-    </footer>
+    <!-- ============================  TORNA (2B)  ========================== -->
+    <div id="view-lathe" class="hidden h-full w-full flex-col gap-2 lg:flex-row">
+      <section class="relative flex-1 overflow-hidden rounded-md border border-zinc-700 bg-black">
+        <div class="pointer-events-none absolute left-2 top-2 z-10 rounded bg-black/40 px-2 py-1 font-mono text-[11px] text-cyan-300">FANUC 0i-T · Turning</div>
+        <canvas id="lathe-canvas" class="block h-full w-full"></canvas>
+        <div id="hud" class="pointer-events-none absolute bottom-2 left-2 z-10 rounded bg-black/50 px-2 py-1 font-mono text-[11px] text-emerald-300"></div>
+      </section>
+      <aside class="w-full shrink-0 overflow-y-auto lg:w-[380px]" style="max-height:calc(100vh - 70px)">
+        <div class="flex h-full flex-col gap-2 rounded-md bg-zinc-800 p-2 text-zinc-200">
+          <div class="rounded-sm border-4 border-zinc-500 bg-zinc-900 p-1.5">
+            <div class="rounded-sm bg-[#0f261b] p-2 font-mono text-[11px] text-[#5be08a]">
+              <div class="flex items-center justify-between bg-[#0d4a6b] px-1 text-[#cfe8ff]"><span>ACTUAL POSITION (ABS)</span><span>O0001</span><span>N0010</span></div>
+              <div class="my-2 space-y-1 px-1">
+                <div class="flex items-baseline justify-between"><span class="text-lg text-[#7effb0]">X</span><span id="lcd-x" class="text-2xl tabular-nums tracking-wider text-[#eaffef]">0.000</span></div>
+                <div class="flex items-baseline justify-between"><span class="text-lg text-[#7effb0]">Z</span><span id="lcd-z" class="text-2xl tabular-nums tracking-wider text-[#eaffef]">0.000</span></div>
+              </div>
+              <div class="grid grid-cols-2 gap-x-3 gap-y-0.5 border-t border-[#1f5c42] px-1 pt-1 text-[10px] text-[#59c98e]">
+                <span id="lcd-actf">ACT.F 0 MM/M</span><span id="lcd-rpm" class="text-right">S 0 RPM</span>
+                <span>PART COUNT 1</span><span id="lcd-tool" class="text-right">T0100</span>
+                <span id="lcd-ovr">OVR 100%</span><span id="lcd-removed" class="text-right">REMOVED 0%</span>
+              </div>
+              <div class="mt-1 flex items-center justify-between border-t border-[#1f5c42] px-1 pt-1 text-[10px]">
+                <span id="lcd-mode" class="text-[#59c98e]">MANUAL</span><span id="lcd-alarm" class="text-[#59c98e]">READY</span><span id="lcd-run" class="text-[#59c98e]">STOP</span>
+              </div>
+            </div>
+            <div class="mt-1 grid grid-cols-5 gap-1">
+              <div class="rounded-[2px] bg-zinc-300 text-center text-[9px] font-bold text-zinc-800">ABS</div>
+              <div class="rounded-[2px] bg-zinc-300 text-center text-[9px] font-bold text-zinc-800">REL</div>
+              <div class="rounded-[2px] bg-zinc-300 text-center text-[9px] font-bold text-zinc-800">ALL</div>
+              <div class="rounded-[2px] bg-zinc-300 text-center text-[9px] font-bold text-zinc-800">HNDL</div>
+              <div class="rounded-[2px] bg-zinc-300 text-center text-[9px] font-bold text-zinc-800">(OPRT)</div>
+            </div>
+          </div>
+          <div class="grid grid-cols-2 gap-2">
+            <fieldset class="rounded border border-zinc-600 bg-zinc-900/60 p-2">
+              <legend class="px-1 text-[9px] font-bold uppercase text-cyan-300">MDI Position</legend>
+              <label class="mb-1 flex items-center gap-1 text-[10px]"><span class="w-4 text-[#7effb0]">X</span><input id="edit-x" inputmode="decimal" placeholder="0.000" class="w-full rounded bg-zinc-950 px-1.5 py-1 font-mono text-[11px] text-[#eaffef] outline-none ring-1 ring-zinc-700 focus:ring-cyan-400"/></label>
+              <label class="mb-2 flex items-center gap-1 text-[10px]"><span class="w-4 text-[#7effb0]">Z</span><input id="edit-z" inputmode="decimal" placeholder="0.000" class="w-full rounded bg-zinc-950 px-1.5 py-1 font-mono text-[11px] text-[#eaffef] outline-none ring-1 ring-zinc-700 focus:ring-cyan-400"/></label>
+              <button id="btn-goto" class="w-full rounded bg-cyan-600 py-1 text-[10px] font-bold text-white hover:bg-cyan-500 disabled:opacity-40">INPUT → MOVE</button>
+            </fieldset>
+            <fieldset class="rounded border border-zinc-600 bg-zinc-900/60 p-2">
+              <legend class="px-1 text-[9px] font-bold uppercase text-cyan-300">Spindle / Feed</legend>
+              <div class="mb-1 flex justify-between text-[10px]"><span>Spindle</span><span id="lbl-rpm" class="font-mono text-[#7effb0]">1200 rpm</span></div>
+              <input id="rng-rpm" type="range" min="0" max="4000" step="50" value="1200" class="mb-2 w-full"/>
+              <div class="mb-1 flex justify-between text-[10px]"><span>Feed</span><span id="lbl-feed" class="font-mono text-[#7effb0]">200 mm/m</span></div>
+              <input id="rng-feed" type="range" min="1" max="1000" step="1" value="200" class="mb-2 w-full"/>
+              <div class="mb-1 flex justify-between text-[10px]"><span>Override</span><span id="lbl-ovr" class="font-mono text-[#7effb0]">100%</span></div>
+              <input id="rng-ovr" type="range" min="0" max="1.2" step="0.05" value="1" class="w-full"/>
+            </fieldset>
+          </div>
+          <div class="grid grid-cols-2 gap-2">
+            <div class="rounded border border-zinc-600 bg-zinc-900/60 p-2">
+              <div class="mb-1 text-[9px] font-bold uppercase text-cyan-300">Mode</div>
+              <div class="grid grid-cols-2 gap-1">
+                <button id="mode-manual" class="rounded py-2 text-[10px] font-bold">JOG / MDI</button>
+                <button id="mode-auto" class="rounded py-2 text-[10px] font-bold">AUTO</button>
+              </div>
+              <div class="mt-2 flex items-center justify-between"><span class="text-[9px] uppercase text-zinc-400">Tool</span>
+                <div class="flex items-center gap-1">
+                  <button id="tool-minus" class="mdi-key h-6 w-6 text-[10px]">−</button>
+                  <span id="lbl-tool" class="w-8 text-center font-mono text-[12px] text-[#7effb0]">T01</span>
+                  <button id="tool-plus" class="mdi-key h-6 w-6 text-[10px]">+</button>
+                </div>
+              </div>
+            </div>
+            <div class="rounded border border-zinc-600 bg-zinc-900/60 p-2">
+              <div class="mb-1 text-[9px] font-bold uppercase text-cyan-300">Jog Axis</div>
+              <div class="grid grid-cols-3 grid-rows-3 gap-1">
+                <span></span><button class="jog rounded bg-zinc-700 py-2 text-[10px] font-bold hover:bg-zinc-600 active:bg-emerald-600" data-dx="1" data-dz="0">+X</button><span></span>
+                <button class="jog rounded bg-zinc-700 py-2 text-[10px] font-bold hover:bg-zinc-600 active:bg-emerald-600" data-dx="0" data-dz="1">−Z</button>
+                <span class="flex items-center justify-center text-zinc-500">✛</span>
+                <button class="jog rounded bg-zinc-700 py-2 text-[10px] font-bold hover:bg-zinc-600 active:bg-emerald-600" data-dx="0" data-dz="-1">+Z</button>
+                <span></span><button class="jog rounded bg-zinc-700 py-2 text-[10px] font-bold hover:bg-zinc-600 active:bg-emerald-600" data-dx="-1" data-dz="0">−X</button><span></span>
+              </div>
+            </div>
+          </div>
+          <div class="grid grid-cols-3 items-center gap-2 rounded border border-zinc-600 bg-zinc-900/60 p-2">
+            <button id="btn-spindle" class="flex flex-col items-center gap-1 rounded bg-zinc-700 py-2 text-[10px] font-bold hover:bg-zinc-600"><span id="spindle-icon" class="text-base">◎</span><span id="spindle-label">SPINDLE OFF</span></button>
+            <button id="btn-cycle" class="flex flex-col items-center gap-1 rounded bg-green-600 py-2 text-[10px] font-bold text-white hover:bg-green-500 disabled:opacity-40"><span class="h-4 w-4 rounded-full bg-green-300 shadow-[0_0_6px_rgba(120,255,160,.9)]"></span>CYCLE START</button>
+            <button id="btn-hold" class="flex flex-col items-center gap-1 rounded bg-amber-500 py-2 text-[10px] font-bold text-zinc-900 hover:bg-amber-400"><span class="h-4 w-4 rounded-full bg-amber-200"></span>FEED HOLD</button>
+          </div>
+          <div class="rounded border border-zinc-600 bg-zinc-700/40 p-2"><div id="mdi-rows" class="grid grid-cols-6 gap-1"></div><div id="mdi-fn" class="mt-1 grid grid-cols-6 gap-1"></div></div>
+          <div class="mt-auto flex items-center gap-3 rounded border border-zinc-600 bg-zinc-900/60 p-2">
+            <button id="btn-emg" aria-label="Emergency stop" class="flex h-16 w-16 shrink-0 items-center justify-center rounded-full border-4 border-yellow-400 bg-red-600 shadow-[0_4px_10px_rgba(0,0,0,.6)] active:translate-y-0.5"><span class="h-9 w-9 rounded-full bg-red-500 shadow-inner"></span></button>
+            <div class="flex flex-1 flex-col gap-1">
+              <span class="text-[9px] font-bold uppercase text-red-400">Emergency Stop</span>
+              <button id="btn-reset" class="rounded bg-yellow-300 py-1.5 text-[10px] font-bold text-zinc-900 hover:bg-yellow-200">RESET / CLEAR ALARM</button>
+              <button id="btn-new" class="rounded bg-zinc-600 py-1.5 text-[10px] font-bold hover:bg-zinc-500">NEW WORKPIECE</button>
+            </div>
+          </div>
+        </div>
+      </aside>
+    </div>
 
-    <script type="module" src="cnc-sim.js"></script>
-    <script type="module" src="session-nav.js"></script>
-  </body>
+  </div>
+</main>
+
+<script type="module" src="cnc-sim.js"></script>
+<script type="module" src="session-nav.js"></script>
+</body>
 </html>

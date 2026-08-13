@@ -1,980 +1,841 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 
-// ─── G-CODE PARSER ENGINE ──────────────────────────────────────────────────────
+const $ = id => document.getElementById(id);
 
-function parseGCode(text) {
-  const lines = text.split("\n").map((l) => l.replace(/;.*$/, "").replace(/\(.*?\)/g, "").trim()).filter(Boolean);
-  const commands = [];
-  for (let i = 0; i < lines.length; i++) {
-    const raw = lines[i].toUpperCase();
-    if (!raw || raw.startsWith("%") || raw.startsWith("O")) continue;
-    const words = [];
-    const re = /([A-Z])([+-]?\d*\.?\d+)/g;
-    let m;
-    while ((m = re.exec(raw)) !== null) words.push({ letter: m[1], value: parseFloat(m[2]) });
-    if (words.length) commands.push({ line: i, raw: lines[i], words });
+// ─── CONSTANTS ────────────────────────────────────────────────────────────────
+
+// Mill workpiece
+const MW = 200, MD = 140, MTOP = 60;
+const COLS = 150, ROWS = 105;
+const CUTTER_R = 13, MARGIN = 6;
+
+// Lathe workpiece
+const LN = 260, STOCK_LEN = 200, STOCK_R = 60, TOOL_HALF_W = 3.2;
+
+// Chip pool
+const CHIP_POOL = 160;
+
+// ─── LATHE ENGINE ─────────────────────────────────────────────────────────────
+
+class LatheEngine {
+  constructor() {
+    this.radii = new Float32Array(LN).fill(STOCK_R);
+    this.toolX = 0; this.toolZ = STOCK_R + 15;
+    this.spindleOn = false; this.spindleRpm = 1200;
+    this.feed = 200; this.override = 1;
+    this.mode = "MANUAL"; this.alarm = ""; this.emergency = false;
+    this.running = false; this.holding = false;
+    this.chuckAngle = 0; this.removedPct = 0;
+    this.chips = []; this.toolNo = 1;
+    this.autoCycle = null; this.autoStep = 0;
+    this.jogTarget = null;
   }
-  return { lines, commands };
-}
 
-function buildMoves(commands) {
-  let pos = { x: 0, y: 0, z: 0 };
-  let mode = 0; // G0=0 G1=1 G2=2 G3=3
-  let absolute = true;
-  let feed = 100;
-  let speed = 1000;
-  let tool = 1;
-  let metric = true;
-  const moves = [];
+  reset() {
+    this.radii.fill(STOCK_R);
+    this.toolX = 0; this.toolZ = STOCK_R + 15;
+    this.removedPct = 0; this.chips = [];
+    this.autoCycle = null; this.autoStep = 0;
+    this.running = false; this.holding = false;
+    this.alarm = "";
+  }
 
-  for (const cmd of commands) {
-    const wm = {};
-    const gCodes = [];
-    for (const w of cmd.words) {
-      if (w.letter === "G") gCodes.push(w.value);
-      else wm[w.letter] = w.value;
+  cutAt(x, z) {
+    const r = Math.abs(z);
+    const seg = STOCK_LEN / LN;
+    const i0 = Math.max(0, Math.floor((x - TOOL_HALF_W) / seg));
+    const i1 = Math.min(LN - 1, Math.floor((x + TOOL_HALF_W) / seg));
+    let cut = false;
+    for (let i = i0; i <= i1; i++) {
+      if (r < this.radii[i]) { this.radii[i] = Math.max(1, r); cut = true; }
     }
-
-    let skipMove = false;
-    for (const g of gCodes) {
-      if (g === 0) mode = 0;
-      else if (g === 1) mode = 1;
-      else if (g === 2) mode = 2;
-      else if (g === 3) mode = 3;
-      else if (g === 90) { absolute = true; skipMove = true; }
-      else if (g === 91) { absolute = false; skipMove = true; }
-      else if (g === 20) { metric = false; skipMove = true; }
-      else if (g === 21) { metric = true; skipMove = true; }
-      else if (g === 28) {
-        moves.push({ type: "rapid", from: { ...pos }, to: { x: 0, y: 0, z: 0 }, feed: 9999, speed, tool, line: cmd.line });
-        pos = { x: 0, y: 0, z: 0 };
-        skipMove = true;
+    if (cut) {
+      let total = 0;
+      for (let i = 0; i < LN; i++) total += (STOCK_R - this.radii[i]);
+      this.removedPct = (total / (LN * STOCK_R)) * 100;
+      if (Math.random() < 0.35) {
+        this.chips.push({
+          x: x + (Math.random() - 0.5) * 6,
+          y: z + (Math.random() > 0.5 ? 1 : -1) * (r + 3),
+          vx: (Math.random() - 0.5) * 50,
+          vy: (Math.random() > 0.5 ? 1 : -1) * (15 + Math.random() * 25),
+          life: 1.2 + Math.random()
+        });
       }
     }
-    if ("F" in wm) feed = wm.F;
-    if ("S" in wm) speed = wm.S;
-    if ("T" in wm) tool = wm.T;
+  }
 
-    if ("M" in wm) {
-      const mc = wm.M;
-      if (mc === 3 || mc === 4 || mc === 5) {
-        moves.push({ type: "mcode", code: mc, speed, line: cmd.line });
-      }
-      if (mc === 30 || mc === 2) {
-        moves.push({ type: "end", line: cmd.line });
-      }
-      if (!("X" in wm || "Y" in wm || "Z" in wm)) continue;
+  startCycle() {
+    if (this.emergency || this.mode !== "AUTO") return;
+    this.spindleOn = true;
+    this.running = true; this.holding = false;
+    const passes = [];
+    for (let r = STOCK_R - 6; r >= 30; r -= 6) {
+      passes.push({ type: "rapid", x: 0, z: r + 2 });
+      passes.push({ type: "feed", x: STOCK_LEN, z: r });
+      passes.push({ type: "rapid", x: STOCK_LEN, z: STOCK_R + 10 });
+      passes.push({ type: "rapid", x: 0, z: STOCK_R + 10 });
     }
+    passes.push({ type: "rapid", x: 0, z: STOCK_R + 15 });
+    this.autoCycle = passes;
+    this.autoStep = 0;
+  }
 
-    const hasXYZ = "X" in wm || "Y" in wm || "Z" in wm;
-    if (!hasXYZ) continue;
+  update(dt) {
+    if (this.emergency) return;
+    if (this.spindleOn) this.chuckAngle += dt * (this.spindleRpm / 60) * Math.PI * 2;
 
-    const from = { ...pos };
-    const scale = metric ? 1 : 25.4;
-    if (absolute) {
-      if ("X" in wm) pos.x = wm.X * scale;
-      if ("Y" in wm) pos.y = wm.Y * scale;
-      if ("Z" in wm) pos.z = wm.Z * scale;
-    } else {
-      if ("X" in wm) pos.x += wm.X * scale;
-      if ("Y" in wm) pos.y += wm.Y * scale;
-      if ("Z" in wm) pos.z += wm.Z * scale;
-    }
-    const to = { ...pos };
-
-    if (mode === 0) {
-      moves.push({ type: "rapid", from, to, feed: 9999, speed, tool, line: cmd.line });
-    } else if (mode === 1) {
-      moves.push({ type: "linear", from, to, feed, speed, tool, line: cmd.line });
-    } else if (mode === 2 || mode === 3) {
-      const cx = "I" in wm ? from.x + wm.I * scale : ("R" in wm ? null : from.x);
-      const cy = "J" in wm ? from.y + wm.J * scale : ("R" in wm ? null : from.y);
-      let arcCenter = null;
-      let radius = null;
-      if (cx !== null && cy !== null) {
-        arcCenter = { x: cx, y: cy };
-        radius = Math.sqrt((from.x - cx) ** 2 + (from.y - cy) ** 2);
-      } else if ("R" in wm) {
-        radius = Math.abs(wm.R * scale);
-        const dx = to.x - from.x, dy = to.y - from.y;
-        const d = Math.sqrt(dx * dx + dy * dy);
-        if (d > 0 && radius >= d / 2) {
-          const h = Math.sqrt(Math.max(0, radius * radius - (d / 2) ** 2));
-          const mx = (from.x + to.x) / 2, my = (from.y + to.y) / 2;
-          const sign = (mode === 2) !== (wm.R < 0) ? 1 : -1;
-          arcCenter = { x: mx + sign * h * (-dy / d), y: my + sign * h * (dx / d) };
-        }
-      }
-      if (arcCenter && radius) {
-        const arcPts = interpolateArc(from, to, arcCenter, radius, mode === 2, "Z" in wm ? to.z - from.z : 0);
-        for (let i = 1; i < arcPts.length; i++) {
-          moves.push({ type: "linear", from: arcPts[i - 1], to: arcPts[i], feed, speed, tool, line: cmd.line });
-        }
+    // Jog interpolation
+    if (this.jogTarget) {
+      const dx = this.jogTarget.x - this.toolX;
+      const dz = this.jogTarget.z - this.toolZ;
+      const d = Math.sqrt(dx * dx + dz * dz);
+      const spd = 300 * dt;
+      if (d < spd) {
+        this.toolX = this.jogTarget.x;
+        this.toolZ = this.jogTarget.z;
+        this.jogTarget = null;
       } else {
-        moves.push({ type: "linear", from, to, feed, speed, tool, line: cmd.line });
+        this.toolX += (dx / d) * spd;
+        this.toolZ += (dz / d) * spd;
       }
+      if (this.spindleOn) this.cutAt(this.toolX, this.toolZ);
+    }
+
+    if (!this.running || this.holding || !this.autoCycle) return;
+    const step = this.autoCycle[this.autoStep];
+    if (!step) { this.running = false; return; }
+
+    const speed = step.type === "rapid" ? 600 : this.feed * this.override;
+    const dx = step.x - this.toolX, dz = step.z - this.toolZ;
+    const dist = Math.sqrt(dx * dx + dz * dz);
+    const move = (speed / 60) * dt;
+
+    if (dist < move) {
+      this.toolX = step.x; this.toolZ = step.z;
+      if (step.type === "feed" && this.spindleOn) this.cutAt(this.toolX, this.toolZ);
+      this.autoStep++;
+      if (this.autoStep >= this.autoCycle.length) { this.running = false; }
+    } else {
+      this.toolX += (dx / dist) * move;
+      this.toolZ += (dz / dist) * move;
+      if (step.type === "feed" && this.spindleOn) this.cutAt(this.toolX, this.toolZ);
     }
   }
-  return moves;
+
+  draw(ctx, w, h, dt) {
+    ctx.fillStyle = "#0a1018";
+    ctx.fillRect(0, 0, w, h);
+
+    const cx = w * 0.38, cy = h / 2;
+    const sx = (w * 0.5) / STOCK_LEN;
+    const sy = (h * 0.35) / STOCK_R;
+    const s = Math.min(sx, sy);
+
+    // Grid
+    ctx.strokeStyle = "#0f1a2a"; ctx.lineWidth = 0.5;
+    for (let i = 0; i <= STOCK_LEN; i += 20) {
+      const px = cx + i * s;
+      ctx.beginPath(); ctx.moveTo(px, cy - STOCK_R * s * 1.4);
+      ctx.lineTo(px, cy + STOCK_R * s * 1.4); ctx.stroke();
+    }
+    for (let r = 0; r <= STOCK_R; r += 10) {
+      ctx.beginPath(); ctx.moveTo(cx, cy - r * s); ctx.lineTo(cx + STOCK_LEN * s, cy - r * s); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(cx, cy + r * s); ctx.lineTo(cx + STOCK_LEN * s, cy + r * s); ctx.stroke();
+    }
+
+    // Chuck
+    const chR = STOCK_R * s * 1.15;
+    const chX = cx - 12;
+    ctx.save(); ctx.translate(chX, cy);
+    ctx.rotate(this.chuckAngle);
+    const cg = ctx.createRadialGradient(0, 0, chR * 0.3, 0, 0, chR);
+    cg.addColorStop(0, "#3e3e3e"); cg.addColorStop(0.7, "#2a2a2a"); cg.addColorStop(1, "#1a1a1a");
+    ctx.fillStyle = cg;
+    ctx.beginPath(); ctx.arc(0, 0, chR, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = "#555"; ctx.lineWidth = 1.5;
+    for (let j = 0; j < 3; j++) {
+      const a = (j / 3) * Math.PI * 2;
+      ctx.beginPath();
+      ctx.moveTo(Math.cos(a) * chR * 0.4, Math.sin(a) * chR * 0.4);
+      ctx.lineTo(Math.cos(a) * chR * 0.92, Math.sin(a) * chR * 0.92);
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    // Workpiece
+    const seg = STOCK_LEN / LN;
+    const grad = ctx.createLinearGradient(cx, cy - STOCK_R * s, cx, cy + STOCK_R * s);
+    grad.addColorStop(0, "#8899aa"); grad.addColorStop(0.3, "#aabbcc");
+    grad.addColorStop(0.5, "#ccd8e8"); grad.addColorStop(0.7, "#aabbcc");
+    grad.addColorStop(1, "#667788");
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy - this.radii[0] * s);
+    for (let i = 0; i < LN; i++) ctx.lineTo(cx + (i + 0.5) * seg * s, cy - this.radii[i] * s);
+    ctx.lineTo(cx + STOCK_LEN * s, cy);
+    for (let i = LN - 1; i >= 0; i--) ctx.lineTo(cx + (i + 0.5) * seg * s, cy + this.radii[i] * s);
+    ctx.closePath(); ctx.fill();
+
+    // Hatching
+    ctx.save(); ctx.clip();
+    ctx.strokeStyle = "rgba(100,140,180,0.08)"; ctx.lineWidth = 0.5;
+    for (let d = -400; d < 800; d += 6) {
+      ctx.beginPath(); ctx.moveTo(cx + d, cy - 200); ctx.lineTo(cx + d + 200, cy + 200); ctx.stroke();
+    }
+    ctx.restore();
+
+    // Outline
+    ctx.strokeStyle = "#4a6a8a"; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(cx, cy - this.radii[0] * s);
+    for (let i = 0; i < LN; i++) ctx.lineTo(cx + (i + 0.5) * seg * s, cy - this.radii[i] * s);
+    ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(cx, cy + this.radii[0] * s);
+    for (let i = 0; i < LN; i++) ctx.lineTo(cx + (i + 0.5) * seg * s, cy + this.radii[i] * s);
+    ctx.stroke();
+
+    // Center line
+    ctx.strokeStyle = "#1a3058"; ctx.setLineDash([6, 4]);
+    ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + STOCK_LEN * s, cy); ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Tool
+    const tx = cx + this.toolX * s;
+    const tz = cy - this.toolZ * s;
+    ctx.fillStyle = "#dd4444";
+    ctx.beginPath();
+    ctx.moveTo(tx, tz); ctx.lineTo(tx + 5 * s, tz - 4 * s); ctx.lineTo(tx + 5 * s, tz + 4 * s);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = "#aa3333";
+    ctx.fillRect(tx + 5 * s, tz - 6 * s, 14 * s, 12 * s);
+
+    // Chips
+    ctx.fillStyle = "#bbaa66";
+    for (let i = this.chips.length - 1; i >= 0; i--) {
+      const c = this.chips[i];
+      c.x += c.vx * dt; c.y += c.vy * dt; c.vy += 50 * dt; c.life -= dt;
+      const px = cx + c.x * s, py = cy - c.y * s;
+      ctx.fillRect(px - 1, py - 1, 2, 2);
+      if (c.life <= 0) this.chips.splice(i, 1);
+    }
+
+    // Axis labels
+    ctx.fillStyle = "#5a8ab5"; ctx.font = "11px monospace";
+    ctx.fillText("X →", cx + STOCK_LEN * s + 8, cy + 4);
+    ctx.fillText("Z ↑", cx - 20, cy - STOCK_R * s * 1.15);
+  }
 }
 
-function interpolateArc(from, to, center, radius, cw, dz) {
-  let startAngle = Math.atan2(from.y - center.y, from.x - center.x);
-  let endAngle = Math.atan2(to.y - center.y, to.x - center.x);
-  if (cw) {
-    if (endAngle >= startAngle) endAngle -= 2 * Math.PI;
-  } else {
-    if (endAngle <= startAngle) endAngle += 2 * Math.PI;
-  }
-  const sweep = Math.abs(endAngle - startAngle);
-  const steps = Math.max(8, Math.ceil(sweep / (Math.PI / 36)));
-  const pts = [{ ...from }];
-  for (let i = 1; i <= steps; i++) {
-    const t = i / steps;
-    const a = startAngle + (endAngle - startAngle) * t;
-    pts.push({
-      x: center.x + radius * Math.cos(a),
-      y: center.y + radius * Math.sin(a),
-      z: from.z + dz * t,
-    });
-  }
-  return pts;
-}
-
-
-// ─── DOM REFERENCES ────────────────────────────────────────────────────────────
-
-const $ = (id) => document.getElementById(id);
-const tabFreze = $("tab-freze");
-const tabTorna = $("tab-torna");
-const viewFreze = $("viewport-freze");
-const viewTorna = $("viewport-torna");
-const machineLabel = $("cnc-machine-label");
-const droX = $("dro-x"), droY = $("dro-y"), droZ = $("dro-z");
-const droF = $("dro-f"), droS = $("dro-s"), droT = $("dro-t");
-const lcdLines = $("cnc-lcd-lines");
-const lcdStatus = $("cnc-lcd-status");
-const lcdLineNo = $("cnc-lcd-line");
-const modeLabel = $("cnc-mode-label");
-const progName = $("cnc-program-name");
-const gcodeInput = $("gcode-input");
-const gcodeListing = $("gcode-listing");
-const gcodeListingLines = $("gcode-listing-lines");
-const speedSlider = $("speed-slider"), speedPct = $("speed-pct");
-const feedSlider = $("feed-override"), feedPct = $("feed-pct");
-const camBtns = { iso: $("cam-iso"), top: $("cam-top"), front: $("cam-front"), right: $("cam-right") };
-
-let machineType = "freze";
-let currentMode = "auto";
-let simState = "idle"; // idle, running, paused, estop, done
-let moves = [];
-let moveIndex = 0;
-let moveT = 0;
-let parsedLines = [];
-let lcdElements = [];
-let listingElements = [];
-let speedMult = 1;
-let feedMult = 1;
-
-// ─── THREE.JS SCENE (Milling) ─────────────────────────────────────────────────
+// ─── MILL 3D ENGINE ───────────────────────────────────────────────────────────
 
 let scene, camera, renderer, controls;
-let toolGroup, spindleGroup;
-let stockMesh, stockHeights;
-let stockGX = 0, stockGY = 0;
-let stkMinX = 0, stkMinY = 0, stkColW = 1, stkColD = 1;
-let stkBaseZ = 0, stkTopZ = 0;
-const stkTmp = new THREE.Object3D();
-let toolpathGroup = null;
-let chipParticles = [];
-let cutterRadius = 3;
+let wpMesh, wpGeo, wpPos;
+let toolGroup, spindleGrp;
+let chipPool = [], chipIdx = 0;
+let millRunning = false, millHolding = false;
+let millSpindleOn = false, millRpm = 6000, millFeed = 400, millOvr = 1;
+let millMode = "MANUAL", millAlarm = "", millEmg = false;
+let millToolNo = 1, millRemoved = 0;
+let millJogTarget = null;
+let millAuto = null, millAutoStep = 0;
+let wpPosArr; // position attribute array reference
 
-function initThree() {
+function initMill() {
+  const wrap = $("mill-canvas-wrap");
   scene = new THREE.Scene();
   scene.background = new THREE.Color(0x0a1018);
 
-  camera = new THREE.PerspectiveCamera(45, viewFreze.clientWidth / (viewFreze.clientHeight || 450), 1, 5000);
-  camera.position.set(200, 150, 200);
+  camera = new THREE.PerspectiveCamera(40, wrap.clientWidth / (wrap.clientHeight || 500), 1, 5000);
+  camera.position.set(280, 200, 280);
 
   renderer = new THREE.WebGLRenderer({ antialias: true, logarithmicDepthBuffer: true });
-  renderer.setSize(viewFreze.clientWidth, viewFreze.clientHeight || 450);
+  renderer.setSize(wrap.clientWidth, wrap.clientHeight || 500);
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-  viewFreze.replaceChildren(renderer.domElement);
+  renderer.shadowMap.enabled = true;
+  wrap.replaceChildren(renderer.domElement);
 
   controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
-  controls.target.set(0, 0, 0);
+  controls.target.set(MW / 2, 0, MD / 2);
 
   scene.add(new THREE.AmbientLight(0xffffff, 0.5));
-  const dir = new THREE.DirectionalLight(0xffffff, 0.8);
-  dir.position.set(100, 200, 150);
-  scene.add(dir);
-  const dir2 = new THREE.DirectionalLight(0xffffff, 0.3);
-  dir2.position.set(-100, -50, -100);
-  scene.add(dir2);
+  const dl = new THREE.DirectionalLight(0xffffff, 0.9);
+  dl.position.set(150, 300, 200); dl.castShadow = true;
+  dl.shadow.mapSize.set(1024, 1024);
+  scene.add(dl);
+  scene.add(new THREE.DirectionalLight(0xffffff, 0.3).translateX(-100));
 
+  // Machine table
+  const tableMat = new THREE.MeshStandardMaterial({ color: 0x1a2636, metalness: 0.6, roughness: 0.4 });
+  const table = new THREE.Mesh(new THREE.BoxGeometry(MW + 80, 6, MD + 80), tableMat);
+  table.position.set(MW / 2, -5, MD / 2);
+  table.receiveShadow = true;
+  scene.add(table);
+
+  // T-slot lines
+  const slotMat = new THREE.MeshStandardMaterial({ color: 0x0f1a2a });
+  for (let i = 0; i < 5; i++) {
+    const slot = new THREE.Mesh(new THREE.BoxGeometry(MW + 60, 0.5, 2), slotMat);
+    slot.position.set(MW / 2, -1.7, MD * 0.15 + i * MD * 0.175);
+    scene.add(slot);
+  }
+
+  // Grid
   const grid = new THREE.GridHelper(400, 40, 0x1a2a44, 0x0f1a2a);
-  grid.rotation.x = Math.PI / 2;
+  grid.position.set(MW / 2, -8, MD / 2);
   scene.add(grid);
 
+  buildWorkpiece();
   buildTool();
+  buildChipPool();
 
-  window.addEventListener("resize", onResize);
+  window.addEventListener("resize", () => {
+    const w = wrap.clientWidth, h = wrap.clientHeight || 500;
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+    renderer.setSize(w, h);
+  });
 }
 
-function onResize() {
-  if (!renderer) return;
-  const w = viewFreze.clientWidth;
-  const h = viewFreze.clientHeight || 450;
-  camera.aspect = w / h;
-  camera.updateProjectionMatrix();
-  renderer.setSize(w, h);
+function buildWorkpiece() {
+  if (wpMesh) { scene.remove(wpMesh); wpGeo.dispose(); }
+  wpGeo = new THREE.PlaneGeometry(MW, MD, COLS, ROWS);
+  wpGeo.rotateX(-Math.PI / 2);
+  wpGeo.translate(MW / 2, 0, MD / 2);
+  wpPos = wpGeo.attributes.position;
+  wpPosArr = wpPos.array;
+  for (let i = 0; i < wpPos.count; i++) wpPosArr[i * 3 + 1] = MTOP;
+
+  const mat = new THREE.MeshStandardMaterial({
+    color: 0x7a8a9a, metalness: 0.45, roughness: 0.5,
+    flatShading: true, side: THREE.DoubleSide
+  });
+  wpMesh = new THREE.Mesh(wpGeo, mat);
+  wpMesh.castShadow = true; wpMesh.receiveShadow = true;
+  scene.add(wpMesh);
 }
 
 function buildTool() {
   toolGroup = new THREE.Group();
-  spindleGroup = new THREE.Group();
-  toolGroup.add(spindleGroup);
+  spindleGrp = new THREE.Group();
+  toolGroup.add(spindleGrp);
 
-  const holderMat = new THREE.MeshStandardMaterial({ color: 0x2a2a2a, metalness: 0.85, roughness: 0.25 });
-  const shankMat = new THREE.MeshStandardMaterial({ color: 0x888888, metalness: 0.7, roughness: 0.3 });
-  const cutterMat = new THREE.MeshStandardMaterial({ color: 0xaabbcc, metalness: 0.9, roughness: 0.12 });
+  const holder = new THREE.Mesh(
+    new THREE.CylinderGeometry(8, 8, 12, 20),
+    new THREE.MeshStandardMaterial({ color: 0x2a2a2a, metalness: 0.85, roughness: 0.25 })
+  );
+  holder.position.y = 38; spindleGrp.add(holder);
+
+  const taper = new THREE.Mesh(
+    new THREE.CylinderGeometry(6, CUTTER_R, 6, 20),
+    new THREE.MeshStandardMaterial({ color: 0x888888, metalness: 0.7, roughness: 0.3 })
+  );
+  taper.position.y = 29; spindleGrp.add(taper);
+
+  const cutMat = new THREE.MeshStandardMaterial({ color: 0xaabbcc, metalness: 0.9, roughness: 0.12 });
+  const cutter = new THREE.Mesh(new THREE.CylinderGeometry(CUTTER_R, CUTTER_R * 0.92, 18, 20), cutMat);
+  cutter.position.y = 17; spindleGrp.add(cutter);
+
   const fluteMat = new THREE.MeshStandardMaterial({ color: 0xddeeff, metalness: 0.95, roughness: 0.08, side: THREE.DoubleSide });
-
-  const holder = new THREE.Mesh(new THREE.CylinderGeometry(5, 5, 8, 20), holderMat);
-  holder.position.y = 30;
-  spindleGroup.add(holder);
-
-  const taper = new THREE.Mesh(new THREE.CylinderGeometry(4, 2, 4, 20), shankMat);
-  taper.position.y = 24;
-  spindleGroup.add(taper);
-
-  const shank = new THREE.Mesh(new THREE.CylinderGeometry(2, 2, 10, 16), shankMat);
-  shank.position.y = 17;
-  spindleGroup.add(shank);
-
-  const cutter = new THREE.Mesh(new THREE.CylinderGeometry(cutterRadius, cutterRadius * 0.9, 12, 16), cutterMat);
-  cutter.position.y = 6;
-  spindleGroup.add(cutter);
-
   for (let i = 0; i < 4; i++) {
-    const fin = new THREE.Mesh(new THREE.BoxGeometry(cutterRadius * 2.2, 11, 0.3), fluteMat);
-    fin.position.y = 6;
-    fin.rotation.y = (i / 4) * Math.PI * 2;
-    spindleGroup.add(fin);
+    const fin = new THREE.Mesh(new THREE.BoxGeometry(CUTTER_R * 2.3, 16, 0.4), fluteMat);
+    fin.position.y = 17; fin.rotation.y = (i / 4) * Math.PI * 2;
+    spindleGrp.add(fin);
   }
 
-  const tip = new THREE.Mesh(new THREE.CylinderGeometry(cutterRadius * 0.9, 0.5, 3, 16), cutterMat);
-  tip.position.y = -1;
-  spindleGroup.add(tip);
+  const tip = new THREE.Mesh(new THREE.CylinderGeometry(CUTTER_R * 0.9, 1, 4, 16), cutMat);
+  tip.position.y = 6; spindleGrp.add(tip);
 
   toolGroup.rotation.x = Math.PI;
+  toolGroup.position.set(MW / 2, MTOP + 50, MD / 2);
   scene.add(toolGroup);
 }
 
-function setupFrezeStock(mvs) {
-  if (stockMesh) { scene.remove(stockMesh); stockMesh.geometry.dispose(); stockMesh.material.dispose(); stockMesh = null; }
-  if (toolpathGroup) { scene.remove(toolpathGroup); toolpathGroup = null; }
-
-  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, minZ = Infinity, maxZ = -Infinity;
-  for (const mv of mvs) {
-    if (mv.type !== "linear" && mv.type !== "rapid") continue;
-    for (const p of [mv.from, mv.to]) {
-      minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
-      minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y);
-      minZ = Math.min(minZ, p.z); maxZ = Math.max(maxZ, p.z);
-    }
+function buildChipPool() {
+  const geo = new THREE.BoxGeometry(1.2, 0.3, 0.8);
+  const mat = new THREE.MeshStandardMaterial({ color: 0xbbaa77, metalness: 0.6, roughness: 0.4 });
+  for (let i = 0; i < CHIP_POOL; i++) {
+    const m = new THREE.Mesh(geo, mat);
+    m.visible = false;
+    m.userData = { vx: 0, vy: 0, vz: 0, life: 0 };
+    scene.add(m);
+    chipPool.push(m);
   }
-  if (!isFinite(minX)) return;
-
-  const pad = Math.max(5, (maxX - minX) * 0.1);
-  stkMinX = minX - pad; stkMinY = minY - pad;
-  const stkMaxX = maxX + pad, stkMaxY = maxY + pad;
-
-  let feedMinZ = Infinity, feedMaxZ = -Infinity;
-  for (const mv of mvs) {
-    if (mv.type !== "linear") continue;
-    feedMinZ = Math.min(feedMinZ, mv.from.z, mv.to.z);
-    feedMaxZ = Math.max(feedMaxZ, mv.from.z, mv.to.z);
-  }
-  if (!isFinite(feedMinZ)) { feedMinZ = minZ; feedMaxZ = maxZ; }
-  stkTopZ = feedMaxZ + 2;
-  stkBaseZ = feedMinZ - 3;
-  if (stkBaseZ >= stkTopZ) stkBaseZ = stkTopZ - 1;
-
-  const stkW = stkMaxX - stkMinX, stkD = stkMaxY - stkMinY;
-  const cellSz = Math.max(cutterRadius * 0.5, 0.8);
-  stockGX = Math.min(120, Math.max(10, Math.round(stkW / cellSz)));
-  stockGY = Math.min(120, Math.max(10, Math.round(stkD / cellSz)));
-  stkColW = stkW / stockGX;
-  stkColD = stkD / stockGY;
-
-  stockHeights = new Float32Array(stockGX * stockGY);
-  const initH = stkTopZ - stkBaseZ;
-  stockHeights.fill(initH);
-
-  const geo = new THREE.BoxGeometry(stkColW * 0.96, stkColD * 0.96, 1);
-  const mat = new THREE.MeshStandardMaterial({ color: 0x7a8a9a, metalness: 0.4, roughness: 0.5 });
-  stockMesh = new THREE.InstancedMesh(geo, mat, stockGX * stockGY);
-
-  for (let gy = 0; gy < stockGY; gy++)
-    for (let gx = 0; gx < stockGX; gx++) setCol(gx, gy, initH);
-  stockMesh.instanceMatrix.needsUpdate = true;
-  scene.add(stockMesh);
-
-  // Draw toolpath lines
-  toolpathGroup = new THREE.Group();
-  const feedPts = [], rapidPts = [];
-  for (const mv of mvs) {
-    if (mv.type !== "linear" && mv.type !== "rapid") continue;
-    const a = new THREE.Vector3(mv.from.x, mv.from.y, mv.from.z);
-    const b = new THREE.Vector3(mv.to.x, mv.to.y, mv.to.z);
-    if (mv.type === "rapid") rapidPts.push(a, b);
-    else feedPts.push(a, b);
-  }
-  if (feedPts.length) {
-    const g = new THREE.BufferGeometry().setFromPoints(feedPts);
-    toolpathGroup.add(new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: 0x22d3ee, opacity: 0.6, transparent: true })));
-  }
-  if (rapidPts.length) {
-    const g = new THREE.BufferGeometry().setFromPoints(rapidPts);
-    toolpathGroup.add(new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: 0xf59e0b, opacity: 0.25, transparent: true })));
-  }
-  scene.add(toolpathGroup);
-
-  // Center camera
-  const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2, cz = (feedMinZ + feedMaxZ) / 2;
-  const radius = Math.max(stkW, stkD, feedMaxZ - feedMinZ) * 1.5;
-  camera.position.set(cx + radius, cy + radius * 0.7, cz + radius);
-  controls.target.set(cx, cy, cz);
-  controls.update();
 }
 
-function setCol(ix, iy, h) {
-  if (h < 0.01) h = 0.01;
-  stkTmp.position.set(stkMinX + (ix + 0.5) * stkColW, stkMinY + (iy + 0.5) * stkColD, stkBaseZ + h / 2);
-  stkTmp.scale.set(1, 1, h);
-  stkTmp.updateMatrix();
-  stockMesh.setMatrixAt(iy * stockGX + ix, stkTmp.matrix);
+function spawnChip(x, y, z) {
+  const c = chipPool[chipIdx % CHIP_POOL];
+  chipIdx++;
+  c.visible = true;
+  c.position.set(x + (Math.random() - 0.5) * 8, y, z + (Math.random() - 0.5) * 8);
+  const s = 0.6 + Math.random() * 1.2;
+  c.scale.set(s, 1, 0.5 + Math.random());
+  c.userData.vx = (Math.random() - 0.5) * 30;
+  c.userData.vy = 8 + Math.random() * 18;
+  c.userData.vz = (Math.random() - 0.5) * 30;
+  c.userData.life = 1.5 + Math.random();
 }
 
-function cutFreze(tx, ty, tz) {
-  if (!stockMesh || tz >= stkTopZ) return;
-  const ch = Math.max(0.01, tz - stkBaseZ);
-  const r = cutterRadius;
-  const x0 = Math.max(0, Math.floor((tx - r - stkMinX) / stkColW));
-  const x1 = Math.min(stockGX - 1, Math.floor((tx + r - stkMinX) / stkColW));
-  const y0 = Math.max(0, Math.floor((ty - r - stkMinY) / stkColD));
-  const y1 = Math.min(stockGY - 1, Math.floor((ty + r - stkMinY) / stkColD));
-  let dirty = false;
-  for (let iy = y0; iy <= y1; iy++) {
-    for (let ix = x0; ix <= x1; ix++) {
-      const cx = stkMinX + (ix + 0.5) * stkColW;
-      const cy = stkMinY + (iy + 0.5) * stkColD;
-      const dx = cx - tx, dy = cy - ty;
-      if (dx * dx + dy * dy <= r * r) {
-        const idx = iy * stockGX + ix;
-        if (ch < stockHeights[idx]) {
-          stockHeights[idx] = ch;
-          setCol(ix, iy, ch);
-          dirty = true;
-        }
+function carve(tx, ty, tz) {
+  if (ty >= MTOP) return;
+  const r2 = CUTTER_R * CUTTER_R;
+  const colW = MW / COLS, rowD = MD / ROWS;
+  const ci0 = Math.max(1, Math.floor((tx - CUTTER_R) / colW));
+  const ci1 = Math.min(COLS - 1, Math.floor((tx + CUTTER_R) / colW));
+  const ri0 = Math.max(1, Math.floor((tz - CUTTER_R) / rowD));
+  const ri1 = Math.min(ROWS - 1, Math.floor((tz + CUTTER_R) / rowD));
+  let dirty = false, chipSpawned = false;
+  for (let ri = ri0; ri <= ri1; ri++) {
+    for (let ci = ci0; ci <= ci1; ci++) {
+      const idx = ri * (COLS + 1) + ci;
+      const vx = wpPosArr[idx * 3];
+      const vz = wpPosArr[idx * 3 + 2];
+      const dx = vx - tx, dz2 = vz - tz;
+      if (dx * dx + dz2 * dz2 > r2) continue;
+      if (vx < MARGIN || vx > MW - MARGIN || vz < MARGIN || vz > MD - MARGIN) continue;
+      if (wpPosArr[idx * 3 + 1] > ty) {
+        wpPosArr[idx * 3 + 1] = ty;
+        dirty = true;
+        if (!chipSpawned && Math.random() < 0.12) { spawnChip(vx, ty, vz); chipSpawned = true; }
       }
     }
   }
   if (dirty) {
-    stockMesh.instanceMatrix.needsUpdate = true;
-    spawnChip3D(tx, ty, tz);
+    wpPos.needsUpdate = true;
+    wpGeo.computeVertexNormals();
+    let cnt = 0, total = 0;
+    for (let i = 0; i < wpPos.count; i++) {
+      total++;
+      if (wpPosArr[i * 3 + 1] < MTOP) cnt++;
+    }
+    millRemoved = (cnt / total) * 100;
   }
 }
 
-function resetFrezeStock() {
-  if (!stockMesh) return;
-  const initH = stkTopZ - stkBaseZ;
-  stockHeights.fill(initH);
-  for (let gy = 0; gy < stockGY; gy++)
-    for (let gx = 0; gx < stockGX; gx++) setCol(gx, gy, initH);
-  stockMesh.instanceMatrix.needsUpdate = true;
-}
+function updateMill(dt) {
+  if (millEmg) return;
+  if (millSpindleOn) spindleGrp.rotation.y += dt * (millRpm / 60) * Math.PI * 0.5;
 
-// Chip particles (3D) — shared geometry/material to avoid GC pressure
-const chipGeo = new THREE.BoxGeometry(1, 0.3, 1);
-const chipMat = new THREE.MeshStandardMaterial({ color: 0xbbaa77, metalness: 0.6, roughness: 0.4 });
-function spawnChip3D(x, y, z) {
-  if (chipParticles.length > 40) return;
-  if (Math.random() > 0.1) return;
-  const m = new THREE.Mesh(chipGeo, chipMat);
-  const s = 0.5 + Math.random();
-  m.scale.set(s, 1, 0.5 + Math.random());
-  m.position.set(x + (Math.random() - 0.5) * 3, y + (Math.random() - 0.5) * 3, z);
-  m.userData.vel = new THREE.Vector3((Math.random() - 0.5) * 20, (Math.random() - 0.5) * 20, 5 + Math.random() * 15);
-  m.userData.life = 1.5 + Math.random();
-  scene.add(m);
-  chipParticles.push(m);
-}
+  // Jog
+  if (millJogTarget) {
+    const p = toolGroup.position;
+    const dx = millJogTarget.x - p.x;
+    const dy = millJogTarget.y - p.y;
+    const dz = millJogTarget.z - p.z;
+    const d = Math.sqrt(dx * dx + dy * dy + dz * dz);
+    const spd = 300 * dt;
+    if (d < spd) {
+      p.set(millJogTarget.x, millJogTarget.y, millJogTarget.z);
+      millJogTarget = null;
+    } else {
+      p.x += (dx / d) * spd; p.y += (dy / d) * spd; p.z += (dz / d) * spd;
+    }
+    if (millSpindleOn) carve(p.x, p.y, p.z);
+  }
 
-function updateChips(dt) {
-  for (let i = chipParticles.length - 1; i >= 0; i--) {
-    const c = chipParticles[i];
-    c.userData.vel.z -= 60 * dt;
-    c.position.addScaledVector(c.userData.vel, dt);
-    c.rotation.x += dt * 5;
-    c.rotation.z += dt * 3;
+  // Auto cycle
+  if (!millRunning || millHolding || !millAuto) return;
+  const step = millAuto[millAutoStep];
+  if (!step) { millRunning = false; return; }
+
+  const speed = step.type === "rapid" ? 800 : millFeed * millOvr;
+  const p = toolGroup.position;
+  const dx = step.x - p.x, dy = step.y - p.y, dz = step.z - p.z;
+  const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+  const move = (speed / 60) * dt;
+
+  if (dist < move) {
+    p.set(step.x, step.y, step.z);
+    if (step.type === "feed" && millSpindleOn) carve(p.x, p.y, p.z);
+    millAutoStep++;
+    if (millAutoStep >= millAuto.length) millRunning = false;
+  } else {
+    p.x += (dx / dist) * move; p.y += (dy / dist) * move; p.z += (dz / dist) * move;
+    if (step.type === "feed" && millSpindleOn) carve(p.x, p.y, p.z);
+  }
+
+  // Chips update
+  for (const c of chipPool) {
+    if (!c.visible) continue;
+    c.userData.vy -= 50 * dt;
+    c.position.x += c.userData.vx * dt;
+    c.position.y += c.userData.vy * dt;
+    c.position.z += c.userData.vz * dt;
+    c.rotation.x += dt * 6; c.rotation.z += dt * 4;
     c.userData.life -= dt;
-    if (c.userData.life <= 0 || c.position.z < stkBaseZ - 20) {
-      scene.remove(c);
-      chipParticles.splice(i, 1);
-    }
+    if (c.userData.life <= 0 || c.position.y < -30) c.visible = false;
   }
 }
 
-
-// ─── CANVAS 2D (Lathe) ────────────────────────────────────────────────────────
-
-const LATHE_N = 300;
-const LATHE_LEN = 200;
-const LATHE_MAX_R = 60;
-let latheRadii = new Float32Array(LATHE_N);
-let latheChuckAngle = 0;
-let latheToolX = 0, latheToolZ = LATHE_MAX_R + 10;
-let latheChips = [];
-
-function resetLathe() {
-  latheRadii.fill(LATHE_MAX_R);
-  latheToolX = 0;
-  latheToolZ = LATHE_MAX_R + 10;
-  latheChips = [];
-}
-
-function cutLathe(x, z) {
-  const r = Math.abs(z);
-  const segLen = LATHE_LEN / LATHE_N;
-  const toolW = 3;
-  const i0 = Math.max(0, Math.floor((x - toolW / 2) / segLen));
-  const i1 = Math.min(LATHE_N - 1, Math.floor((x + toolW / 2) / segLen));
-  let cut = false;
-  for (let i = i0; i <= i1; i++) {
-    if (r < latheRadii[i]) {
-      latheRadii[i] = Math.max(0.5, r);
-      cut = true;
+function millStartCycle() {
+  if (millEmg || millMode !== "AUTO") return;
+  millSpindleOn = true; millRunning = true; millHolding = false;
+  const passes = [];
+  const depths = [46, 34];
+  const step = CUTTER_R * 1.6;
+  for (const y of depths) {
+    passes.push({ type: "rapid", x: MARGIN, y: MTOP + 5, z: MARGIN });
+    passes.push({ type: "rapid", x: MARGIN, y: y, z: MARGIN });
+    let dir = 1;
+    for (let z = MARGIN; z <= MD - MARGIN; z += step) {
+      const zz = Math.min(z, MD - MARGIN);
+      if (dir === 1) {
+        passes.push({ type: "feed", x: MARGIN, y, z: zz });
+        passes.push({ type: "feed", x: MW - MARGIN, y, z: zz });
+      } else {
+        passes.push({ type: "feed", x: MW - MARGIN, y, z: zz });
+        passes.push({ type: "feed", x: MARGIN, y, z: zz });
+      }
+      dir *= -1;
     }
   }
-  if (cut && Math.random() < 0.3) {
-    latheChips.push({
-      x: x + (Math.random() - 0.5) * 5,
-      y: z + (Math.random() > 0.5 ? 1 : -1) * (r + 2),
-      vx: (Math.random() - 0.5) * 40,
-      vy: (Math.random() > 0.5 ? 1 : -1) * (10 + Math.random() * 20),
-      life: 1 + Math.random(),
+  passes.push({ type: "rapid", x: MW / 2, y: MTOP + 50, z: MD / 2 });
+  millAuto = passes; millAutoStep = 0;
+}
+
+// ─── LCD SYNC ─────────────────────────────────────────────────────────────────
+
+function syncMillLCD() {
+  const p = toolGroup ? toolGroup.position : { x: 0, y: 0, z: 0 };
+  $("ml-x").textContent = p.x.toFixed(3);
+  $("ml-y").textContent = p.z.toFixed(3);
+  $("ml-z").textContent = p.y.toFixed(3);
+  $("ml-actf").textContent = `ACT.F ${Math.round(millRunning ? millFeed * millOvr : 0)}`;
+  $("ml-rpm").textContent = `S ${millSpindleOn ? millRpm : 0}`;
+  $("ml-tool").textContent = `T${String(millToolNo).padStart(2, "0")}`;
+  $("ml-ovr").textContent = `OVR ${Math.round(millOvr * 100)}%`;
+  $("ml-removed").textContent = `REMOVED ${millRemoved.toFixed(1)}%`;
+  $("ml-mode").textContent = millMode;
+  $("ml-alarm").textContent = millAlarm || "READY";
+  $("ml-run").textContent = millEmg ? "EMG" : millRunning ? (millHolding ? "HOLD" : "RUN") : "STOP";
+
+  // Stats overlay
+  $("m-stat-pos").textContent = `X ${p.x.toFixed(3)} Y ${p.z.toFixed(3)} Z ${p.y.toFixed(3)}`;
+  $("m-stat-tool").textContent = `tool_selected = ${millToolNo}`;
+  $("m-stat-cut").textContent = `cutting_status = ${millRunning && !millHolding ? 1 : 0}`;
+}
+
+function syncLatheLCD(L) {
+  $("lcd-x").textContent = L.toolX.toFixed(3);
+  $("lcd-z").textContent = L.toolZ.toFixed(3);
+  $("lcd-actf").textContent = `ACT.F ${L.running ? Math.round(L.feed * L.override) : 0} MM/M`;
+  $("lcd-rpm").textContent = `S ${L.spindleOn ? L.spindleRpm : 0} RPM`;
+  $("lcd-tool").textContent = `T${String(L.toolNo).padStart(2, "0")}00`;
+  $("lcd-ovr").textContent = `OVR ${Math.round(L.override * 100)}%`;
+  $("lcd-removed").textContent = `REMOVED ${L.removedPct.toFixed(1)}%`;
+  $("lcd-mode").textContent = L.mode;
+  $("lcd-alarm").textContent = L.alarm || "READY";
+  $("lcd-run").textContent = L.emergency ? "EMG" : L.running ? (L.holding ? "HOLD" : "RUN") : "STOP";
+}
+
+// ─── MDI KEYPAD ───────────────────────────────────────────────────────────────
+
+function buildKeypad(container, axes) {
+  const keys = ["7","8","9","4","5","6","1","2","3",".","0","+/-","DEL","ENT","CLR"];
+  container.innerHTML = "";
+  for (const k of keys) {
+    const btn = document.createElement("button");
+    btn.className = "mdi-key h-7 text-[10px]";
+    btn.textContent = k;
+    btn.addEventListener("click", () => {
+      const focused = document.activeElement;
+      if (focused && focused.tagName === "INPUT" && axes.some(a => a === focused)) {
+        if (k === "DEL") focused.value = focused.value.slice(0, -1);
+        else if (k === "CLR") focused.value = "";
+        else if (k === "ENT") focused.blur();
+        else if (k === "+/-") {
+          if (focused.value.startsWith("-")) focused.value = focused.value.slice(1);
+          else focused.value = "-" + focused.value;
+        }
+        else focused.value += k;
+      }
+    });
+    container.appendChild(btn);
+  }
+}
+
+// ─── TAB SWITCHING ────────────────────────────────────────────────────────────
+
+let currentTab = "mill";
+
+function setTab(tab) {
+  currentTab = tab;
+  $("view-mill").style.display = tab === "mill" ? "flex" : "none";
+  $("view-lathe").style.display = tab === "lathe" ? "flex" : "none";
+  $("tab-mill").className = `px-4 py-1.5 text-[12px] font-bold ${tab === "mill" ? "bg-cyan-600 text-white" : "bg-zinc-700 text-zinc-400 hover:bg-zinc-600"}`;
+  $("tab-lathe").className = `px-4 py-1.5 text-[12px] font-bold ${tab === "lathe" ? "bg-cyan-600 text-white" : "bg-zinc-700 text-zinc-400 hover:bg-zinc-600"}`;
+}
+
+// ─── MAIN LOOP ────────────────────────────────────────────────────────────────
+
+const lathe = new LatheEngine();
+let lastT = 0, fpsFrames = 0, fpsTime = 0, fpsVal = 0;
+
+function loop(t) {
+  requestAnimationFrame(loop);
+  const dt = Math.min((t - lastT) / 1000, 0.05);
+  lastT = t;
+
+  fpsFrames++; fpsTime += dt;
+  if (fpsTime >= 0.5) { fpsVal = Math.round(fpsFrames / fpsTime); fpsFrames = 0; fpsTime = 0; }
+
+  if (currentTab === "mill") {
+    updateMill(dt);
+    // Update chips
+    for (const c of chipPool) {
+      if (!c.visible) continue;
+      c.userData.vy -= 50 * dt;
+      c.position.x += c.userData.vx * dt;
+      c.position.y += c.userData.vy * dt;
+      c.position.z += c.userData.vz * dt;
+      c.rotation.x += dt * 6; c.rotation.z += dt * 4;
+      c.userData.life -= dt;
+      if (c.userData.life <= 0 || c.position.y < -30) c.visible = false;
+    }
+    controls.update();
+    renderer.render(scene, camera);
+    syncMillLCD();
+    $("m-stat-fps").textContent = `FPS: ${fpsVal}`;
+  } else {
+    lathe.update(dt);
+    const cv = $("lathe-canvas");
+    const ctx = cv.getContext("2d");
+    const dpr = window.devicePixelRatio || 1;
+    if (cv.width !== cv.clientWidth * dpr || cv.height !== cv.clientHeight * dpr) {
+      cv.width = cv.clientWidth * dpr; cv.height = cv.clientHeight * dpr;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+    lathe.draw(ctx, cv.clientWidth, cv.clientHeight, dt);
+    syncLatheLCD(lathe);
+    const hud = $("hud");
+    if (hud) hud.textContent = `X ${lathe.toolX.toFixed(1)}  Z ${lathe.toolZ.toFixed(1)}  ${lathe.spindleOn ? "◎ " + lathe.spindleRpm + " rpm" : "OFF"}  FPS ${fpsVal}`;
+  }
+}
+
+// ─── EVENT WIRING ─────────────────────────────────────────────────────────────
+
+function wireEvents() {
+  // Tab switching
+  $("tab-mill").addEventListener("click", () => setTab("mill"));
+  $("tab-lathe").addEventListener("click", () => setTab("lathe"));
+
+  // ── MILL EVENTS ──
+
+  // Mode
+  const mmManual = $("mmode-manual"), mmAuto = $("mmode-auto");
+  function setMillMode(m) {
+    millMode = m;
+    mmManual.className = `rounded py-2 text-[10px] font-bold ${m === "MANUAL" ? "bg-cyan-600 text-white" : "bg-zinc-700 hover:bg-zinc-600"}`;
+    mmAuto.className = `rounded py-2 text-[10px] font-bold ${m === "AUTO" ? "bg-cyan-600 text-white" : "bg-zinc-700 hover:bg-zinc-600"}`;
+  }
+  mmManual.addEventListener("click", () => setMillMode("MANUAL"));
+  mmAuto.addEventListener("click", () => setMillMode("AUTO"));
+  setMillMode("MANUAL");
+
+  // Spindle / Feed / Override sliders
+  $("mrng-rpm").addEventListener("input", e => { millRpm = +e.target.value; $("mlbl-rpm").textContent = `${millRpm} rpm`; });
+  $("mrng-feed").addEventListener("input", e => { millFeed = +e.target.value; $("mlbl-feed").textContent = `${millFeed} mm/m`; });
+  $("mrng-ovr").addEventListener("input", e => { millOvr = +e.target.value; $("mlbl-ovr").textContent = `${Math.round(millOvr * 100)}%`; });
+
+  // Tool selector
+  $("mtool-minus").addEventListener("click", () => { millToolNo = Math.max(1, millToolNo - 1); $("mlbl-tool").textContent = `T${String(millToolNo).padStart(2, "0")}`; });
+  $("mtool-plus").addEventListener("click", () => { millToolNo = Math.min(20, millToolNo + 1); $("mlbl-tool").textContent = `T${String(millToolNo).padStart(2, "0")}`; });
+
+  // Jog buttons
+  document.querySelectorAll(".mjog").forEach(btn => {
+    btn.addEventListener("click", () => {
+      if (millMode !== "MANUAL" || millEmg) return;
+      const axis = btn.dataset.a, dir = +btn.dataset.d;
+      const step = 10;
+      const p = toolGroup.position;
+      const nx = axis === "x" ? p.x + dir * step : p.x;
+      const ny = axis === "y" ? p.y + dir * step : p.y;
+      const nz = axis === "z" ? p.z + dir * step : p.z;
+      millJogTarget = { x: nx, y: ny, z: nz };
+    });
+  });
+
+  // MDI go
+  $("me-go").addEventListener("click", () => {
+    if (millMode !== "MANUAL" || millEmg) return;
+    const x = parseFloat($("me-x").value) || toolGroup.position.x;
+    const y = parseFloat($("me-y").value) || toolGroup.position.y;
+    const z = parseFloat($("me-z").value) || toolGroup.position.z;
+    millJogTarget = { x, y, z };
+  });
+
+  // Spindle toggle
+  $("mbtn-spindle").addEventListener("click", () => {
+    if (millEmg) return;
+    millSpindleOn = !millSpindleOn;
+    $("mspindle-icon").className = millSpindleOn ? "text-base animate-spin-slow" : "text-base";
+    $("mspindle-label").textContent = millSpindleOn ? "SPINDLE ON" : "SPINDLE OFF";
+    $("mbtn-spindle").className = `flex flex-col items-center gap-1 rounded py-2 text-[10px] font-bold ${millSpindleOn ? "bg-emerald-600 text-white" : "bg-zinc-700 hover:bg-zinc-600"}`;
+  });
+
+  // Cycle start / hold
+  $("mbtn-cycle").addEventListener("click", () => millStartCycle());
+  $("mbtn-hold").addEventListener("click", () => {
+    if (millRunning) { millHolding = !millHolding; }
+  });
+
+  // Emergency
+  $("mbtn-emg").addEventListener("click", () => {
+    millEmg = true; millRunning = false; millSpindleOn = false;
+    millAlarm = "EMG STOP";
+  });
+  $("mbtn-reset").addEventListener("click", () => {
+    millEmg = false; millAlarm = ""; millHolding = false;
+    $("mspindle-icon").className = "text-base";
+    $("mspindle-label").textContent = "SPINDLE OFF";
+    $("mbtn-spindle").className = "flex flex-col items-center gap-1 rounded bg-zinc-700 py-2 text-[10px] font-bold hover:bg-zinc-600";
+  });
+  $("mbtn-newp").addEventListener("click", () => {
+    buildWorkpiece();
+    millRunning = false; millAutoStep = 0; millAuto = null;
+    millRemoved = 0;
+    toolGroup.position.set(MW / 2, MTOP + 50, MD / 2);
+  });
+
+  // Viewport buttons
+  $("m-play").addEventListener("click", () => millStartCycle());
+  $("m-pause").addEventListener("click", () => { if (millRunning) millHolding = !millHolding; });
+  $("m-stop").addEventListener("click", () => {
+    millRunning = false; millAuto = null; millAutoStep = 0;
+  });
+  $("m-new").addEventListener("click", () => {
+    buildWorkpiece();
+    millRunning = false; millAutoStep = 0; millAuto = null;
+    millRemoved = 0;
+    toolGroup.position.set(MW / 2, MTOP + 50, MD / 2);
+  });
+
+  // Camera views
+  document.querySelectorAll("[data-view]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const t = controls.target;
+      const d = 280;
+      switch (btn.dataset.view) {
+        case "iso": camera.position.set(t.x + d, t.y + d * 0.7, t.z + d); break;
+        case "top": camera.position.set(t.x, t.y + d, t.z); break;
+        case "front": camera.position.set(t.x, t.y, t.z + d); break;
+        case "right": camera.position.set(t.x + d, t.y, t.z); break;
+      }
+      camera.lookAt(t); controls.update();
+    });
+  });
+
+  // Wireframe toggle
+  $("m-wire").addEventListener("click", () => {
+    if (wpMesh) wpMesh.material.wireframe = !wpMesh.material.wireframe;
+  });
+
+  // Mill MDI keypad
+  buildKeypad($("mmdi"), [$("me-x"), $("me-y"), $("me-z")]);
+
+  // ── LATHE EVENTS ──
+
+  // Mode
+  const lmManual = $("mode-manual"), lmAuto = $("mode-auto");
+  function setLatheMode(m) {
+    lathe.mode = m;
+    lmManual.className = `rounded py-2 text-[10px] font-bold ${m === "MANUAL" ? "bg-cyan-600 text-white" : "bg-zinc-700 hover:bg-zinc-600"}`;
+    lmAuto.className = `rounded py-2 text-[10px] font-bold ${m === "AUTO" ? "bg-cyan-600 text-white" : "bg-zinc-700 hover:bg-zinc-600"}`;
+  }
+  lmManual.addEventListener("click", () => setLatheMode("MANUAL"));
+  lmAuto.addEventListener("click", () => setLatheMode("AUTO"));
+  setLatheMode("MANUAL");
+
+  // Spindle / Feed / Override
+  $("rng-rpm").addEventListener("input", e => { lathe.spindleRpm = +e.target.value; $("lbl-rpm").textContent = `${lathe.spindleRpm} rpm`; });
+  $("rng-feed").addEventListener("input", e => { lathe.feed = +e.target.value; $("lbl-feed").textContent = `${lathe.feed} mm/m`; });
+  $("rng-ovr").addEventListener("input", e => { lathe.override = +e.target.value; $("lbl-ovr").textContent = `${Math.round(lathe.override * 100)}%`; });
+
+  // Tool selector
+  $("tool-minus").addEventListener("click", () => { lathe.toolNo = Math.max(1, lathe.toolNo - 1); $("lbl-tool").textContent = `T${String(lathe.toolNo).padStart(2, "0")}`; });
+  $("tool-plus").addEventListener("click", () => { lathe.toolNo = Math.min(20, lathe.toolNo + 1); $("lbl-tool").textContent = `T${String(lathe.toolNo).padStart(2, "0")}`; });
+
+  // Jog
+  document.querySelectorAll(".jog").forEach(btn => {
+    btn.addEventListener("click", () => {
+      if (lathe.mode !== "MANUAL" || lathe.emergency) return;
+      const dx = +btn.dataset.dx * 5;
+      const dz = +btn.dataset.dz * 5;
+      lathe.jogTarget = { x: lathe.toolX + dx, z: lathe.toolZ + dz };
+    });
+  });
+
+  // MDI go
+  $("btn-goto").addEventListener("click", () => {
+    if (lathe.mode !== "MANUAL" || lathe.emergency) return;
+    const x = parseFloat($("edit-x").value);
+    const z = parseFloat($("edit-z").value);
+    lathe.jogTarget = { x: isNaN(x) ? lathe.toolX : x, z: isNaN(z) ? lathe.toolZ : z };
+  });
+
+  // Spindle toggle
+  $("btn-spindle").addEventListener("click", () => {
+    if (lathe.emergency) return;
+    lathe.spindleOn = !lathe.spindleOn;
+    $("spindle-icon").className = lathe.spindleOn ? "text-base animate-spin-slow" : "text-base";
+    $("spindle-label").textContent = lathe.spindleOn ? "SPINDLE ON" : "SPINDLE OFF";
+    $("btn-spindle").className = `flex flex-col items-center gap-1 rounded py-2 text-[10px] font-bold ${lathe.spindleOn ? "bg-emerald-600 text-white" : "bg-zinc-700 hover:bg-zinc-600"}`;
+  });
+
+  // Cycle / Hold
+  $("btn-cycle").addEventListener("click", () => lathe.startCycle());
+  $("btn-hold").addEventListener("click", () => {
+    if (lathe.running) lathe.holding = !lathe.holding;
+  });
+
+  // Emergency
+  $("btn-emg").addEventListener("click", () => {
+    lathe.emergency = true; lathe.running = false; lathe.spindleOn = false;
+    lathe.alarm = "EMG STOP";
+  });
+  $("btn-reset").addEventListener("click", () => {
+    lathe.emergency = false; lathe.alarm = ""; lathe.holding = false;
+    $("spindle-icon").className = "text-base";
+    $("spindle-label").textContent = "SPINDLE OFF";
+    $("btn-spindle").className = "flex flex-col items-center gap-1 rounded bg-zinc-700 py-2 text-[10px] font-bold hover:bg-zinc-600";
+  });
+  $("btn-new").addEventListener("click", () => lathe.reset());
+
+  // Lathe MDI keypad
+  buildKeypad($("mdi-rows"), [$("edit-x"), $("edit-z")]);
+
+  // Mute button (placeholder)
+  const muteBtn = $("m-mute");
+  if (muteBtn) {
+    let muted = false;
+    muteBtn.addEventListener("click", () => {
+      muted = !muted;
+      muteBtn.textContent = muted ? "🔇" : "🔊";
     });
   }
 }
 
-function drawLathe(ctx, w, h, dt) {
-  ctx.fillStyle = "#0a1018";
-  ctx.fillRect(0, 0, w, h);
-
-  const cx = w * 0.42, cy = h / 2;
-  const scaleX = (w * 0.55) / LATHE_LEN;
-  const scaleY = (h * 0.35) / LATHE_MAX_R;
-  const scale = Math.min(scaleX, scaleY);
-
-  // Grid
-  ctx.strokeStyle = "#0f1a2a";
-  ctx.lineWidth = 0.5;
-  for (let i = 0; i <= LATHE_LEN; i += 20) {
-    const sx = cx + i * scale;
-    ctx.beginPath(); ctx.moveTo(sx, cy - LATHE_MAX_R * scale * 1.3); ctx.lineTo(sx, cy + LATHE_MAX_R * scale * 1.3); ctx.stroke();
-  }
-  for (let r = 0; r <= LATHE_MAX_R; r += 10) {
-    ctx.beginPath(); ctx.moveTo(cx, cy - r * scale); ctx.lineTo(cx + LATHE_LEN * scale, cy - r * scale); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(cx, cy + r * scale); ctx.lineTo(cx + LATHE_LEN * scale, cy + r * scale); ctx.stroke();
-  }
-
-  // Chuck
-  latheChuckAngle += dt * 8;
-  const chuckX = cx - 10;
-  const chuckR = LATHE_MAX_R * scale * 1.1;
-  ctx.save();
-  ctx.translate(chuckX, cy);
-  ctx.rotate(latheChuckAngle);
-  const chuckGrad = ctx.createRadialGradient(0, 0, chuckR * 0.3, 0, 0, chuckR);
-  chuckGrad.addColorStop(0, "#3a3a3a");
-  chuckGrad.addColorStop(0.7, "#2a2a2a");
-  chuckGrad.addColorStop(1, "#1a1a1a");
-  ctx.fillStyle = chuckGrad;
-  ctx.beginPath(); ctx.arc(0, 0, chuckR, 0, Math.PI * 2); ctx.fill();
-  ctx.strokeStyle = "#555";
-  ctx.lineWidth = 1;
-  for (let j = 0; j < 3; j++) {
-    const a = (j / 3) * Math.PI * 2;
-    ctx.beginPath();
-    ctx.moveTo(Math.cos(a) * chuckR * 0.5, Math.sin(a) * chuckR * 0.5);
-    ctx.lineTo(Math.cos(a) * chuckR * 0.95, Math.sin(a) * chuckR * 0.95);
-    ctx.stroke();
-  }
-  ctx.restore();
-
-  // Workpiece profile (upper + lower)
-  const segLen = LATHE_LEN / LATHE_N;
-  const grad = ctx.createLinearGradient(cx, cy - LATHE_MAX_R * scale, cx, cy + LATHE_MAX_R * scale);
-  grad.addColorStop(0, "#8899aa");
-  grad.addColorStop(0.3, "#aabbcc");
-  grad.addColorStop(0.5, "#ccd8e8");
-  grad.addColorStop(0.7, "#aabbcc");
-  grad.addColorStop(1, "#667788");
-  ctx.fillStyle = grad;
-  ctx.beginPath();
-  ctx.moveTo(cx, cy - latheRadii[0] * scale);
-  for (let i = 0; i < LATHE_N; i++) {
-    ctx.lineTo(cx + (i + 0.5) * segLen * scale, cy - latheRadii[i] * scale);
-  }
-  ctx.lineTo(cx + LATHE_LEN * scale, cy);
-  for (let i = LATHE_N - 1; i >= 0; i--) {
-    ctx.lineTo(cx + (i + 0.5) * segLen * scale, cy + latheRadii[i] * scale);
-  }
-  ctx.closePath();
-  ctx.fill();
-
-  // Profile outline
-  ctx.strokeStyle = "#4a6a8a";
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(cx, cy - latheRadii[0] * scale);
-  for (let i = 0; i < LATHE_N; i++) ctx.lineTo(cx + (i + 0.5) * segLen * scale, cy - latheRadii[i] * scale);
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.moveTo(cx, cy + latheRadii[0] * scale);
-  for (let i = 0; i < LATHE_N; i++) ctx.lineTo(cx + (i + 0.5) * segLen * scale, cy + latheRadii[i] * scale);
-  ctx.stroke();
-
-  // Center line
-  ctx.strokeStyle = "#1a3058";
-  ctx.setLineDash([6, 4]);
-  ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + LATHE_LEN * scale, cy); ctx.stroke();
-  ctx.setLineDash([]);
-
-  // Tool
-  const tx = cx + latheToolX * scale;
-  const tz = cy - latheToolZ * scale;
-  ctx.fillStyle = "#dd4444";
-  ctx.beginPath();
-  ctx.moveTo(tx, tz);
-  ctx.lineTo(tx + 4 * scale, tz - 3 * scale);
-  ctx.lineTo(tx + 4 * scale, tz + 3 * scale);
-  ctx.closePath();
-  ctx.fill();
-  ctx.fillStyle = "#aa3333";
-  ctx.fillRect(tx + 4 * scale, tz - 5 * scale, 12 * scale, 10 * scale);
-
-  // Chips
-  ctx.fillStyle = "#bbaa66";
-  for (let i = latheChips.length - 1; i >= 0; i--) {
-    const c = latheChips[i];
-    c.x += c.vx * dt; c.y += c.vy * dt;
-    c.vy += 40 * dt;
-    c.life -= dt;
-    const sx = cx + c.x * scale, sy = cy - c.y * scale;
-    ctx.fillRect(sx - 1, sy - 1, 2, 2);
-    if (c.life <= 0) latheChips.splice(i, 1);
-  }
-
-  // Axis labels
-  ctx.fillStyle = "#5a8ab5";
-  ctx.font = "10px monospace";
-  ctx.fillText("X →", cx + LATHE_LEN * scale + 8, cy + 3);
-  ctx.fillText("Z ↑", cx - 18, cy - LATHE_MAX_R * scale * 1.1);
-}
-
-
-// ─── LCD & LISTING ─────────────────────────────────────────────────────────────
-
-function populateLCD(lines) {
-  lcdLines.innerHTML = "";
-  lcdElements = [];
-  const show = lines.slice(0, 200);
-  for (let i = 0; i < show.length; i++) {
-    const div = document.createElement("div");
-    div.className = "cnc-lcd-line";
-    div.textContent = show[i];
-    lcdLines.appendChild(div);
-    lcdElements.push(div);
-  }
-}
-
-function populateListing(lines) {
-  gcodeListingLines.innerHTML = "";
-  listingElements = [];
-  for (let i = 0; i < lines.length; i++) {
-    const div = document.createElement("div");
-    div.className = "cnc-listing-line";
-    div.innerHTML = `<span class="ln">${i + 1}</span>${escapeHtml(lines[i])}`;
-    gcodeListingLines.appendChild(div);
-    listingElements.push(div);
-  }
-  gcodeListing.hidden = false;
-}
-
-let lastHighlightedLine = -1;
-function highlightLine(lineIdx) {
-  if (lineIdx === lastHighlightedLine) return;
-  lastHighlightedLine = lineIdx;
-  for (const el of lcdElements) el.classList.remove("active");
-  for (const el of listingElements) el.classList.remove("active");
-  if (lineIdx >= 0 && lineIdx < lcdElements.length) {
-    lcdElements[lineIdx].classList.add("active");
-    lcdElements[lineIdx].scrollIntoView({ block: "nearest" });
-  }
-  if (lineIdx >= 0 && lineIdx < listingElements.length) {
-    listingElements[lineIdx].classList.add("active");
-    listingElements[lineIdx].scrollIntoView({ block: "nearest" });
-  }
-  lcdLineNo.textContent = `N${lineIdx}`;
-}
-
-function escapeHtml(s) {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
-
-
-// ─── SIMULATION LOOP ──────────────────────────────────────────────────────────
-
-let lastTime = 0;
-function animationLoop(time) {
-  requestAnimationFrame(animationLoop);
-  const dt = Math.min((time - lastTime) / 1000, 0.05);
-  lastTime = time;
-
-  if (machineType === "freze") {
-    if (spindleGroup && simState === "running") spindleGroup.rotation.y += dt * 15;
-    updateChips(dt);
-    controls.update();
-    renderer.render(scene, camera);
-  } else {
-    const canvas = viewTorna;
-    const ctx = canvas.getContext("2d");
-    const dpr = window.devicePixelRatio || 1;
-    if (canvas.width !== canvas.clientWidth * dpr || canvas.height !== canvas.clientHeight * dpr) {
-      canvas.width = canvas.clientWidth * dpr;
-      canvas.height = canvas.clientHeight * dpr;
-      ctx.scale(dpr, dpr);
-    }
-    drawLathe(ctx, canvas.clientWidth, canvas.clientHeight, simState === "running" ? dt : 0);
-  }
-
-  if (simState === "running") stepSim(dt);
-}
-
-function stepSim(dt) {
-  if (moveIndex >= moves.length) {
-    simState = "done";
-    lcdStatus.textContent = "BİTTİ";
-    return;
-  }
-  const mv = moves[moveIndex];
-  if (mv.type === "mcode" || mv.type === "end") {
-    highlightLine(mv.line);
-    if (mv.type === "end") { simState = "done"; lcdStatus.textContent = "BİTTİ"; return; }
-    moveIndex++;
-    return;
-  }
-  if (mv.type !== "linear" && mv.type !== "rapid") { moveIndex++; return; }
-
-  const f = mv.type === "rapid" ? 5000 : (mv.feed * feedMult);
-  const mmPerSec = (f / 60) * speedMult;
-  const dx = mv.to.x - mv.from.x, dy = mv.to.y - mv.from.y, dz = mv.to.z - mv.from.z;
-  const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
-  if (dist < 0.001) { moveIndex++; return; }
-
-  const totalTime = dist / mmPerSec;
-  moveT += dt;
-  const t = Math.min(1, moveT / totalTime);
-
-  const px = mv.from.x + dx * t;
-  const py = mv.from.y + dy * t;
-  const pz = mv.from.z + dz * t;
-
-  if (machineType === "freze") {
-    toolGroup.position.set(px, py, pz);
-    if (mv.type === "linear") cutFreze(px, py, pz);
-  } else {
-    latheToolX = px;
-    latheToolZ = pz;
-    if (mv.type === "linear") cutLathe(px, pz);
-  }
-
-  droX.textContent = px.toFixed(3);
-  droY.textContent = py.toFixed(3);
-  droZ.textContent = pz.toFixed(3);
-  droF.textContent = String(Math.round(mv.type === "rapid" ? 9999 : mv.feed));
-  droS.textContent = String(Math.round(mv.speed));
-  droT.textContent = String(mv.tool).padStart(2, "0");
-  highlightLine(mv.line);
-
-  if (t >= 1) { moveIndex++; moveT = 0; }
-}
-
-
-// ─── CONTROLS ──────────────────────────────────────────────────────────────────
-
-function loadGCode(text) {
-  const parsed = parseGCode(text);
-  parsedLines = parsed.lines;
-  const built = buildMoves(parsed.commands);
-  moves = built;
-  moveIndex = 0;
-  moveT = 0;
-  simState = "idle";
-  lcdStatus.textContent = "HAZIR";
-
-  populateLCD(parsedLines);
-  populateListing(parsedLines);
-
-  if (machineType === "freze") {
-    setupFrezeStock(built);
-    if (built.length) toolGroup.position.set(built[0].from.x, built[0].from.y, built[0].from.z);
-  } else {
-    resetLathe();
-  }
-
-  droX.textContent = "0.000"; droY.textContent = "0.000"; droZ.textContent = "0.000";
-  droF.textContent = "0"; droS.textContent = "0"; droT.textContent = "01";
-
-  $("btn-estop").classList.remove("engaged");
-}
-
-function cycleStart() {
-  if (simState === "estop") return;
-  if (simState === "done") {
-    moveIndex = 0; moveT = 0;
-    if (machineType === "freze") resetFrezeStock();
-    else resetLathe();
-  }
-  simState = "running";
-  lcdStatus.textContent = "ÇALIŞIYOR";
-}
-
-function feedHold() {
-  if (simState === "running") {
-    simState = "paused";
-    lcdStatus.textContent = "DURAKLATILDI";
-  }
-}
-
-function resetSim() {
-  simState = "idle";
-  moveIndex = 0;
-  moveT = 0;
-  lcdStatus.textContent = "HAZIR";
-  if (machineType === "freze") resetFrezeStock();
-  else resetLathe();
-  droX.textContent = "0.000"; droY.textContent = "0.000"; droZ.textContent = "0.000";
-}
-
-function estop() {
-  const btn = $("btn-estop");
-  if (simState === "estop") {
-    simState = "idle";
-    btn.classList.remove("engaged");
-    lcdStatus.textContent = "HAZIR";
-  } else {
-    simState = "estop";
-    btn.classList.add("engaged");
-    lcdStatus.textContent = "ACİL DURDURMA";
-  }
-}
-
-function switchMachine(type) {
-  machineType = type;
-  tabFreze.classList.toggle("active", type === "freze");
-  tabTorna.classList.toggle("active", type === "torna");
-  viewFreze.hidden = type !== "freze";
-  viewTorna.hidden = type !== "torna";
-  machineLabel.textContent = type === "freze" ? "FANUC 0i-MF — Freze" : "FANUC 0i-TF — Torna";
-
-  const camRow = document.querySelector(".cnc-camera-btns");
-  if (camRow) camRow.style.display = type === "freze" ? "flex" : "none";
-
-  simState = "idle";
-  moves = [];
-  moveIndex = 0;
-  moveT = 0;
-  lcdStatus.textContent = "HAZIR";
-  populateLCD([]);
-  gcodeListingLines.innerHTML = "";
-  gcodeListing.hidden = true;
-  droX.textContent = "0.000"; droY.textContent = "0.000"; droZ.textContent = "0.000";
-}
-
-function setMode(mode) {
-  currentMode = mode;
-  $("mode-auto").classList.toggle("active", mode === "auto");
-  $("mode-mdi").classList.toggle("active", mode === "mdi");
-  $("mode-manual").classList.toggle("active", mode === "manual");
-  modeLabel.textContent = mode.toUpperCase();
-}
-
-function setCamera(view) {
-  if (!camera || !controls) return;
-  Object.values(camBtns).forEach((b) => b.classList.remove("active"));
-  camBtns[view]?.classList.add("active");
-  const t = controls.target;
-  const d = 250;
-  switch (view) {
-    case "iso": camera.position.set(t.x + d, t.y + d * 0.7, t.z + d); break;
-    case "top": camera.position.set(t.x, t.y, t.z + d); break;
-    case "front": camera.position.set(t.x, t.y - d, t.z + d * 0.3); break;
-    case "right": camera.position.set(t.x + d, t.y, t.z + d * 0.3); break;
-  }
-  camera.lookAt(t);
-  controls.update();
-}
-
-
-// ─── DEMO PROGRAMS ─────────────────────────────────────────────────────────────
-
-const DEMO_FREZE = `( Demo: Freze - Kare Cep + Kontur )
-G90 G21
-G28
-
-( Kare cep - kaba )
-G00 X10 Y10 Z5
-G01 Z-2 F200
-G01 X60 F350
-G01 Y50
-G01 X10
-G01 Y10
-G01 X15 Y15
-G01 X55
-G01 Y45
-G01 X15
-G01 Y15
-G01 Z-4 F200
-G01 X55 F350
-G01 Y45
-G01 X15
-G01 Y15
-G01 X20 Y20
-G01 X50
-G01 Y40
-G01 X20
-G01 Y20
-
-( Daire kontur )
-G00 Z5
-G00 X35 Y60
-G01 Z-3 F200
-G02 X35 Y60 I0 J-15 F300
-
-( Çapraz oluk )
-G00 Z5
-G00 X5 Y5
-G01 Z-1.5 F200
-G01 X65 Y55 F400
-
-G00 Z20
-G28
-M30`;
-
-const DEMO_TORNA = `( Demo: Torna - Kademeli Mil )
-G90 G21
-G28
-
-( Dis torna - 1. kademe )
-G00 X200 Z65
-G01 Z55 F150
-G00 Z65
-G00 X200 Z55
-G01 X0 Z55 F100
-
-G00 X200 Z65
-G01 Z50 F150
-G00 Z65
-G00 X200 Z50
-G01 X0 Z50 F100
-
-G00 X200 Z65
-G01 Z45 F150
-G00 Z65
-G00 X200 Z45
-G01 X0 Z45 F100
-
-( 2. kademe )
-G00 X100 Z40
-G01 X0 Z40 F100
-
-G00 X100 Z40
-G01 Z35 F150
-G00 Z40
-G00 X100 Z35
-G01 X0 Z35 F100
-
-G00 X100 Z40
-G01 Z30 F150
-G00 Z40
-G00 X100 Z30
-G01 X0 Z30 F100
-
-( 3. kademe - ince )
-G00 X60 Z25
-G01 X0 Z25 F80
-
-G00 X60 Z25
-G01 Z20 F120
-G00 Z25
-G00 X60 Z20
-G01 X0 Z20 F80
-
-( Konik geçiş )
-G00 X200 Z70
-G01 X100 Z120 F150
-G01 X60 Z150 F120
-
-G00 Z200
-G28
-M30`;
-
-
-// ─── EVENT WIRING ──────────────────────────────────────────────────────────────
-
-tabFreze.addEventListener("click", () => switchMachine("freze"));
-tabTorna.addEventListener("click", () => switchMachine("torna"));
-
-$("btn-load-gcode").addEventListener("click", () => { loadGCode(gcodeInput.value); });
-$("btn-demo-freze").addEventListener("click", () => { switchMachine("freze"); gcodeInput.value = DEMO_FREZE; loadGCode(DEMO_FREZE); });
-$("btn-demo-torna").addEventListener("click", () => { switchMachine("torna"); gcodeInput.value = DEMO_TORNA; loadGCode(DEMO_TORNA); });
-
-$("btn-cycle-start").addEventListener("click", cycleStart);
-$("btn-feed-hold").addEventListener("click", feedHold);
-$("btn-reset").addEventListener("click", resetSim);
-$("btn-estop").addEventListener("click", estop);
-
-$("mode-auto").addEventListener("click", () => setMode("auto"));
-$("mode-mdi").addEventListener("click", () => setMode("mdi"));
-$("mode-manual").addEventListener("click", () => setMode("manual"));
-
-speedSlider.addEventListener("input", () => { speedMult = speedSlider.value / 100; speedPct.textContent = `${speedSlider.value}%`; });
-feedSlider.addEventListener("input", () => { feedMult = feedSlider.value / 100; feedPct.textContent = `${feedSlider.value}%`; });
-
-Object.entries(camBtns).forEach(([view, btn]) => btn.addEventListener("click", () => setCamera(view)));
-
-// Check for G-code from CAM workflow via sessionStorage
-const camData = sessionStorage.getItem("rover_cnc_gcode");
-if (camData) {
+// ─── CAM INTEGRATION ──────────────────────────────────────────────────────────
+
+function checkCamData() {
+  const raw = sessionStorage.getItem("rover_cnc_gcode");
+  if (!raw) return;
   try {
-    const data = JSON.parse(camData);
-    if (data.gcode) {
-      gcodeInput.value = data.gcode;
-      if (data.machineType === "torna") switchMachine("torna");
-      else switchMachine("freze");
-      loadGCode(data.gcode);
+    const data = JSON.parse(raw);
+    if (!data.gcode) return;
+    if (data.machineType === "torna") {
+      setTab("lathe");
+    } else {
+      setTab("mill");
     }
   } catch {}
 }
 
+// ─── INIT ─────────────────────────────────────────────────────────────────────
 
-// ─── INIT ──────────────────────────────────────────────────────────────────────
-
-initThree();
-requestAnimationFrame(animationLoop);
+initMill();
+setTab("mill");
+wireEvents();
+checkCamData();
+requestAnimationFrame(loop);
