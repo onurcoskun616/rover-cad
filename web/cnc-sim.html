@@ -741,12 +741,15 @@ function parseGcode(text, type){
 function runMillGcode(parsed){
   const {q, bounds}=parsed;
   if(!q.length) return;
+  for(const m of q){const gy=m.y,gz=m.z;m.y=gz;m.z=gy;}
+  const bYmin=bounds.yMin,bYmax=bounds.yMax,bZmin=bounds.zMin,bZmax=bounds.zMax;
+  bounds.yMin=bZmin;bounds.yMax=bZmax;bounds.zMin=bYmin;bounds.zMax=bYmax;
   if(bounds.xMax>bounds.xMin){
     const margin=20;
     const newW=Math.max(80, (bounds.xMax-bounds.xMin)+margin*2);
     const newD=Math.max(60, (bounds.zMax-bounds.zMin)+margin*2);
-    const newTop=Math.max(20, bounds.yMax+10);
-    resizeMillStock(Math.round(newW), Math.round(newD), Math.round(newTop));
+    const newTop=Math.max(20, Math.round(bounds.yMax+10));
+    resizeMillStock(Math.round(newW), Math.round(newD), newTop);
     const cx=(bounds.xMax+bounds.xMin)/2, cz=(bounds.zMax+bounds.zMin)/2;
     for(const m of q){
       m.x=clamp(m.x-cx, -W/2+MARGIN*dx, W/2-MARGIN*dx);
@@ -761,13 +764,15 @@ function runMillGcode(parsed){
 function runLatheGcode(parsed){
   const {q, bounds}=parsed;
   if(!q.length) return;
-  if(bounds.xMax>bounds.xMin){
+  if(bounds.xMax>bounds.xMin||bounds.zMax>bounds.zMin){
     const newR=Math.max(20, Math.round(bounds.xMax+10));
-    const newLen=Math.max(40, Math.round(Math.abs(bounds.zMax-bounds.zMin)+40));
+    const zRange=Math.abs(bounds.zMax-bounds.zMin);
+    const newLen=Math.max(40, Math.round(zRange+40));
     resizeLatheStock(newLen, newR);
+    const zOff=bounds.zMin<0?-bounds.zMin+20:0;
     for(const m of q){
       m.x=clamp(m.x, 0, STOCK_R+12);
-      m.z=clamp(m.z, -20, STOCK_LEN);
+      m.z=clamp(m.z+zOff, -20, STOCK_LEN);
     }
   }
   lathe.setMode("AUTO"); lathe.s.spindleOn=true;
@@ -786,6 +791,17 @@ $("l-file").onchange=e=>{
   f.text().then(txt=>runLatheGcode(parseGcode(txt,"lathe")));
   e.target.value="";
 };
+
+/* --- CAM sayfasından gelen G-code otomatik yükleme --- */
+{const raw=sessionStorage.getItem("rover_cnc_gcode");
+if(raw){try{const d=JSON.parse(raw);if(d.gcode){
+  const isMill=!d.machineType||d.machineType==="freze"||d.machineType==="mill";
+  setTimeout(()=>{
+    if(isMill){setTab("mill");$("m-file-info").textContent="CAM çıktısı";$("m-file-info").classList.remove("hidden");runMillGcode(parseGcode(d.gcode,"mill"));}
+    else{setTab("lathe");$("l-file-info").textContent="CAM çıktısı";$("l-file-info").classList.remove("hidden");runLatheGcode(parseGcode(d.gcode,"lathe"));}
+  },300);
+  sessionStorage.removeItem("rover_cnc_gcode");
+}}catch(e){console.error("CAM gcode yüklenemedi:",e);}}}
 
 /* ==================================================================== */
 /* ==========================  TAB DEĞİŞTİRME  ======================== */
