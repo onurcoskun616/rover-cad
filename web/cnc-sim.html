@@ -1,15 +1,14 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="tr" class="bg-zinc-900">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>CNC Simülatör · Topkapı Okulları</title>
-<link rel="stylesheet" href="style.css" />
+<title>CNC Simülatör · Torna & Freze</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <script type="importmap">
 { "imports": {
-  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
 }}
 </script>
 <style>
@@ -17,67 +16,68 @@
   .animate-spin-slow { animation: spin-slow 2s linear infinite; display:inline-block; }
   .mdi-key{display:flex;align-items:center;justify-content:center;border-radius:3px;border:1px solid rgba(9,9,11,.6);
     background-image:linear-gradient(to bottom,#e4e4e7,#a1a1aa);color:#27272a;font-weight:700;
-    box-shadow:inset 0 1px 0 rgba(255,255,255,.6),0 1px 2px rgba(0,0,0,.5);transition:transform .05s;cursor:pointer;}
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.6),0 1px 2px rgba(0,0,0,.5);transition:transform .05s;}
   .mdi-key:active{transform:translateY(1px);background-image:linear-gradient(to bottom,#d4d4d8,#71717a);}
   input[type="range"]{accent-color:#06b6d4;}
   .tb-btn{display:flex;align-items:center;justify-content:center;border:1px solid #2b6f9c;border-radius:6px;
-    background:linear-gradient(to bottom,#1f6fa0,#124b70);color:#e6f4ff;box-shadow:inset 0 1px 0 rgba(255,255,255,.25);cursor:pointer;}
+    background:linear-gradient(to bottom,#1f6fa0,#124b70);color:#e6f4ff;box-shadow:inset 0 1px 0 rgba(255,255,255,.25);}
   .tb-btn:hover{filter:brightness(1.15);} .tb-btn:active{transform:translateY(1px);}
   .tb-icn{display:flex;align-items:center;justify-content:center;border:1px solid #3f5a2f;border-radius:6px;
-    background:linear-gradient(to bottom,#4a7a2c,#2f5017);color:#eaffd6;cursor:pointer;}
+    background:linear-gradient(to bottom,#4a7a2c,#2f5017);color:#eaffd6;}
   .tb-icn:hover{filter:brightness(1.15);}
 </style>
 </head>
 <body class="text-zinc-100">
 <main class="flex min-h-screen flex-col bg-zinc-900 p-2 lg:h-screen lg:overflow-hidden">
 
-  <!-- ÜST BAR -->
+  <!-- ÜST BAR + SEÇİCİ -->
   <header class="mb-2 flex items-center justify-between rounded-md bg-zinc-800 px-3 py-2">
-    <div class="flex items-center gap-3">
-      <a href="cam.html" class="text-[11px] text-cyan-400 hover:text-cyan-300">← CAM</a>
-      <a href="index.html" class="text-[11px] text-zinc-400 hover:text-zinc-300">Ana Sayfa</a>
-      <h1 class="text-sm font-bold tracking-wide">CNC Simülatör</h1>
-    </div>
+    <h1 class="text-sm font-bold tracking-wide">CNC Simülatör</h1>
     <div class="flex overflow-hidden rounded-md border border-zinc-600">
-      <button id="tab-mill" class="px-4 py-1.5 text-[12px] font-bold">Freze (3B)</button>
+      <button id="tab-mill"  class="px-4 py-1.5 text-[12px] font-bold">Freze (3B)</button>
       <button id="tab-lathe" class="px-4 py-1.5 text-[12px] font-bold">Torna (2B)</button>
     </div>
-    <div class="flex items-center gap-3">
-      <p class="hidden text-[11px] text-zinc-400 lg:block">AUTO + CYCLE START otomatik · MANUAL jog/MDI ile elle</p>
-      <button id="logout-btn" class="text-[11px] text-zinc-400 hover:text-zinc-300" type="button">Çıkış</button>
-    </div>
+    <p class="hidden text-[11px] text-zinc-400 md:block">AUTO + CYCLE START otomatik işler · MANUAL jog/MDI ile elle talaş kaldır</p>
   </header>
 
   <div class="min-h-0 flex-1">
 
+    <!-- ==================================================================== -->
     <!-- ============================  FREZE (3B)  ========================== -->
+    <!-- ==================================================================== -->
     <div id="view-mill" class="flex h-full w-full flex-col gap-2 lg:flex-row">
-      <section class="relative min-h-[400px] flex-1 overflow-hidden rounded-md border border-zinc-700 bg-black">
+      <section class="relative flex-1 overflow-hidden rounded-md border border-zinc-700 bg-black">
         <div id="mill-canvas-wrap" class="absolute inset-0"></div>
+
+        <!-- sol üst durum -->
         <div class="pointer-events-none absolute left-2 top-2 z-10 rounded bg-black/50 px-2 py-1 font-mono text-[10px] text-emerald-300 leading-tight">
           <div id="m-stat-pos">X 0.000 Y 0.000 Z 0.000</div>
           <div id="m-stat-tool">tool_selected = 1</div>
           <div id="m-stat-cut">cutting_status = 0</div>
           <div id="m-stat-fps" class="text-cyan-300">FPS: 0</div>
         </div>
+
+        <!-- sağ üst oynatma kontrolleri -->
         <div class="absolute right-2 top-2 z-10 flex gap-2">
-          <button id="m-play" title="Cycle Start" class="tb-btn h-10 w-10 text-lg">▶</button>
-          <button id="m-pause" title="Feed Hold" class="tb-btn h-10 w-10 text-lg">⏸</button>
-          <button id="m-stop" title="Stop" class="tb-btn h-10 w-10 text-lg">⏹</button>
-          <button id="m-new" title="Yeni Parça" class="tb-btn h-10 w-10 text-base">⤓</button>
-          <button id="m-mute" title="Ses" class="tb-btn h-10 w-10 text-base">🔊</button>
+          <button id="m-play"  title="Cycle Start"  class="tb-btn h-10 w-10 text-lg">▶</button>
+          <button id="m-pause" title="Feed Hold"    class="tb-btn h-10 w-10 text-lg">⏸</button>
+          <button id="m-stop"  title="Stop"         class="tb-btn h-10 w-10 text-lg">⏹</button>
+          <button id="m-new"   title="Yeni Parça"   class="tb-btn h-10 w-10 text-base">⤓</button>
+          <button id="m-mute"  title="Ses"          class="tb-btn h-10 w-10 text-base">🔊</button>
         </div>
+
+        <!-- sol dikey kamera araç çubuğu -->
         <div class="absolute left-2 top-24 z-10 flex flex-col gap-2">
-          <button data-view="iso" title="İzometrik" class="tb-icn h-9 w-9 text-sm">⬛</button>
-          <button data-view="top" title="Üstten" class="tb-icn h-9 w-9 text-sm">▦</button>
-          <button data-view="front" title="Önden" class="tb-icn h-9 w-9 text-sm">▭</button>
-          <button data-view="right" title="Yandan" class="tb-icn h-9 w-9 text-sm">◨</button>
-          <button id="m-wire" title="Tel kafes" class="tb-icn h-9 w-9 text-sm">◇</button>
+          <button data-view="iso"   title="İzometrik" class="tb-icn h-9 w-9 text-sm">⬛</button>
+          <button data-view="top"   title="Üstten"    class="tb-icn h-9 w-9 text-sm">▦</button>
+          <button data-view="front" title="Önden"     class="tb-icn h-9 w-9 text-sm">▭</button>
+          <button data-view="right" title="Yandan"    class="tb-icn h-9 w-9 text-sm">◨</button>
+          <button id="m-wire"       title="Tel kafes" class="tb-icn h-9 w-9 text-sm">◇</button>
         </div>
       </section>
 
       <!-- FREZE PANELİ -->
-      <aside class="w-full shrink-0 overflow-y-auto lg:w-[310px]" style="max-height:calc(100vh - 70px)">
+      <aside class="w-full shrink-0 lg:w-[380px]">
         <div class="flex h-full flex-col gap-2 rounded-md bg-zinc-800 p-2 text-zinc-200">
           <!-- LCD -->
           <div class="rounded-sm border-4 border-zinc-500 bg-zinc-900 p-1.5">
@@ -169,7 +169,7 @@
             </button>
           </div>
 
-          <!-- MDI keypad -->
+          <!-- MDI keypad (dekoratif) -->
           <div class="rounded border border-zinc-600 bg-zinc-700/40 p-2">
             <div id="mmdi" class="grid grid-cols-6 gap-1"></div>
           </div>
@@ -189,14 +189,16 @@
       </aside>
     </div>
 
+    <!-- ==================================================================== -->
     <!-- ============================  TORNA (2B)  ========================== -->
+    <!-- ==================================================================== -->
     <div id="view-lathe" class="hidden h-full w-full flex-col gap-2 lg:flex-row">
-      <section class="relative min-h-[400px] flex-1 overflow-hidden rounded-md border border-zinc-700 bg-black">
+      <section class="relative flex-1 overflow-hidden rounded-md border border-zinc-700 bg-black">
         <div class="pointer-events-none absolute left-2 top-2 z-10 rounded bg-black/40 px-2 py-1 font-mono text-[11px] text-cyan-300">SwanSoft CNC · FANUC 0i-T · Turning</div>
         <canvas id="lathe-canvas" class="block h-full w-full"></canvas>
         <div id="hud" class="pointer-events-none absolute bottom-2 left-2 z-10 rounded bg-black/50 px-2 py-1 font-mono text-[11px] text-emerald-300"></div>
       </section>
-      <aside class="w-full shrink-0 overflow-y-auto lg:w-[310px]" style="max-height:calc(100vh - 70px)">
+      <aside class="w-full shrink-0 lg:w-[380px]">
         <div class="flex h-full flex-col gap-2 rounded-md bg-zinc-800 p-2 text-zinc-200">
           <div class="rounded-sm border-4 border-zinc-500 bg-zinc-900 p-1.5">
             <div class="rounded-sm bg-[#0f261b] p-2 font-mono text-[11px] text-[#5be08a]">
@@ -286,7 +288,339 @@
   </div>
 </main>
 
-<script type="module" src="cnc-sim.js"></script>
-<script type="module" src="session-nav.js"></script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+const $ = id => document.getElementById(id);
+const clamp = (v,lo,hi) => Math.max(lo, Math.min(hi, v));
+const fmt = n => n.toFixed(3);
+let active = 'mill';
+
+/* ==================================================================== */
+/* ============================  TORNA MOTORU  ======================== */
+/* ==================================================================== */
+const N=260, STOCK_LEN=200, STOCK_R=60, TOOL_HALF_W=3.2;
+function roundRect(ctx,x,y,w,h,r){const rr=Math.min(r,Math.abs(w)/2,Math.abs(h)/2);ctx.beginPath();ctx.moveTo(x+rr,y);ctx.arcTo(x+w,y,x+w,y+h,rr);ctx.arcTo(x+w,y+h,x,y+h,rr);ctx.arcTo(x,y+h,x,y,rr);ctx.arcTo(x,y,x+w,y,rr);ctx.closePath();}
+class LatheEngine{
+  constructor(){this.radii=new Float32Array(N).fill(STOCK_R);this.chips=[];this.angle=0;this.jogX=0;this.jogZ=0;this.queue=[];this.moveActive=null;
+    this.s={x:STOCK_R+8,z:-12,targetX:STOCK_R+8,targetZ:-12,spindleOn:false,spindleRpm:1200,actualRpm:0,feed:200,feedOverride:1,mode:"MANUAL",running:false,alarm:null,emergency:false,removed:0,toolNo:1};
+    this.initialVolume=this.volume();}
+  volume(){let v=0;for(let i=0;i<N;i++)v+=this.radii[i]*this.radii[i];return v;}
+  reset(){this.radii=new Float32Array(N).fill(STOCK_R);this.chips=[];this.queue=[];this.moveActive=null;this.s.running=false;this.s.removed=0;this.s.alarm=null;this.s.x=STOCK_R+8;this.s.z=-12;this.s.targetX=this.s.x;this.s.targetZ=this.s.z;}
+  clearAlarm(){this.s.alarm=null;if(this.s.emergency)this.s.emergency=false;}
+  emergencyStop(){this.s.emergency=true;this.s.running=false;this.s.spindleOn=false;this.queue=[];this.moveActive=null;this.s.alarm="EMG";}
+  toggleSpindle(){if(!this.s.emergency)this.s.spindleOn=!this.s.spindleOn;}
+  setSpindleRpm(v){this.s.spindleRpm=clamp(Math.round(v),0,4000);}
+  setFeed(v){this.s.feed=clamp(Math.round(v),1,2000);}
+  setFeedOverride(v){this.s.feedOverride=clamp(v,0,1.2);}
+  setToolNo(n){this.s.toolNo=clamp(Math.round(n),1,12);}
+  setMode(m){if(!this.s.running)this.s.mode=m;}
+  setJog(dx,dz){this.jogX=dx;this.jogZ=dz;}
+  gotoTarget(x,z){if(this.s.emergency||this.s.mode!=="MANUAL")return;this.s.targetX=clamp(x,0,STOCK_R+12);this.s.targetZ=clamp(z,-20,STOCK_LEN);this.moveActive={type:"rapid",x:this.s.targetX,z:this.s.targetZ};}
+  startCycle(){if(this.s.emergency||this.s.mode!=="AUTO")return;if(!this.s.spindleOn)this.s.spindleOn=true;const clearZ=-12,targetR=30,q=[];let r=STOCK_R;
+    while(r>targetR){r=Math.max(targetR,r-6);q.push({type:"rapid",x:r,z:clearZ});q.push({type:"feed",x:r,z:STOCK_LEN-20});q.push({type:"rapid",x:r+6,z:STOCK_LEN-20});q.push({type:"rapid",x:r+6,z:clearZ});}
+    q.push({type:"rapid",x:targetR,z:clearZ});q.push({type:"feed",x:targetR+12,z:0});q.push({type:"rapid",x:STOCK_R+8,z:-12});
+    this.queue=q;this.moveActive=this.queue.shift()||null;this.s.running=true;}
+  stopCycle(){this.queue=[];this.moveActive=null;this.s.running=false;}
+  zToIndex(z){return Math.round((z/STOCK_LEN)*(N-1));}
+  cutAt(z,toolR,agg){const half=Math.ceil((TOOL_HALF_W/STOCK_LEN)*N),c=this.zToIndex(z);let d=false;for(let i=c-half;i<=c+half;i++){if(i<0||i>=N)continue;if(this.radii[i]>toolR+.01){this.radii[i]=Math.max(toolR,this.radii[i]-agg);d=true;}}return d;}
+  spawnChips(px,py,it){const n=Math.min(3,Math.floor(it));for(let i=0;i<n;i++)this.chips.push({px,py,vx:-(1+Math.random()*2.5),vy:-(.5+Math.random()*2),life:1,size:1+Math.random()*2});if(this.chips.length>220)this.chips.splice(0,this.chips.length-220);}
+  update(dt){const tr=this.s.spindleOn?this.s.spindleRpm:0;this.s.actualRpm+=(tr-this.s.actualRpm)*Math.min(1,dt*3);if(this.s.actualRpm<1)this.s.actualRpm=tr===0?0:this.s.actualRpm;this.angle+=(this.s.actualRpm/60)*dt*Math.PI*2;
+    if(this.s.emergency)return;const feedRate=(this.s.feed/60)*this.s.feedOverride,rapid=220;
+    if(this.s.mode==="MANUAL"&&!this.moveActive&&(this.jogX||this.jogZ)){const rate=this.s.spindleOn?feedRate:rapid*.35;this.s.x=clamp(this.s.x+this.jogX*rate*dt,0,STOCK_R+12);this.s.z=clamp(this.s.z+this.jogZ*rate*dt,-20,STOCK_LEN);this.s.targetX=this.s.x;this.s.targetZ=this.s.z;}
+    if(this.moveActive){const m=this.moveActive,rate=m.type==="feed"?feedRate:rapid,dx=m.x-this.s.x,dz=m.z-this.s.z,dist=Math.hypot(dx,dz),step=rate*dt;
+      if(dist<=step||dist<1e-4){this.s.x=m.x;this.s.z=m.z;this.moveActive=this.queue.shift()||null;if(!this.moveActive&&this.s.running)this.s.running=false;}else{this.s.x+=(dx/dist)*step;this.s.z+=(dz/dist)*step;}}
+    const cutting=this.s.actualRpm>30&&this.s.z>=-1&&this.s.z<=STOCK_LEN&&this.s.x<STOCK_R+.5;
+    if(cutting){const agg=Math.max(.4,(this.s.actualRpm/1200)*1.2);if(this.cutAt(this.s.z,this.s.x,agg))this.spawnChips(this.s.z,this.s.x,3);}
+    for(const c of this.chips){c.px+=c.vx*dt*20;c.py+=c.vy*dt*20;c.vy+=40*dt;c.life-=dt*1.4;}this.chips=this.chips.filter(c=>c.life>0);
+    this.s.removed=clamp(1-this.volume()/this.initialVolume,0,1);if(!this.moveActive&&this.s.mode==="AUTO"&&this.queue.length===0)this.s.running=false;}
+  draw(ctx,w,h){ctx.clearRect(0,0,w,h);const bg=ctx.createLinearGradient(0,0,0,h);bg.addColorStop(0,"#0b1f2e");bg.addColorStop(1,"#061019");ctx.fillStyle=bg;ctx.fillRect(0,0,w,h);
+    const mL=w*.06,uW=w*.9,cy=h*.5,sZ=uW/(STOCK_LEN+60),sX=Math.min((h*.36)/STOCK_R,sZ);
+    ctx.strokeStyle="rgba(120,180,210,.25)";ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(0,cy);ctx.lineTo(w,cy);ctx.stroke();
+    const zX=z=>mL+(STOCK_LEN-z)*sZ,rT=r=>cy-r*sX,rB=r=>cy+r*sX;
+    const chX=zX(STOCK_LEN),chW=46,chR=STOCK_R+30,chg=ctx.createLinearGradient(0,cy-chR*sX,0,cy+chR*sX);chg.addColorStop(0,"#cfd6dc");chg.addColorStop(.5,"#8b949c");chg.addColorStop(1,"#565d63");ctx.fillStyle=chg;roundRect(ctx,chX-chW,cy-chR*sX,chW+6,chR*2*sX,6);ctx.fill();
+    ctx.save();ctx.translate(chX,cy);for(let j=0;j<3;j++){const a=this.angle*.25+(j*Math.PI*2)/3,jr=chR*sX*.72;ctx.fillStyle="#3f464b";ctx.save();ctx.rotate(a);roundRect(ctx,-8,-jr,16,jr*.42,3);ctx.fill();ctx.restore();}ctx.restore();
+    ctx.beginPath();ctx.moveTo(zX(STOCK_LEN),rT(this.radii[N-1]));for(let i=N-1;i>=0;i--){const z=(i/(N-1))*STOCK_LEN;ctx.lineTo(zX(z),rT(this.radii[i]));}for(let i=0;i<N;i++){const z=(i/(N-1))*STOCK_LEN;ctx.lineTo(zX(z),rB(this.radii[i]));}ctx.closePath();
+    const wg=ctx.createLinearGradient(0,cy-STOCK_R*sX,0,cy+STOCK_R*sX);wg.addColorStop(0,"#e7a86a");wg.addColorStop(.35,"#c9843f");wg.addColorStop(.5,"#f0c290");wg.addColorStop(.65,"#b9752f");wg.addColorStop(1,"#8a531f");ctx.fillStyle=wg;ctx.fill();
+    ctx.save();ctx.clip();ctx.strokeStyle="rgba(255,255,255,.10)";const ph=(this.angle*12)%22;for(let sx=mL-22+ph;sx<mL+uW;sx+=22){ctx.beginPath();ctx.moveTo(sx,cy-STOCK_R*sX);ctx.lineTo(sx,cy+STOCK_R*sX);ctx.stroke();}ctx.restore();
+    ctx.strokeStyle="rgba(0,0,0,.35)";ctx.lineWidth=1.2;ctx.stroke();
+    const endR=this.radii[0],ex=zX(0),eY=endR*sX;ctx.beginPath();ctx.ellipse(ex,cy,8,eY,0,0,Math.PI*2);const eg=ctx.createLinearGradient(ex-8,0,ex+8,0);eg.addColorStop(0,"#a9691f");eg.addColorStop(.5,"#f0c290");eg.addColorStop(1,"#c9843f");ctx.fillStyle=eg;ctx.fill();ctx.strokeStyle="rgba(0,0,0,.35)";ctx.stroke();ctx.strokeStyle="rgba(60,30,10,.5)";ctx.beginPath();ctx.moveTo(ex,cy);ctx.lineTo(ex+Math.cos(this.angle)*5,cy+Math.sin(this.angle)*eY);ctx.stroke();
+    ctx.fillStyle="#ffd9a0";for(const c of this.chips){ctx.globalAlpha=Math.max(0,c.life);ctx.fillRect(zX(c.px),rB(c.py),c.size,c.size);}ctx.globalAlpha=1;
+    const tx=zX(this.s.z),ty=rB(this.s.x);ctx.fillStyle="#c7ccd1";ctx.strokeStyle="#2a2e31";ctx.lineWidth=1;roundRect(ctx,tx-6,ty+8,12,h-(ty+8),2);ctx.fill();ctx.stroke();ctx.beginPath();ctx.moveTo(tx,ty);ctx.lineTo(tx+12,ty+16);ctx.lineTo(tx-12,ty+16);ctx.closePath();ctx.fillStyle="#f2c94c";ctx.fill();ctx.strokeStyle="#8a6d12";ctx.stroke();
+    ctx.strokeStyle="rgba(120,220,160,.6)";ctx.setLineDash([4,4]);ctx.beginPath();ctx.moveTo(tx,0);ctx.lineTo(tx,h);ctx.moveTo(0,ty);ctx.lineTo(w,ty);ctx.stroke();ctx.setLineDash([]);}
+}
+const lathe=new LatheEngine();
+
+/* ---- torna arayüz bağlantıları ---- */
+$("mdi-rows").innerHTML=["O","N","G","7","8","9","X","Z","F","4","5","6","M","S","T","1","2","3","U","W","EOB","-","0","."].map(k=>`<button class="mdi-key h-7 text-[10px]">${k}</button>`).join("");
+$("mdi-fn").innerHTML=["POS","PROG","SET","SHIFT","CAN","INPUT","SYSTEM","MSG","GRAPH","ALTER","INSERT","DELETE"].map(k=>`<button class="mdi-key h-6 text-[8px]">${k}</button>`).join("");
+$("rng-rpm").oninput=e=>{lathe.setSpindleRpm(+e.target.value);$("lbl-rpm").textContent=lathe.s.spindleRpm+" rpm";};
+$("rng-feed").oninput=e=>{lathe.setFeed(+e.target.value);$("lbl-feed").textContent=lathe.s.feed+" mm/m";};
+$("rng-ovr").oninput=e=>{lathe.setFeedOverride(+e.target.value);$("lbl-ovr").textContent=Math.round(lathe.s.feedOverride*100)+"%";};
+$("btn-goto").onclick=()=>{const x=parseFloat($("edit-x").value),z=parseFloat($("edit-z").value);lathe.gotoTarget(Number.isFinite(x)?x:lathe.s.x,Number.isFinite(z)?z:lathe.s.z);};
+$("mode-manual").onclick=()=>lathe.setMode("MANUAL");$("mode-auto").onclick=()=>lathe.setMode("AUTO");
+$("tool-minus").onclick=()=>lathe.setToolNo(lathe.s.toolNo-1);$("tool-plus").onclick=()=>lathe.setToolNo(lathe.s.toolNo+1);
+document.querySelectorAll(".jog").forEach(b=>{const dx=+b.dataset.dx,dz=+b.dataset.dz;const dn=e=>{e.preventDefault();lathe.setJog(dx,dz);},up=()=>lathe.setJog(0,0);b.addEventListener("pointerdown",dn);b.addEventListener("pointerup",up);b.addEventListener("pointerleave",up);b.addEventListener("pointercancel",up);});
+$("btn-spindle").onclick=()=>lathe.toggleSpindle();$("btn-cycle").onclick=()=>lathe.startCycle();$("btn-hold").onclick=()=>lathe.stopCycle();
+$("btn-emg").onclick=()=>lathe.emergencyStop();$("btn-reset").onclick=()=>lathe.clearAlarm();$("btn-new").onclick=()=>lathe.reset();
+function syncLathe(){const s=lathe.s;$("lcd-x").textContent=fmt(s.x);$("lcd-z").textContent=fmt(s.z);
+  $("lcd-actf").textContent="ACT.F "+Math.round(s.spindleOn?s.feed*s.feedOverride:0)+" MM/M";$("lcd-rpm").textContent="S "+Math.round(s.actualRpm)+" RPM";
+  $("lcd-tool").textContent="T"+String(s.toolNo).padStart(2,"0")+"00";$("lcd-ovr").textContent="OVR "+Math.round(s.feedOverride*100)+"%";$("lcd-removed").textContent="REMOVED "+Math.round(s.removed*100)+"%";
+  $("lcd-mode").textContent=s.mode;$("lcd-mode").className=s.mode==="AUTO"?"text-[#eaffef]":"text-[#59c98e]";
+  const al=$("lcd-alarm");if(s.alarm){al.textContent=s.alarm==="EMG"?"-EMG-":"ALM "+s.alarm;al.className="animate-pulse font-bold text-red-400";}else{al.textContent="READY";al.className="text-[#59c98e]";}
+  $("lcd-run").textContent=s.running?"RUN":"STOP";$("lcd-run").className=s.running?"font-bold text-[#7effb0]":"text-[#59c98e]";
+  $("lbl-tool").textContent="T"+String(s.toolNo).padStart(2,"0");
+  const A="bg-amber-400 text-zinc-900",I="bg-zinc-700 text-zinc-200 hover:bg-zinc-600";
+  $("mode-manual").className="rounded py-2 text-[10px] font-bold "+(s.mode==="MANUAL"?A:I)+(s.running?" opacity-40":"");
+  $("mode-auto").className="rounded py-2 text-[10px] font-bold "+(s.mode==="AUTO"?A:I)+(s.running?" opacity-40":"");
+  $("mode-manual").disabled=s.running;$("mode-auto").disabled=s.running;
+  $("spindle-label").textContent="SPINDLE "+(s.spindleOn?"ON":"OFF");$("btn-spindle").className="flex flex-col items-center gap-1 rounded py-2 text-[10px] font-bold "+(s.spindleOn?"bg-cyan-600 text-white":"bg-zinc-700 text-zinc-200 hover:bg-zinc-600");$("spindle-icon").className="text-base"+(s.spindleOn?" animate-spin-slow":"");
+  $("btn-cycle").disabled=s.mode!=="AUTO"||s.running;$("btn-goto").disabled=s.mode!=="MANUAL";
+  $("hud").textContent="X "+fmt(s.x)+"   Z "+fmt(s.z)+"   "+(s.spindleOn?Math.round(s.actualRpm)+" rpm":"spindle off");}
+const latheCanvas=$("lathe-canvas"),lctx=latheCanvas.getContext("2d");
+function latheResize(){const dpr=Math.min(window.devicePixelRatio||1,2),r=latheCanvas.getBoundingClientRect();latheCanvas.width=Math.max(1,r.width*dpr|0);latheCanvas.height=Math.max(1,r.height*dpr|0);lctx.setTransform(dpr,0,0,dpr,0,0);}
+new ResizeObserver(latheResize).observe(latheCanvas);
+
+/* ==================================================================== */
+/* ============================  FREZE (3B)  ========================== */
+/* ==================================================================== */
+const W=200, D=140, TOP=60, COLS=150, ROWS=105;
+const dx=W/(COLS-1), dz=D/(ROWS-1), MARGIN=6;
+const mill={
+  x:0,y:90,z:0, tx:0,ty:90,tz:0,
+  spindleOn:false, spindleRpm:6000, actualRpm:0, feed:400, feedOverride:1,
+  mode:"MANUAL", running:false, paused:false, alarm:null, emergency:false, removed:0, toolNo:1,
+  spinAngle:0, jog:{x:0,y:0,z:0}, queue:[], moveActive:null, dirty:false, muted:false
+};
+let heights=new Float32Array(COLS*ROWS).fill(TOP);
+
+let renderer,scene,camera,controls,plane,planeGeo,toolGroup,chipPool=[],raf3d;
+const CUTTER_R=13, CUTTER_H=26;
+
+function initMill(){
+  const wrap=$("mill-canvas-wrap");
+  renderer=new THREE.WebGLRenderer({antialias:true});
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
+  renderer.shadowMap.enabled=true;
+  wrap.appendChild(renderer.domElement);
+  renderer.domElement.style.width="100%";renderer.domElement.style.height="100%";
+
+  scene=new THREE.Scene();
+  scene.background=new THREE.Color("#8b9299");
+  scene.fog=new THREE.Fog("#8b9299",500,1400);
+
+  camera=new THREE.PerspectiveCamera(45,1,1,3000);
+  controls=new OrbitControls(camera,renderer.domElement);
+  controls.enableDamping=true;controls.target.set(0,20,0);
+  setView("iso");
+
+  scene.add(new THREE.HemisphereLight(0xffffff,0x556070,0.85));
+  const dir=new THREE.DirectionalLight(0xffffff,1.1);dir.position.set(180,320,160);dir.castShadow=true;
+  dir.shadow.mapSize.set(1024,1024);dir.shadow.camera.left=-260;dir.shadow.camera.right=260;dir.shadow.camera.top=260;dir.shadow.camera.bottom=-260;scene.add(dir);
+
+  // makine tablası (T-kanallı görünüm)
+  const table=new THREE.Mesh(new THREE.BoxGeometry(520,40,360),new THREE.MeshStandardMaterial({color:0xbfc4c9,metalness:.6,roughness:.5}));
+  table.position.y=-22;table.receiveShadow=true;scene.add(table);
+  for(let i=-2;i<=2;i++){const slot=new THREE.Mesh(new THREE.BoxGeometry(6,6,360),new THREE.MeshStandardMaterial({color:0x6b7076}));slot.position.set(i*70,0.5,0);scene.add(slot);}
+  const floor=new THREE.Mesh(new THREE.PlaneGeometry(2400,2400),new THREE.MeshStandardMaterial({color:0x9aa0a6}));
+  floor.rotation.x=-Math.PI/2;floor.position.y=-42;floor.receiveShadow=true;scene.add(floor);
+
+  buildWorkpiece();
+  buildTool();
+  buildChipPool();
+
+  const ro=new ResizeObserver(millResize);ro.observe(wrap);
+  millResize();
+}
+
+let sideMeshes=[];
+function buildWorkpiece(){
+  if(plane){scene.remove(plane);planeGeo.dispose();}
+  sideMeshes.forEach(m=>scene.remove(m));sideMeshes=[];
+  const blue=new THREE.MeshStandardMaterial({color:0x1a9fd0,metalness:.15,roughness:.55,side:THREE.DoubleSide});
+  planeGeo=new THREE.PlaneGeometry(W,D,COLS-1,ROWS-1);
+  planeGeo.rotateX(-Math.PI/2);
+  const pos=planeGeo.attributes.position;
+  for(let i=0;i<pos.count;i++) pos.setY(i,TOP);
+  pos.needsUpdate=true;planeGeo.computeVertexNormals();
+  plane=new THREE.Mesh(planeGeo,blue);plane.castShadow=true;plane.receiveShadow=true;scene.add(plane);
+  // yan duvarlar + taban
+  const mk=(w,h,rx,ry,px,py,pz)=>{const m=new THREE.Mesh(new THREE.PlaneGeometry(w,h),blue);m.rotation.set(rx,ry,0);m.position.set(px,py,pz);m.castShadow=true;scene.add(m);sideMeshes.push(m);};
+  mk(W,TOP,0,0,0,TOP/2, D/2);            // ön
+  mk(W,TOP,0,Math.PI,0,TOP/2,-D/2);      // arka
+  mk(D,TOP,0,-Math.PI/2,-W/2,TOP/2,0);   // sol
+  mk(D,TOP,0,Math.PI/2, W/2,TOP/2,0);    // sağ
+  const bottom=new THREE.Mesh(new THREE.PlaneGeometry(W,D),new THREE.MeshStandardMaterial({color:0x14799e}));
+  bottom.rotation.x=Math.PI/2;bottom.position.y=0;scene.add(bottom);sideMeshes.push(bottom);
+}
+
+function buildTool(){
+  toolGroup=new THREE.Group();
+  const steel=new THREE.MeshStandardMaterial({color:0xd7dde2,metalness:.9,roughness:.25});
+  const dark=new THREE.MeshStandardMaterial({color:0x3a3f45,metalness:.7,roughness:.4});
+  const gold=new THREE.MeshStandardMaterial({color:0xd8a52a,metalness:.6,roughness:.4});
+  const cutter=new THREE.Mesh(new THREE.CylinderGeometry(CUTTER_R,CUTTER_R,CUTTER_H,24),dark);cutter.position.y=CUTTER_H/2;cutter.castShadow=true;toolGroup.add(cutter);
+  for(let i=0;i<4;i++){const t=new THREE.Mesh(new THREE.BoxGeometry(3,3,4),gold);const a=i/4*Math.PI*2;t.position.set(Math.cos(a)*CUTTER_R,2,Math.sin(a)*CUTTER_R);toolGroup.add(t);}
+  const shaft=new THREE.Mesh(new THREE.CylinderGeometry(CUTTER_R*.7,CUTTER_R*.7,40,24),steel);shaft.position.y=CUTTER_H+20;shaft.castShadow=true;toolGroup.add(shaft);
+  const holder=new THREE.Mesh(new THREE.CylinderGeometry(CUTTER_R*1.5,CUTTER_R*.9,46,24),steel);holder.position.y=CUTTER_H+40+23;holder.castShadow=true;toolGroup.add(holder);
+  const taper=new THREE.Mesh(new THREE.CylinderGeometry(CUTTER_R*2.2,CUTTER_R*1.5,40,24),steel);taper.position.y=CUTTER_H+40+46+20;toolGroup.add(taper);
+  scene.add(toolGroup);
+}
+
+function buildChipPool(){
+  const geo=new THREE.BoxGeometry(3,3,3);
+  const mat=new THREE.MeshStandardMaterial({color:0x3fc3f0,metalness:.2,roughness:.5});
+  for(let i=0;i<160;i++){const m=new THREE.Mesh(geo,mat);m.visible=false;m.castShadow=true;scene.add(m);chipPool.push({mesh:m,vx:0,vy:0,vz:0,life:0});}
+}
+function spawnChip(px,py,pz){
+  for(const c of chipPool){if(c.life<=0){c.mesh.visible=true;c.mesh.position.set(px+(Math.random()-.5)*10,py,pz+(Math.random()-.5)*10);
+    c.vx=(Math.random()-.5)*120;c.vy=60+Math.random()*90;c.vz=(Math.random()-.5)*120;c.life=.8+Math.random()*.5;return;}}
+}
+function updateChips(dt){for(const c of chipPool){if(c.life>0){c.life-=dt;c.vy-=260*dt;c.mesh.position.x+=c.vx*dt;c.mesh.position.y+=c.vy*dt;c.mesh.position.z+=c.vz*dt;c.mesh.rotation.x+=dt*8;c.mesh.rotation.y+=dt*6;if(c.life<=0||c.mesh.position.y<-40)c.mesh.visible=false;}}}
+
+function millResize(){if(!renderer)return;const wrap=$("mill-canvas-wrap"),w=wrap.clientWidth||1,h=wrap.clientHeight||1;renderer.setSize(w,h,false);camera.aspect=w/h;camera.updateProjectionMatrix();}
+function setView(v){const d=360;const map={iso:[d*.9,d*.7,d*.9],top:[0,d*1.2,1],front:[0,d*.4,d*1.1],right:[d*1.1,d*.4,0]};const p=map[v]||map.iso;camera.position.set(p[0],p[1],p[2]);controls&&controls.update();}
+
+/* --- freze fiziği --- */
+function colX(ix){return -W/2+ix*dx;} function colZ(iy){return -D/2+iy*dz;}
+function carve(tx,tz,ty){
+  const ixC=Math.round((tx+W/2)/dx), iyC=Math.round((tz+D/2)/dz);
+  const rx=Math.ceil(CUTTER_R/dx), rz=Math.ceil(CUTTER_R/dz);
+  let cut=false;const pos=planeGeo.attributes.position;
+  for(let iy=Math.max(MARGIN,iyC-rz);iy<=Math.min(ROWS-1-MARGIN,iyC+rz);iy++){
+    for(let ix=Math.max(MARGIN,ixC-rx);ix<=Math.min(COLS-1-MARGIN,ixC+rx);ix++){
+      const wx=colX(ix),wz=colZ(iy);if(Math.hypot(wx-tx,wz-tz)>CUTTER_R)continue;
+      const vi=iy*COLS+ix;const h=heights[vi];
+      if(h>ty+.05){const nh=Math.max(ty,0);heights[vi]=nh;pos.setY(vi,nh);cut=true;}
+    }
+  }
+  if(cut){pos.needsUpdate=true;mill.dirty=true;}
+  return cut;
+}
+function computeRemoved(){let s=0,n=0;for(let iy=MARGIN;iy<ROWS-MARGIN;iy++)for(let ix=MARGIN;ix<COLS-MARGIN;ix++){s+=TOP-heights[iy*COLS+ix];n++;}return clamp((s/n)/TOP,0,1);}
+
+function millStartCycle(){
+  if(mill.emergency||mill.mode!=="AUTO")return;mill.spindleOn=true;mill.paused=false;
+  const q=[],safeY=TOP+8,step=CUTTER_R*1.25,x0=-58,x1=58,z0=-38,z1=38;
+  for(const depth of [46,34]){
+    q.push({type:"rapid",x:x0,y:safeY,z:z0});
+    q.push({type:"feed", x:x0,y:depth,z:z0});
+    let z=z0,dir=1;
+    while(z<=z1){const xa=dir>0?x1:x0;q.push({type:"feed",x:xa,y:depth,z:z});z=Math.min(z+step,z1+.001);if(z<=z1)q.push({type:"feed",x:xa,y:depth,z:z});dir*=-1;
+      if(z>z1)break;}
+    q.push({type:"rapid",x:q[q.length-1].x,y:safeY,z:z1});
+  }
+  q.push({type:"rapid",x:0,y:90,z:0});
+  mill.queue=q;mill.moveActive=q.shift();mill.running=true;
+}
+function millStop(){mill.queue=[];mill.moveActive={type:"rapid",x:mill.x,y:90,z:mill.z};mill.running=false;mill.paused=false;}
+function millGoto(x,y,z){if(mill.emergency||mill.mode!=="MANUAL")return;mill.moveActive={type:"rapid",x:clamp(x,-W/2+MARGIN*dx,W/2-MARGIN*dx),y:clamp(y,0,120),z:clamp(z,-D/2+MARGIN*dz,D/2-MARGIN*dz)};}
+
+function updateMill(dt){
+  const tr=mill.spindleOn?mill.spindleRpm:0;mill.actualRpm+=(tr-mill.actualRpm)*Math.min(1,dt*3);if(mill.actualRpm<1)mill.actualRpm=tr===0?0:mill.actualRpm;
+  mill.spinAngle+=(mill.actualRpm/60)*dt*Math.PI*2;
+  if(!mill.emergency&&!mill.paused){
+    const feedRate=(mill.feed/60)*mill.feedOverride, rapid=260;
+    if(mill.mode==="MANUAL"&&!mill.moveActive&&(mill.jog.x||mill.jog.y||mill.jog.z)){
+      const rate=mill.spindleOn?feedRate:rapid*.4;
+      mill.x=clamp(mill.x+mill.jog.x*rate*dt,-W/2+MARGIN*dx,W/2-MARGIN*dx);
+      mill.z=clamp(mill.z+mill.jog.z*rate*dt,-D/2+MARGIN*dz,D/2-MARGIN*dz);
+      mill.y=clamp(mill.y+mill.jog.y*rate*dt,0,120);
+    }
+    if(mill.moveActive){const m=mill.moveActive,rate=m.type==="feed"?feedRate:rapid;
+      const ex=m.x-mill.x,ey=m.y-mill.y,ez=m.z-mill.z,dist=Math.hypot(ex,ey,ez),stepv=rate*dt;
+      if(dist<=stepv||dist<1e-4){mill.x=m.x;mill.y=m.y;mill.z=m.z;mill.moveActive=mill.queue.shift()||null;if(!mill.moveActive&&mill.running)mill.running=false;}
+      else{mill.x+=ex/dist*stepv;mill.y+=ey/dist*stepv;mill.z+=ez/dist*stepv;}}
+    // talaş kaldırma
+    let cutting=false;
+    if(mill.actualRpm>60){const cut=carve(mill.x,mill.z,mill.y);if(cut){cutting=true;if(Math.random()<.8)spawnChip(mill.x,mill.y+2,mill.z);}}
+    mill.cutting=cutting;
+  } else mill.cutting=false;
+  if(mill.dirty){planeGeo.computeVertexNormals();mill.dirty=false;mill.removed=computeRemoved();}
+  updateChips(dt);
+  // takım konumu
+  toolGroup.position.set(mill.x,mill.y,mill.z);
+  toolGroup.rotation.y=mill.spinAngle;
+}
+
+/* --- freze arayüz --- */
+$("mmdi").innerHTML=["7","8","9","X","Y","Z","4","5","6","G","M","S","1","2","3","F","H","T","0",".","-","EOB","INP","CAN"].map(k=>`<button class="mdi-key h-7 text-[10px]">${k}</button>`).join("");
+$("mrng-rpm").oninput=e=>{mill.spindleRpm=clamp(+e.target.value,0,12000);$("mlbl-rpm").textContent=mill.spindleRpm+" rpm";};
+$("mrng-feed").oninput=e=>{mill.feed=clamp(+e.target.value,1,2000);$("mlbl-feed").textContent=mill.feed+" mm/m";};
+$("mrng-ovr").oninput=e=>{mill.feedOverride=clamp(+e.target.value,0,1.2);$("mlbl-ovr").textContent=Math.round(mill.feedOverride*100)+"%";};
+$("me-go").onclick=()=>{const x=parseFloat($("me-x").value),y=parseFloat($("me-z").value),z=parseFloat($("me-y").value);millGoto(Number.isFinite(x)?x:mill.x,Number.isFinite(y)?y:mill.y,Number.isFinite(z)?z:mill.z);};
+$("mmode-manual").onclick=()=>{if(!mill.running)mill.mode="MANUAL";};$("mmode-auto").onclick=()=>{if(!mill.running)mill.mode="AUTO";};
+$("mtool-minus").onclick=()=>mill.toolNo=clamp(mill.toolNo-1,1,40);$("mtool-plus").onclick=()=>mill.toolNo=clamp(mill.toolNo+1,1,40);
+document.querySelectorAll(".mjog").forEach(b=>{const a=b.dataset.a,d=+b.dataset.d;const dn=e=>{e.preventDefault();mill.jog[a]=d;},up=()=>mill.jog[a]=0;b.addEventListener("pointerdown",dn);b.addEventListener("pointerup",up);b.addEventListener("pointerleave",up);b.addEventListener("pointercancel",up);});
+$("mbtn-spindle").onclick=()=>{if(!mill.emergency)mill.spindleOn=!mill.spindleOn;};
+$("mbtn-cycle").onclick=()=>millStartCycle(); $("mbtn-hold").onclick=()=>mill.paused=!mill.paused;
+$("mbtn-emg").onclick=()=>{mill.emergency=true;mill.running=false;mill.spindleOn=false;mill.queue=[];mill.moveActive=null;mill.alarm="EMG";};
+$("mbtn-reset").onclick=()=>{mill.alarm=null;mill.emergency=false;};
+$("mbtn-newp").onclick=()=>{heights=new Float32Array(COLS*ROWS).fill(TOP);const pos=planeGeo.attributes.position;for(let i=0;i<pos.count;i++)pos.setY(i,TOP);pos.needsUpdate=true;planeGeo.computeVertexNormals();mill.removed=0;mill.running=false;mill.queue=[];mill.moveActive=null;mill.x=0;mill.y=90;mill.z=0;};
+$("m-play").onclick=()=>{mill.mode="AUTO";millStartCycle();};
+$("m-pause").onclick=()=>mill.paused=!mill.paused;
+$("m-stop").onclick=()=>millStop();
+$("m-new").onclick=()=>$("mbtn-newp").click();
+$("m-mute").onclick=()=>{mill.muted=!mill.muted;$("m-mute").textContent=mill.muted?"🔇":"🔊";};
+$("m-wire").onclick=()=>{plane.material.wireframe=!plane.material.wireframe;};
+document.querySelectorAll("[data-view]").forEach(b=>b.onclick=()=>setView(b.dataset.view));
+
+let fpsT=0,fpsC=0,fps=0;
+function syncMill(dt){
+  fpsT+=dt;fpsC++;if(fpsT>=.5){fps=Math.round(fpsC/fpsT);fpsT=0;fpsC=0;}
+  $("ml-x").textContent=fmt(mill.x);$("ml-y").textContent=fmt(mill.y);$("ml-z").textContent=fmt(mill.z);
+  $("ml-actf").textContent="ACT.F "+Math.round(mill.spindleOn?mill.feed*mill.feedOverride:0);
+  $("ml-rpm").textContent="S "+Math.round(mill.actualRpm);
+  $("ml-tool").textContent="T"+String(mill.toolNo).padStart(2,"0");
+  $("ml-ovr").textContent="OVR "+Math.round(mill.feedOverride*100)+"%";
+  $("ml-removed").textContent="REMOVED "+Math.round(mill.removed*100)+"%";
+  $("ml-mode").textContent=mill.mode;$("ml-mode").className=mill.mode==="AUTO"?"text-[#eaffef]":"text-[#59c98e]";
+  const al=$("ml-alarm");if(mill.alarm){al.textContent=mill.paused?"HOLD":"-EMG-";al.className="animate-pulse font-bold text-red-400";}else if(mill.paused){al.textContent="HOLD";al.className="font-bold text-amber-300";}else{al.textContent="READY";al.className="text-[#59c98e]";}
+  $("ml-run").textContent=mill.running?"RUN":"STOP";$("ml-run").className=mill.running?"font-bold text-[#7effb0]":"text-[#59c98e]";
+  $("mlbl-tool").textContent="T"+String(mill.toolNo).padStart(2,"0");
+  const A="bg-amber-400 text-zinc-900",I="bg-zinc-700 text-zinc-200 hover:bg-zinc-600";
+  $("mmode-manual").className="rounded py-2 text-[10px] font-bold "+(mill.mode==="MANUAL"?A:I)+(mill.running?" opacity-40":"");
+  $("mmode-auto").className="rounded py-2 text-[10px] font-bold "+(mill.mode==="AUTO"?A:I)+(mill.running?" opacity-40":"");
+  $("mspindle-label").textContent="SPINDLE "+(mill.spindleOn?"ON":"OFF");$("mbtn-spindle").className="flex flex-col items-center gap-1 rounded py-2 text-[10px] font-bold "+(mill.spindleOn?"bg-cyan-600 text-white":"bg-zinc-700 text-zinc-200 hover:bg-zinc-600");$("mspindle-icon").className="text-base"+(mill.spindleOn?" animate-spin-slow":"");
+  $("mbtn-cycle").disabled=mill.mode!=="AUTO"||mill.running;$("me-go").disabled=mill.mode!=="MANUAL";
+  $("m-stat-pos").textContent="X "+fmt(mill.x)+"  Y "+fmt(mill.y)+"  Z "+fmt(mill.z);
+  $("m-stat-tool").textContent="tool_selected = "+mill.toolNo;
+  $("m-stat-cut").textContent="cutting_status = "+(mill.cutting?1:0);
+  $("m-stat-fps").textContent="FPS: "+fps;
+}
+
+/* ==================================================================== */
+/* ==========================  TAB DEĞİŞTİRME  ======================== */
+/* ==================================================================== */
+function setTab(t){
+  active=t;
+  $("view-mill").classList.toggle("hidden",t!=="mill");
+  $("view-mill").classList.toggle("flex",t==="mill");
+  $("view-lathe").classList.toggle("hidden",t!=="lathe");
+  $("view-lathe").classList.toggle("flex",t==="lathe");
+  const on="bg-cyan-600 text-white",off="bg-zinc-700 text-zinc-300";
+  $("tab-mill").className="px-4 py-1.5 text-[12px] font-bold "+(t==="mill"?on:off);
+  $("tab-lathe").className="px-4 py-1.5 text-[12px] font-bold "+(t==="lathe"?on:off);
+  if(t==="mill"){millResize();} else {latheResize();}
+}
+$("tab-mill").onclick=()=>setTab("mill");
+$("tab-lathe").onclick=()=>setTab("lathe");
+
+/* ==================================================================== */
+/* =============================  ANA DÖNGÜ  ========================== */
+/* ==================================================================== */
+initMill();
+setTab("mill");
+let last=performance.now(),uiAcc=0;
+function loop(now){
+  const dt=Math.min(.05,(now-last)/1000);last=now;
+  if(active==="mill"){updateMill(dt);controls.update();renderer.render(scene,camera);}
+  else{lathe.update(dt);const r=latheCanvas.getBoundingClientRect();lathe.draw(lctx,r.width,r.height);}
+  uiAcc+=dt;if(uiAcc>.066){uiAcc=0;if(active==="mill")syncMill(uiAcc||dt);else syncLathe();}
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
 </body>
 </html>
