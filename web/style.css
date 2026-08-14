@@ -538,53 +538,11 @@ button.secondary:hover:not(:disabled) {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  border-radius: 8px;
+  border-radius: 6px;
   overflow-y: auto;
   background: #27272a;
   padding: 8px;
 }
-
-/* Status overlay on viewer (top-left) */
-.sim-status-overlay {
-  position: absolute;
-  left: 8px;
-  top: 8px;
-  z-index: 10;
-  pointer-events: none;
-  background: rgba(0,0,0,0.5);
-  border-radius: 4px;
-  padding: 4px 8px;
-  font-family: "JetBrains Mono", "Fira Code", "Courier New", monospace;
-  font-size: 10px;
-  line-height: 1.5;
-  color: #6ee7b7;
-}
-.sim-stat-feed { color: #67e8f9; }
-
-/* Camera toolbar (left vertical) */
-.sim-cam-toolbar {
-  position: absolute;
-  left: 8px;
-  top: 80px;
-  z-index: 10;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.sim-cam-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
-  border: 1px solid #3f5a2f;
-  border-radius: 6px;
-  background: linear-gradient(to bottom,#4a7a2c,#2f5017);
-  color: #eaffd6;
-  font-size: 14px;
-  cursor: pointer;
-}
-.sim-cam-btn:hover { filter: brightness(1.15); }
 
 /* Fanuc LCD */
 .cnc-panel-lcd {
@@ -1172,17 +1130,77 @@ main.sim-expanded {
   transition: max-width 0.3s ease;
 }
 
+/* --- Full-screen CNC-style simulation layout --- */
+
 .sim-workspace {
   display: block;
 }
 
 .sim-workspace.sim-active {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
   display: flex;
-  gap: 8px;
+  flex-direction: column;
   background: #18181b;
-  border-radius: 8px;
+  overflow: hidden;
+}
+
+/* Top bar (matches cnc-sim header) */
+.sim-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 12px;
+  background: #27272a;
+  border-radius: 6px;
+  margin: 8px 8px 0;
+  flex-shrink: 0;
+}
+.sim-topbar-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.sim-topbar-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #e4e4e7;
+  letter-spacing: 0.02em;
+}
+.sim-topbar-hint {
+  font-size: 11px;
+  color: #71717a;
+}
+.sim-topbar-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  background: #3f3f46;
+  color: #a1a1aa;
+  border: none;
+  cursor: pointer;
+  transition: background .15s, color .15s;
+}
+.sim-topbar-icon:hover {
+  background: #52525b;
+  color: #fff;
+}
+.sim-topbar-close:hover {
+  background: #dc2626;
+  color: #fff;
+}
+
+/* Content row: viewer + aside */
+.sim-content {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  gap: 8px;
   padding: 8px;
-  border: 1px solid #3f3f46;
 }
 
 .sim-viewer-wrap {
@@ -1196,10 +1214,79 @@ main.sim-expanded {
 }
 
 .sim-workspace.sim-active .viewer-container {
-  height: 580px;
+  width: 100%;
+  height: 100%;
   border: none;
   border-radius: 0;
 }
+
+/* Status overlay (top-left) — matches cnc-sim */
+.sim-overlay-status {
+  position: absolute;
+  left: 8px;
+  top: 8px;
+  z-index: 10;
+  pointer-events: none;
+  background: rgba(0,0,0,0.5);
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-family: "JetBrains Mono", "Fira Code", "Courier New", monospace;
+  font-size: 10px;
+  line-height: 1.5;
+  color: #6ee7b7;
+}
+.sim-overlay-feed { color: #67e8f9; }
+
+/* Playback toolbar (top-right) — matches cnc-sim */
+.sim-overlay-toolbar {
+  position: absolute;
+  right: 8px;
+  top: 8px;
+  z-index: 10;
+  display: flex;
+  gap: 8px;
+}
+.sim-tb-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border: 1px solid #2b6f9c;
+  border-radius: 6px;
+  background: linear-gradient(to bottom, #1f6fa0, #124b70);
+  color: #e6f4ff;
+  font-size: 18px;
+  cursor: pointer;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.25);
+}
+.sim-tb-btn:hover { filter: brightness(1.15); }
+.sim-tb-btn:active { transform: translateY(1px); }
+
+/* Camera toolbar (left vertical) — matches cnc-sim */
+.sim-overlay-cam {
+  position: absolute;
+  left: 8px;
+  top: 80px;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.sim-cam-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid #3f5a2f;
+  border-radius: 6px;
+  background: linear-gradient(to bottom, #4a7a2c, #2f5017);
+  color: #eaffd6;
+  font-size: 14px;
+  cursor: pointer;
+}
+.sim-cam-btn:hover { filter: brightness(1.15); }
 
 .gcode-lines {
   flex: 1;
@@ -1299,7 +1386,7 @@ main.sim-expanded {
 }
 
 @media (max-width: 900px) {
-  .sim-workspace.sim-active {
+  .sim-content {
     flex-direction: column;
   }
 
@@ -1307,8 +1394,8 @@ main.sim-expanded {
     width: 100%;
   }
 
-  .sim-workspace.sim-active .viewer-container {
-    height: 350px;
+  .sim-viewer-wrap {
+    min-height: 300px;
   }
 
   .gcode-lines {

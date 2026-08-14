@@ -28,7 +28,15 @@ const camSimOp = byId("cam-sim-op");
 const camSimProgress = byId("cam-sim-progress");
 const camSimPlay = byId("cam-sim-play");
 const camSimPause = byId("cam-sim-pause");
+const camSimResetTb = byId("cam-sim-reset-tb");
+const camSimPlay2 = byId("cam-sim-play2");
+const camSimPause2 = byId("cam-sim-pause2");
 const camSimReset = byId("cam-sim-reset");
+const simTopbar = byId("sim-topbar");
+const simToolbar = byId("sim-toolbar");
+const simCamBar = byId("sim-cam-bar");
+const simExitBtn = byId("sim-exit-btn");
+const simCloseBtn = byId("sim-close-btn");
 const camSimSpeedBtns = { 1: byId("cam-sim-1x"), 2: byId("cam-sim-2x"), 5: byId("cam-sim-5x") };
 const camLcdLines = byId("cam-lcd-lines");
 const camLcdLineNo = byId("cam-lcd-line-no");
@@ -144,6 +152,10 @@ function resetSimLayout() {
   if (camPreviewView) camPreviewView.hidden = true;
   if (coordDisplay) coordDisplay.hidden = true;
   if (gcodePanel) gcodePanel.hidden = true;
+  if (simTopbar) simTopbar.hidden = true;
+  if (simToolbar) simToolbar.hidden = true;
+  if (simCamBar) simCamBar.hidden = true;
+  document.body.style.overflow = "";
 }
 
 let camSpeedMult = 1;
@@ -264,9 +276,13 @@ async function setupSimulation(simulationUrl) {
   }
 
   if (simWorkspace) simWorkspace.classList.add("sim-active");
+  if (simTopbar) simTopbar.hidden = false;
+  if (simToolbar) simToolbar.hidden = false;
+  if (simCamBar) simCamBar.hidden = false;
   if (camPreviewView) camPreviewView.hidden = false;
   if (coordDisplay) coordDisplay.hidden = false;
   if (gcodePanel) gcodePanel.hidden = false;
+  document.body.style.overflow = "hidden";
   requestAnimationFrame(() => window.dispatchEvent(new Event("resize")));
 
   camSimProgress.value = "0";
@@ -526,40 +542,41 @@ camPreviewBtn.addEventListener("click", handleCamPreview);
 camConfirmBtn.addEventListener("click", handleCamConfirm);
 camRejectBtn.addEventListener("click", handleCamReject);
 
-camSimPlay.addEventListener("click", () => {
+function doPlay() {
   if (!camSim) return;
   const cncStatus = byId("cnc-cam-status");
-  if (camSim.isPlaying()) {
-    camSim.pause();
-    if (cncStatus) cncStatus.textContent = "DURAKLATILDI";
-  } else {
-    camSim.play();
-    if (cncStatus) cncStatus.textContent = "ÇALIŞIYOR";
-  }
-});
-
-if (camSimPause) {
-  camSimPause.addEventListener("click", () => {
-    if (!camSim || !camSim.isPlaying()) return;
-    camSim.pause();
-    const cncStatus = byId("cnc-cam-status");
-    if (cncStatus) cncStatus.textContent = "DURAKLATILDI";
-  });
+  camSim.play();
+  if (cncStatus) cncStatus.textContent = "ÇALIŞIYOR";
 }
 
-if (camSimReset) {
-  camSimReset.addEventListener("click", () => {
-    if (!camSim) return;
-    camSim.pause();
-    camSim.seek(0);
-    camSimProgress.value = "0";
-    const cncStatus = byId("cnc-cam-status");
-    if (cncStatus) cncStatus.textContent = "HAZIR";
-    camLastLineIdx = -1;
-    for (const el of camLcdLineEls) el.classList.remove("active");
-    for (const el of camGcodeLineEls) el.classList.remove("active");
-  });
+function doPause() {
+  if (!camSim || !camSim.isPlaying()) return;
+  camSim.pause();
+  const cncStatus = byId("cnc-cam-status");
+  if (cncStatus) cncStatus.textContent = "DURAKLATILDI";
 }
+
+function doReset() {
+  if (!camSim) return;
+  camSim.pause();
+  camSim.seek(0);
+  camSimProgress.value = "0";
+  const cncStatus = byId("cnc-cam-status");
+  if (cncStatus) cncStatus.textContent = "HAZIR";
+  camLastLineIdx = -1;
+  for (const el of camLcdLineEls) el.classList.remove("active");
+  for (const el of camGcodeLineEls) el.classList.remove("active");
+}
+
+if (camSimPlay) camSimPlay.addEventListener("click", doPlay);
+if (camSimPause) camSimPause.addEventListener("click", doPause);
+if (camSimResetTb) camSimResetTb.addEventListener("click", doReset);
+if (camSimPlay2) camSimPlay2.addEventListener("click", doPlay);
+if (camSimPause2) camSimPause2.addEventListener("click", doPause);
+if (camSimReset) camSimReset.addEventListener("click", doReset);
+
+if (simExitBtn) simExitBtn.addEventListener("click", handleCamReject);
+if (simCloseBtn) simCloseBtn.addEventListener("click", handleCamReject);
 
 camSimProgress.addEventListener("input", () => {
   if (!camSim) return;

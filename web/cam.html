@@ -38,108 +38,135 @@
 
       <section id="result-section" class="result-section">
         <div id="sim-workspace" class="sim-workspace">
-          <div class="sim-viewer-wrap">
-            <div id="viewer-container" class="viewer-container"></div>
-            <!-- Status overlay (top-left) -->
-            <div id="coord-display" class="sim-status-overlay" hidden>
-              <div id="coord-x">X 0.000</div>
-              <div id="coord-y">Y 0.000</div>
-              <div id="coord-z">Z 0.000</div>
-              <div id="coord-f" class="sim-stat-feed">F 0</div>
+          <!-- Compact top bar (only visible in sim mode) -->
+          <header id="sim-topbar" class="sim-topbar" hidden>
+            <div class="sim-topbar-left">
+              <button id="sim-exit-btn" type="button" class="sim-topbar-icon" title="Simülasyondan Çık">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/></svg>
+              </button>
+              <span class="sim-topbar-title">CAM Simülatör</span>
             </div>
-            <!-- Camera toolbar (left) -->
-            <div class="sim-cam-toolbar" hidden>
-              <button data-cam="iso" title="İzometrik" class="sim-cam-btn">⬛</button>
-              <button data-cam="top" title="Üstten" class="sim-cam-btn">▦</button>
-              <button data-cam="front" title="Önden" class="sim-cam-btn">▭</button>
-              <button data-cam="right" title="Yandan" class="sim-cam-btn">◨</button>
-            </div>
-          </div>
+            <span class="sim-topbar-hint">CYCLE START ile simülasyonu başlat</span>
+            <button id="sim-close-btn" type="button" class="sim-topbar-icon sim-topbar-close" title="Kapat">
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+            </button>
+          </header>
 
-          <!-- Fanuc right panel (aside) -->
-          <aside id="cam-preview-view" class="sim-fanuc-aside" hidden>
-            <!-- Fanuc LCD -->
-            <div class="cnc-panel-lcd">
-              <div class="cnc-screen">
-                <div class="cnc-screen-inner">
-                  <div class="cnc-pos-header">
-                    <span>ACTUAL POSITION</span><span>O0001</span><span id="cam-lcd-line-no">N0000</span>
-                  </div>
-                  <div class="cnc-pos-rows">
-                    <div class="cnc-pos-row"><span class="cnc-pos-label">X</span><span id="cnc-cam-x" class="cnc-pos-val">0.000</span></div>
-                    <div class="cnc-pos-row"><span class="cnc-pos-label">Y</span><span id="cnc-cam-y" class="cnc-pos-val">0.000</span></div>
-                    <div class="cnc-pos-row"><span class="cnc-pos-label">Z</span><span id="cnc-cam-z" class="cnc-pos-val">0.000</span></div>
-                  </div>
-                  <div class="cnc-info-grid">
-                    <span id="cam-dro-f">ACT.F 0</span><span id="cam-dro-s" class="cnc-right">S 0</span>
-                    <span id="cam-sim-op">Operasyon: —</span><span class="cnc-right">OVR 100%</span>
-                  </div>
-                  <div class="cnc-status-bar">
-                    <span id="cnc-cam-mode">FREZE</span>
-                    <span id="cnc-cam-status">HAZIR</span>
-                    <span class="cnc-run-label">STOP</span>
+          <!-- Viewer + Aside row -->
+          <div id="sim-content" class="sim-content">
+            <!-- 3D Viewer (left, fills remaining space) -->
+            <section class="sim-viewer-wrap">
+              <div id="viewer-container" class="viewer-container"></div>
+
+              <!-- Status overlay (top-left, like cnc-sim) -->
+              <div id="coord-display" class="sim-overlay-status" hidden>
+                <div id="coord-x">X 0.000</div>
+                <div id="coord-y">Y 0.000</div>
+                <div id="coord-z">Z 0.000</div>
+                <div id="coord-f" class="sim-overlay-feed">F 0</div>
+              </div>
+
+              <!-- Playback toolbar (top-right, like cnc-sim) -->
+              <div id="sim-toolbar" class="sim-overlay-toolbar" hidden>
+                <button id="cam-sim-play" class="sim-tb-btn" type="button" title="Cycle Start">▶</button>
+                <button id="cam-sim-pause" class="sim-tb-btn" type="button" title="Feed Hold">⏸</button>
+                <button id="cam-sim-reset-tb" class="sim-tb-btn" type="button" title="Stop">⏹</button>
+              </div>
+
+              <!-- Camera toolbar (left vertical, like cnc-sim) -->
+              <div id="sim-cam-bar" class="sim-overlay-cam" hidden>
+                <button data-cam="iso" title="İzometrik" class="sim-cam-btn">⬛</button>
+                <button data-cam="top" title="Üstten" class="sim-cam-btn">▦</button>
+                <button data-cam="front" title="Önden" class="sim-cam-btn">▭</button>
+                <button data-cam="right" title="Yandan" class="sim-cam-btn">◨</button>
+              </div>
+            </section>
+
+            <!-- Right aside panel (380px, like cnc-sim) -->
+            <aside id="cam-preview-view" class="sim-fanuc-aside" hidden>
+              <!-- Fanuc LCD -->
+              <div class="cnc-panel-lcd">
+                <div class="cnc-screen">
+                  <div class="cnc-screen-inner">
+                    <div class="cnc-pos-header">
+                      <span>ACTUAL POSITION</span><span>O0001</span><span id="cam-lcd-line-no">N0000</span>
+                    </div>
+                    <div class="cnc-pos-rows">
+                      <div class="cnc-pos-row"><span class="cnc-pos-label">X</span><span id="cnc-cam-x" class="cnc-pos-val">0.000</span></div>
+                      <div class="cnc-pos-row"><span class="cnc-pos-label">Y</span><span id="cnc-cam-y" class="cnc-pos-val">0.000</span></div>
+                      <div class="cnc-pos-row"><span class="cnc-pos-label">Z</span><span id="cnc-cam-z" class="cnc-pos-val">0.000</span></div>
+                    </div>
+                    <div class="cnc-info-grid">
+                      <span id="cam-dro-f">ACT.F 0</span><span id="cam-dro-s" class="cnc-right">S 0</span>
+                      <span id="cam-sim-op">Operasyon: —</span><span class="cnc-right">OVR 100%</span>
+                    </div>
+                    <div class="cnc-status-bar">
+                      <span id="cnc-cam-mode">FREZE</span>
+                      <span id="cnc-cam-status">HAZIR</span>
+                      <span class="cnc-run-label">STOP</span>
+                    </div>
                   </div>
                 </div>
               </div>
-            </div>
 
-            <!-- G-code lines -->
-            <div class="cnc-gcode-section">
-              <div class="cnc-gcode-title">G-CODE</div>
-              <div id="cam-lcd-lines" class="cam-lcd-lines"></div>
-            </div>
-
-            <!-- Full G-code panel -->
-            <div id="gcode-panel" class="cnc-gcode-section" hidden>
-              <div class="cnc-gcode-title">G-CODE (TAM)</div>
-              <div id="gcode-lines" class="gcode-lines"></div>
-            </div>
-
-            <!-- Spindle / Feed -->
-            <div class="cnc-sliders-section">
-              <div class="cnc-sliders-legend">Spindle / Feed</div>
-              <div class="cnc-slider-item">
-                <span class="cnc-slider-name">Hız</span>
-                <span id="cam-speed-pct" class="cnc-slider-val">100%</span>
+              <!-- G-code lines (LCD) -->
+              <div class="cnc-gcode-section">
+                <div class="cnc-gcode-title">G-CODE</div>
+                <div id="cam-lcd-lines" class="cam-lcd-lines"></div>
               </div>
-              <input id="cam-speed-slider" type="range" min="1" max="200" value="100" class="cnc-range-input" />
-              <div class="cnc-slider-item">
-                <span class="cnc-slider-name">İlerleme</span>
-                <span id="cam-feed-pct" class="cnc-slider-val">100%</span>
+
+              <!-- Full G-code panel -->
+              <div id="gcode-panel" class="cnc-gcode-section" hidden>
+                <div class="cnc-gcode-title">G-CODE (TAM)</div>
+                <div id="gcode-lines" class="gcode-lines"></div>
               </div>
-              <input id="cam-feed-slider" type="range" min="10" max="200" value="100" class="cnc-range-input" />
-            </div>
 
-            <!-- Speed presets -->
-            <div class="cam-speed-presets">
-              <span class="cam-speed-label">Sim Hız:</span>
-              <button id="cam-sim-1x" type="button" class="cam-speed-btn active">1x</button>
-              <button id="cam-sim-2x" type="button" class="cam-speed-btn">2x</button>
-              <button id="cam-sim-5x" type="button" class="cam-speed-btn">5x</button>
-            </div>
+              <!-- Spindle / Feed -->
+              <div class="cnc-sliders-section">
+                <div class="cnc-sliders-legend">Spindle / Feed</div>
+                <div class="cnc-slider-item">
+                  <span class="cnc-slider-name">Hız</span>
+                  <span id="cam-speed-pct" class="cnc-slider-val">100%</span>
+                </div>
+                <input id="cam-speed-slider" type="range" min="1" max="200" value="100" class="cnc-range-input" />
+                <div class="cnc-slider-item">
+                  <span class="cnc-slider-name">İlerleme</span>
+                  <span id="cam-feed-pct" class="cnc-slider-val">100%</span>
+                </div>
+                <input id="cam-feed-slider" type="range" min="10" max="200" value="100" class="cnc-range-input" />
+              </div>
 
-            <!-- Progress -->
-            <div class="cam-progress-row">
-              <input id="cam-sim-progress" class="cam-sim-progress" type="range" min="0" max="1000" value="0" />
-            </div>
+              <!-- Speed presets -->
+              <div class="cam-speed-presets">
+                <span class="cam-speed-label">Sim Hız:</span>
+                <button id="cam-sim-1x" type="button" class="cam-speed-btn active">1x</button>
+                <button id="cam-sim-2x" type="button" class="cam-speed-btn">2x</button>
+                <button id="cam-sim-5x" type="button" class="cam-speed-btn">5x</button>
+              </div>
 
-            <!-- Operation buttons -->
-            <div class="cnc-ops-row">
-              <button id="cam-sim-play" class="cnc-op-btn cnc-op-cycle" type="button">
-                <span class="cnc-led-dot cnc-led-green"></span>CYCLE START
-              </button>
-              <button id="cam-sim-pause" class="cnc-op-btn cnc-op-hold" type="button">
-                <span class="cnc-led-dot cnc-led-amber"></span>FEED HOLD
-              </button>
-              <button id="cam-sim-reset" class="cnc-op-btn cnc-op-stop" type="button">RESET</button>
-            </div>
+              <!-- Progress -->
+              <div class="cam-progress-row">
+                <input id="cam-sim-progress" class="cam-sim-progress" type="range" min="0" max="1000" value="0" />
+              </div>
 
-            <!-- Confirm/Reject Footer -->
-            <div class="cam-sim-footer">
-              <button id="cam-confirm-btn" class="cnc-btn-approve" type="button">Onayla — G-code Üret</button>
-              <button id="cam-reject-btn" class="cnc-btn-reject" type="button">Reddet</button>
-            </div>
-          </aside>
+              <!-- Operation buttons -->
+              <div class="cnc-ops-row">
+                <button id="cam-sim-play2" class="cnc-op-btn cnc-op-cycle" type="button">
+                  <span class="cnc-led-dot cnc-led-green"></span>CYCLE START
+                </button>
+                <button id="cam-sim-pause2" class="cnc-op-btn cnc-op-hold" type="button">
+                  <span class="cnc-led-dot cnc-led-amber"></span>FEED HOLD
+                </button>
+                <button id="cam-sim-reset" class="cnc-op-btn cnc-op-stop" type="button">RESET</button>
+              </div>
+
+              <!-- Confirm/Reject Footer -->
+              <div class="cam-sim-footer">
+                <button id="cam-confirm-btn" class="cnc-btn-approve" type="button">Onayla — G-code Üret</button>
+                <button id="cam-reject-btn" class="cnc-btn-reject" type="button">Reddet</button>
+              </div>
+            </aside>
+          </div>
         </div>
 
         <div id="cam-status" class="status-section" hidden>
