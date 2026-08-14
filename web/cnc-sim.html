@@ -32,12 +32,22 @@
 
   <!-- ÜST BAR + SEÇİCİ -->
   <header class="mb-2 flex items-center justify-between rounded-md bg-zinc-800 px-3 py-2">
-    <h1 class="text-sm font-bold tracking-wide">CNC Simülatör</h1>
+    <div class="flex items-center gap-2">
+      <button onclick="history.back()" title="Geri" class="flex h-8 w-8 items-center justify-center rounded-md bg-zinc-700 text-zinc-300 hover:bg-zinc-600 hover:text-white transition-colors">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/></svg>
+      </button>
+      <h1 class="text-sm font-bold tracking-wide">CNC Simülatör</h1>
+    </div>
     <div class="flex overflow-hidden rounded-md border border-zinc-600">
       <button id="tab-mill"  class="px-4 py-1.5 text-[12px] font-bold">Freze (3B)</button>
       <button id="tab-lathe" class="px-4 py-1.5 text-[12px] font-bold">Torna (2B)</button>
     </div>
-    <p class="hidden text-[11px] text-zinc-400 md:block">AUTO + CYCLE START otomatik işler · MANUAL jog/MDI ile elle talaş kaldır</p>
+    <div class="flex items-center gap-2">
+      <p class="hidden text-[11px] text-zinc-400 md:block">AUTO + CYCLE START otomatik işler · MANUAL jog/MDI ile elle talaş kaldır</p>
+      <a href="index.html" title="Ana Sayfa" class="flex h-8 w-8 items-center justify-center rounded-md bg-zinc-700 text-zinc-300 hover:bg-red-600 hover:text-white transition-colors">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+      </a>
+    </div>
   </header>
 
   <div class="min-h-0 flex-1">
@@ -194,7 +204,7 @@
     <!-- ==================================================================== -->
     <div id="view-lathe" class="hidden h-full w-full flex-col gap-2 lg:flex-row">
       <section class="relative flex-1 overflow-hidden rounded-md border border-zinc-700 bg-black">
-        <div class="pointer-events-none absolute left-2 top-2 z-10 rounded bg-black/40 px-2 py-1 font-mono text-[11px] text-cyan-300">SwanSoft CNC · FANUC 0i-T · Turning</div>
+        <div class="pointer-events-none absolute left-2 top-2 z-10 rounded bg-black/40 px-2 py-1 font-mono text-[11px] text-cyan-300">Topkapı AI · FANUC 0i-T · Turning</div>
         <canvas id="lathe-canvas" class="block h-full w-full"></canvas>
         <div id="hud" class="pointer-events-none absolute bottom-2 left-2 z-10 rounded bg-black/50 px-2 py-1 font-mono text-[11px] text-emerald-300"></div>
       </section>
