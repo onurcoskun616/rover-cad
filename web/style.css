@@ -530,17 +530,61 @@ button.secondary:hover:not(:disabled) {
 }
 
 /* === CNC Simulation Panel — Fanuc-style (matches cnc-sim.html) === */
-.cam-preview-view {
+
+/* Fanuc aside panel inside sim-workspace */
+.sim-fanuc-aside {
+  width: 380px;
+  flex-shrink: 0;
   display: flex;
   flex-direction: column;
   gap: 6px;
-  margin-top: 0.75rem;
   border-radius: 8px;
-  overflow: hidden;
+  overflow-y: auto;
   background: #27272a;
   padding: 8px;
-  box-shadow: 0 12px 48px rgba(0,0,0,.6);
 }
+
+/* Status overlay on viewer (top-left) */
+.sim-status-overlay {
+  position: absolute;
+  left: 8px;
+  top: 8px;
+  z-index: 10;
+  pointer-events: none;
+  background: rgba(0,0,0,0.5);
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-family: "JetBrains Mono", "Fira Code", "Courier New", monospace;
+  font-size: 10px;
+  line-height: 1.5;
+  color: #6ee7b7;
+}
+.sim-stat-feed { color: #67e8f9; }
+
+/* Camera toolbar (left vertical) */
+.sim-cam-toolbar {
+  position: absolute;
+  left: 8px;
+  top: 80px;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.sim-cam-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid #3f5a2f;
+  border-radius: 6px;
+  background: linear-gradient(to bottom,#4a7a2c,#2f5017);
+  color: #eaffd6;
+  font-size: 14px;
+  cursor: pointer;
+}
+.sim-cam-btn:hover { filter: brightness(1.15); }
 
 /* Fanuc LCD */
 .cnc-panel-lcd {
@@ -1124,7 +1168,7 @@ button.secondary:hover:not(:disabled) {
 }
 
 main.sim-expanded {
-  max-width: 72rem;
+  max-width: 100%;
   transition: max-width 0.3s ease;
 }
 
@@ -1134,77 +1178,27 @@ main.sim-expanded {
 
 .sim-workspace.sim-active {
   display: flex;
-  gap: 2px;
+  gap: 8px;
+  background: #18181b;
+  border-radius: 8px;
+  padding: 8px;
+  border: 1px solid #3f3f46;
 }
 
 .sim-viewer-wrap {
   position: relative;
   flex: 1;
   min-width: 0;
+  overflow: hidden;
+  border-radius: 6px;
+  border: 1px solid #3f3f46;
+  background: #000;
 }
 
 .sim-workspace.sim-active .viewer-container {
-  height: 450px;
-}
-
-.coord-display {
-  position: absolute;
-  top: 10px;
-  left: 10px;
-  background: rgba(0, 0, 0, 0.82);
-  border: 1px solid rgba(74, 141, 255, 0.25);
-  border-radius: 6px;
-  padding: 8px 12px;
-  font-family: "Courier New", Courier, monospace;
-  font-size: 0.85rem;
-  z-index: 10;
-  pointer-events: none;
-}
-
-.coord-row {
-  display: flex;
-  align-items: baseline;
-  gap: 0.6rem;
-  line-height: 1.55;
-}
-
-.coord-label {
-  color: #8899aa;
-  font-weight: 700;
-  width: 1em;
-}
-
-.coord-val {
-  color: #00ff88;
-  font-weight: 600;
-  text-align: right;
-  min-width: 7em;
-}
-
-.coord-feed .coord-val {
-  color: #ffaa00;
-}
-
-.gcode-panel {
-  width: 300px;
-  flex-shrink: 0;
-  background: #0a1018;
-  border: 1px solid var(--border);
-  border-radius: calc(var(--radius) - 4px);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-.gcode-header {
-  padding: 0.55rem 0.75rem;
-  font-weight: 700;
-  font-size: 0.8rem;
-  color: var(--text-muted);
-  background: rgba(255, 255, 255, 0.03);
-  border-bottom: 1px solid var(--border);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
+  height: 580px;
+  border: none;
+  border-radius: 0;
 }
 
 .gcode-lines {
@@ -1304,13 +1298,17 @@ main.sim-expanded {
   pointer-events: none !important;
 }
 
-@media (max-width: 760px) {
+@media (max-width: 900px) {
   .sim-workspace.sim-active {
     flex-direction: column;
   }
 
-  .gcode-panel {
+  .sim-fanuc-aside {
     width: 100%;
+  }
+
+  .sim-workspace.sim-active .viewer-container {
+    height: 350px;
   }
 
   .gcode-lines {

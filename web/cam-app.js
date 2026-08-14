@@ -141,8 +141,9 @@ function escapeHtml(s) {
 
 function resetSimLayout() {
   if (simWorkspace) simWorkspace.classList.remove("sim-active");
-  if (gcodePanel) gcodePanel.hidden = true;
+  if (camPreviewView) camPreviewView.hidden = true;
   if (coordDisplay) coordDisplay.hidden = true;
+  if (gcodePanel) gcodePanel.hidden = true;
 }
 
 let camSpeedMult = 1;
@@ -211,12 +212,10 @@ async function setupSimulation(simulationUrl) {
       if (camDroF) camDroF.textContent = "ACT.F " + (f != null ? Math.round(f) : 0);
       if (camDroS) camDroS.textContent = "S 1000";
 
-      if (coordX) {
-        coordX.textContent = x != null ? x.toFixed(3) : "0.000";
-        coordY.textContent = y != null ? y.toFixed(3) : "0.000";
-        coordZ.textContent = z != null ? z.toFixed(3) : "0.000";
-        coordF.textContent = f != null ? String(Math.round(f)) : "0";
-      }
+      if (coordX) coordX.textContent = `X ${x != null ? x.toFixed(3) : "0.000"}`;
+      if (coordY) coordY.textContent = `Y ${y != null ? y.toFixed(3) : "0.000"}`;
+      if (coordZ) coordZ.textContent = `Z ${z != null ? z.toFixed(3) : "0.000"}`;
+      if (coordF) coordF.textContent = `F ${f != null ? Math.round(f) : 0}`;
 
       if (lineIndex !== camLastLineIdx) {
         if (camLcdLineEls.length > 0) {
@@ -265,8 +264,9 @@ async function setupSimulation(simulationUrl) {
   }
 
   if (simWorkspace) simWorkspace.classList.add("sim-active");
-  if (gcodePanel) gcodePanel.hidden = false;
+  if (camPreviewView) camPreviewView.hidden = false;
   if (coordDisplay) coordDisplay.hidden = false;
+  if (gcodePanel) gcodePanel.hidden = false;
   requestAnimationFrame(() => window.dispatchEvent(new Event("resize")));
 
   camSimProgress.value = "0";
@@ -364,7 +364,7 @@ async function requestCamPlan(changeRequest) {
     camReviseInput.value = "";
     if (camSim) camSim.pause();
     camSim = null;
-    camPreviewView.hidden = true;
+    resetSimLayout();
     camPreviewToken = null;
     camEstimatedMinutes = null;
     camQuote.hidden = true;
@@ -564,7 +564,6 @@ if (camSimReset) {
 camSimProgress.addEventListener("input", () => {
   if (!camSim) return;
   camSim.pause();
-  camSimPlay.textContent = "▶ Cycle Start";
   camSim.seek(Number(camSimProgress.value) / 1000);
 });
 
