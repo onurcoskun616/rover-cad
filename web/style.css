@@ -529,6 +529,102 @@ button.secondary:hover:not(:disabled) {
   gap: 0.5rem;
 }
 
+/* === G-code Output Section === */
+
+.cam-gcode-output {
+  margin-top: 1rem;
+  padding: 1rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.cam-gcode-output-title {
+  margin: 0 0 0.75rem;
+  font-size: 1rem;
+  color: var(--accent);
+}
+
+.cam-gcode-preview {
+  max-height: 400px;
+  overflow-y: auto;
+  background: #0d1117;
+  color: #c9d1d9;
+  border-radius: calc(var(--radius) - 4px);
+  padding: 0.5rem 0;
+  font-family: "Fira Code", "JetBrains Mono", monospace;
+  font-size: 0.8rem;
+  line-height: 1.6;
+  border: 1px solid #30363d;
+}
+
+.cam-gcode-line {
+  padding: 0 0.75rem;
+  white-space: pre;
+}
+
+.cam-gcode-line:hover {
+  background: rgba(56, 139, 253, 0.1);
+}
+
+.cam-gcode-linenum {
+  display: inline-block;
+  width: 3.5em;
+  text-align: right;
+  margin-right: 1em;
+  color: #484f58;
+  user-select: none;
+}
+
+.cam-gcode-more {
+  color: #8b949e;
+  font-style: italic;
+  padding-top: 0.25rem;
+}
+
+.cam-gcode-actions {
+  display: flex;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.cam-gcode-download {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--accent);
+  text-decoration: none;
+  font-weight: 600;
+  padding: 0.5rem 0.9rem;
+  border: 1px solid var(--accent);
+  border-radius: calc(var(--radius) - 4px);
+  transition: background 0.15s, color 0.15s;
+}
+
+.cam-gcode-download:hover {
+  background: var(--accent);
+  color: white;
+}
+
+.cam-gcode-sim-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: var(--accent);
+  color: white;
+  border: none;
+  padding: 0.5rem 0.9rem;
+  border-radius: calc(var(--radius) - 4px);
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.cam-gcode-sim-btn:hover {
+  opacity: 0.85;
+}
+
 /* === CNC Simulation Panel — Fanuc-style (matches cnc-sim.html) === */
 
 /* Fanuc aside panel inside sim-workspace */
