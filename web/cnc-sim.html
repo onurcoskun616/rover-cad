@@ -827,7 +827,7 @@ const taiToggle=$("tai-toggle"), taiPanel=$("tai-panel"), taiClose=$("tai-close"
 const taiMessages=$("tai-messages"), taiInput=$("tai-input"), taiSend=$("tai-send"), taiChips=$("tai-chips");
 const taiBadge=$("tai-mode-badge");
 
-taiToggle.onclick=()=>{ taiPanel.classList.toggle("open"); if(taiPanel.classList.contains("open")){ taiInput.focus(); updateChips(); }};
+taiToggle.onclick=()=>{ taiPanel.classList.toggle("open"); if(taiPanel.classList.contains("open")){ taiInput.focus(); taiUpdateChips(); }};
 taiClose.onclick=()=>taiPanel.classList.remove("open");
 
 function addMsg(text, who){
@@ -849,7 +849,7 @@ const defaultChips=[
   {label:"Üstten görünüme geç", cmd:"Üstten görünüme geç"},
 ];
 
-function updateChips(){
+function taiUpdateChips(){
   taiBadge.textContent=active==="mill"?"FREZE":"TORNA";
   taiChips.innerHTML="";
   const chips = active==="mill" ? defaultChips : [
@@ -879,7 +879,7 @@ taiInput.onkeydown=e=>{ if(e.key==="Enter") handleSend(); };
 function handleUserInput(text){
   addMsg(text,"user");
   const result = executeCommand(text);
-  if(result){ addMsg(result,"bot"); updateChips(); return; }
+  if(result){ addMsg(result,"bot"); taiUpdateChips(); return; }
   callAI(text);
 }
 
@@ -1111,11 +1111,11 @@ async function callAI(text){
     typing.remove();
     addMsg("AI servisine ulaşamadım. Yine de panel butonları ve manuel G-kodu editörü ile çalışmaya devam edebilirsiniz.","bot");
   }
-  updateChips();
+  taiUpdateChips();
 }
 
 addMsg("Merhaba, ben Topkapı AI. Türkçe konuşarak CNC panelini yönetebilirsin.<br>Örn: <b>\"İş milini aç, feed 300 yap ve başlat\"</b>.","bot");
-updateChips();
+taiUpdateChips();
 </script>
 </body>
 </html>
