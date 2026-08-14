@@ -879,10 +879,305 @@ button.secondary:hover:not(:disabled) {
   color: #fff;
 }
 
+/* Inner flex container for aside content */
+.cnc-aside-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  height: 100%;
+}
+
+/* Info grid col-span-2 for REMOVED */
+.cnc-info-full { grid-column: 1 / -1; }
+
+/* 2-column fieldset row */
+.cnc-fieldset-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.cnc-fieldset {
+  border-radius: 4px;
+  border: 1px solid #52525b;
+  background: rgba(24,24,27,0.6);
+  padding: 8px;
+  margin: 0;
+}
+.cnc-fieldset-legend {
+  padding: 0 4px;
+  font-size: 9px;
+  font-weight: 800;
+  text-transform: uppercase;
+  color: #67e8f9;
+}
+.cnc-fieldset-plain {
+  border: 1px solid #52525b;
+  border-radius: 4px;
+  background: rgba(24,24,27,0.6);
+  padding: 8px;
+}
+
+/* MDI Position inputs */
+.cnc-mdi-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 4px;
+  font-size: 10px;
+}
+.cnc-mdi-label-last { margin-bottom: 8px; }
+.cnc-mdi-axis {
+  width: 12px;
+  font-weight: 700;
+  color: #7effb0;
+}
+.cnc-mdi-input {
+  width: 100%;
+  border-radius: 4px;
+  background: #09090b;
+  padding: 2px 6px;
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  font-size: 11px;
+  color: #eaffef;
+  border: none;
+  outline: none;
+  box-shadow: inset 0 0 0 1px #3f3f46;
+}
+.cnc-mdi-input:focus { box-shadow: inset 0 0 0 1px #22d3ee; }
+.cnc-mdi-go {
+  width: 100%;
+  border-radius: 4px;
+  background: #0891b2;
+  padding: 4px 0;
+  font-size: 10px;
+  font-weight: 700;
+  color: #fff;
+  border: none;
+  cursor: pointer;
+}
+.cnc-mdi-go:hover { background: #06b6d4; }
+.cnc-mdi-go:disabled { opacity: .4; cursor: default; }
+
+/* Spindle/Feed rows */
+.cnc-sf-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  margin-bottom: 2px;
+  color: #d4d4d8;
+}
+.cnc-sf-val {
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  color: #7effb0;
+  font-weight: 700;
+}
+.cnc-range-mb { margin-bottom: 8px; }
+
+/* Section title (Mode, Jog) */
+.cnc-section-title {
+  font-size: 9px;
+  font-weight: 800;
+  text-transform: uppercase;
+  color: #67e8f9;
+  margin-bottom: 4px;
+}
+
+/* Mode buttons */
+.cnc-mode-btns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+}
+.cnc-mode-btn {
+  border-radius: 4px;
+  padding: 8px 0;
+  font-size: 10px;
+  font-weight: 700;
+  border: none;
+  cursor: pointer;
+  background: #3f3f46;
+  color: #d4d4d8;
+}
+.cnc-mode-btn:hover { background: #52525b; }
+.cnc-mode-active {
+  background: #fbbf24;
+  color: #18181b;
+}
+.cnc-mode-btn:disabled { opacity: .4; cursor: default; }
+
+/* Tool selector */
+.cnc-tool-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 8px;
+}
+.cnc-tool-label {
+  font-size: 9px;
+  text-transform: uppercase;
+  color: #a1a1aa;
+}
+.cnc-tool-sel {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.cnc-tool-val {
+  width: 32px;
+  text-align: center;
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  font-size: 12px;
+  color: #7effb0;
+}
+.cnc-mdi-key {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 3px;
+  border: 1px solid rgba(9,9,11,.6);
+  background-image: linear-gradient(to bottom, #e4e4e7, #a1a1aa);
+  color: #27272a;
+  font-weight: 700;
+  font-size: 10px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.6), 0 1px 2px rgba(0,0,0,.5);
+  cursor: pointer;
+}
+.cnc-mdi-key:active {
+  transform: translateY(1px);
+  background-image: linear-gradient(to bottom, #d4d4d8, #71717a);
+}
+
+/* Jog Axis grid */
+.cnc-jog-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 4px;
+}
+.cnc-jog-btn {
+  border-radius: 4px;
+  background: #3f3f46;
+  padding: 6px 0;
+  font-size: 10px;
+  font-weight: 700;
+  color: #d4d4d8;
+  border: none;
+  cursor: pointer;
+  text-align: center;
+}
+.cnc-jog-btn:hover { background: #52525b; }
+.cnc-jog-btn:active { background: #059669; }
+.cnc-jog-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #71717a;
+}
+
+/* Spindle op button */
+.cnc-op-spindle {
+  background: #3f3f46;
+  color: #d4d4d8;
+}
+.cnc-op-spindle:hover { background: #52525b; }
+.cnc-op-spindle.cnc-spindle-on {
+  background: #0891b2;
+  color: #fff;
+}
+.cnc-spindle-icon { font-size: 16px; }
+
+/* MDI Keypad */
+.cnc-keypad-wrap {
+  border: 1px solid #52525b;
+  border-radius: 4px;
+  background: rgba(63,63,70,0.4);
+  padding: 8px;
+}
+.cnc-keypad-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 4px;
+}
+.cnc-keypad-grid .cnc-mdi-key {
+  height: 28px;
+  font-size: 10px;
+}
+
+/* Emergency Stop section */
+.cnc-emergency {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid #52525b;
+  border-radius: 4px;
+  background: rgba(24,24,27,0.6);
+  padding: 8px;
+  margin-top: auto;
+}
+.cnc-emg-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: 4px solid #facc15;
+  background: #dc2626;
+  box-shadow: 0 4px 10px rgba(0,0,0,.6);
+  cursor: pointer;
+}
+.cnc-emg-btn:active { transform: translateY(2px); }
+.cnc-emg-inner {
+  display: block;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: #ef4444;
+  box-shadow: inset 0 2px 4px rgba(0,0,0,.3);
+}
+.cnc-emg-side {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  gap: 4px;
+}
+.cnc-emg-title {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: #f87171;
+}
+.cnc-emg-reset {
+  border-radius: 4px;
+  background: #fde047;
+  padding: 6px 0;
+  font-size: 10px;
+  font-weight: 700;
+  color: #18181b;
+  border: none;
+  cursor: pointer;
+}
+.cnc-emg-reset:hover { background: #fef08a; }
+.cnc-emg-new {
+  border-radius: 4px;
+  background: #52525b;
+  padding: 6px 0;
+  font-size: 10px;
+  font-weight: 700;
+  color: #d4d4d8;
+  border: none;
+  cursor: pointer;
+}
+.cnc-emg-new:hover { background: #71717a; }
+
 /* Responsive CAM preview */
 @media (max-width: 520px) {
   .cnc-ops-row { grid-template-columns: 1fr; }
   .cam-sim-footer { flex-direction: column; }
+  .cnc-fieldset-row { grid-template-columns: 1fr; }
 }
 
 .sim-downloads {

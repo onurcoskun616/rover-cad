@@ -42,10 +42,10 @@ const camLcdLines = byId("cam-lcd-lines");
 const camLcdLineNo = byId("cam-lcd-line-no");
 const camDroF = byId("cam-dro-f");
 const camDroS = byId("cam-dro-s");
-const camSpeedSlider = byId("cam-speed-slider");
-const camSpeedPct = byId("cam-speed-pct");
-const camFeedSlider = byId("cam-feed-slider");
-const camFeedPct = byId("cam-feed-pct");
+const camSpeedSlider = byId("cam-speed-slider"); // legacy, may be null
+const camSpeedPct = byId("cam-speed-pct"); // legacy, may be null
+const camFeedSlider = byId("cam-feed-slider"); // legacy, may be null
+const camFeedPct = byId("cam-feed-pct"); // legacy, may be null
 const camConfirmBtn = byId("cam-confirm-btn");
 const camRejectBtn = byId("cam-reject-btn");
 const camReviseBtn = byId("cam-revise-btn");
@@ -70,6 +70,18 @@ const coordZ = byId("coord-z");
 const coordF = byId("coord-f");
 const gcodePanel = byId("gcode-panel");
 const gcodeLinesEl = byId("gcode-lines");
+const camMdiGo = byId("cam-mdi-go");
+const camModeManual = byId("cam-mode-manual");
+const camModeAuto = byId("cam-mode-auto");
+const camBtnSpindle = byId("cam-btn-spindle");
+const camSpindleIcon = byId("cam-spindle-icon");
+const camSpindleLabel = byId("cam-spindle-label");
+const camToolLbl = byId("cam-tool-lbl");
+const camBtnEmg = byId("cam-btn-emg");
+const camBtnReset = byId("cam-btn-reset");
+const camSimWire = byId("cam-sim-wire");
+const camSimMute = byId("cam-sim-mute");
+const camSimNewpart = byId("cam-sim-newpart");
 
 let viewer = null;
 let stepPath = null;
@@ -600,6 +612,107 @@ if (camFeedSlider) {
     if (camFeedPct) camFeedPct.textContent = `${v}%`;
   });
 }
+
+// MDI keypad (decorative, matching cnc-sim.html)
+const camMdiKeypad = byId("cam-mdi-keypad");
+if (camMdiKeypad) {
+  camMdiKeypad.innerHTML = ["7","8","9","X","Y","Z","4","5","6","G","M","S","1","2","3","F","H","T","0",".","-","EOB","INP","CAN"]
+    .map(k => `<button class="cnc-mdi-key" type="button">${k}</button>`).join("");
+}
+
+// Spindle/Feed range sliders
+const camRngRpm = byId("cam-rng-rpm");
+const camRngFeed = byId("cam-rng-feed");
+const camRngOvr = byId("cam-rng-ovr");
+const camSfRpm = byId("cam-sf-rpm");
+const camSfFeed = byId("cam-sf-feed");
+const camSfOvr = byId("cam-sf-ovr");
+if (camRngRpm) camRngRpm.addEventListener("input", () => { if (camSfRpm) camSfRpm.textContent = camRngRpm.value + " rpm"; });
+if (camRngFeed) camRngFeed.addEventListener("input", () => { if (camSfFeed) camSfFeed.textContent = camRngFeed.value + " mm/m"; });
+if (camRngOvr) camRngOvr.addEventListener("input", () => { if (camSfOvr) camSfOvr.textContent = Math.round(camRngOvr.value * 100) + "%"; });
+
+// Mode buttons (decorative)
+if (camModeManual) camModeManual.addEventListener("click", () => {
+  if (camModeManual) camModeManual.classList.add("cnc-mode-active");
+  if (camModeAuto) camModeAuto.classList.remove("cnc-mode-active");
+  const m = byId("cnc-cam-mode"); if (m) m.textContent = "MANUAL";
+});
+if (camModeAuto) camModeAuto.addEventListener("click", () => {
+  if (camModeAuto) camModeAuto.classList.add("cnc-mode-active");
+  if (camModeManual) camModeManual.classList.remove("cnc-mode-active");
+  const m = byId("cnc-cam-mode"); if (m) m.textContent = "AUTO";
+});
+
+// Tool selector
+let camToolNo = 1;
+const camToolMinus = byId("cam-tool-minus");
+const camToolPlus = byId("cam-tool-plus");
+function updateToolLabel() { if (camToolLbl) camToolLbl.textContent = "T" + String(camToolNo).padStart(2, "0"); const lt = byId("cam-lcd-tool"); if (lt) lt.textContent = "T" + String(camToolNo).padStart(2, "0"); }
+if (camToolMinus) camToolMinus.addEventListener("click", () => { camToolNo = Math.max(1, camToolNo - 1); updateToolLabel(); });
+if (camToolPlus) camToolPlus.addEventListener("click", () => { camToolNo = Math.min(40, camToolNo + 1); updateToolLabel(); });
+
+// Spindle toggle (decorative)
+let camSpindleOn = false;
+if (camBtnSpindle) camBtnSpindle.addEventListener("click", () => {
+  camSpindleOn = !camSpindleOn;
+  if (camSpindleLabel) camSpindleLabel.textContent = "SPINDLE " + (camSpindleOn ? "ON" : "OFF");
+  if (camBtnSpindle) camBtnSpindle.classList.toggle("cnc-spindle-on", camSpindleOn);
+});
+
+// Emergency stop (decorative)
+if (camBtnEmg) camBtnEmg.addEventListener("click", () => {
+  if (camSim && camSim.isPlaying()) camSim.pause();
+  const st = byId("cnc-cam-status"); if (st) { st.textContent = "-EMG-"; st.style.color = "#f87171"; }
+});
+if (camBtnReset) camBtnReset.addEventListener("click", () => {
+  const st = byId("cnc-cam-status"); if (st) { st.textContent = "HAZIR"; st.style.color = ""; }
+});
+
+// Wireframe toggle
+if (camSimWire) {
+  camSimWire.addEventListener("click", () => {
+    if (viewer && viewer.scene) {
+      viewer.scene.traverse(obj => { if (obj.isMesh && obj.material) obj.material.wireframe = !obj.material.wireframe; });
+    }
+  });
+}
+
+// Camera view buttons
+document.querySelectorAll("[data-cam]").forEach(btn => {
+  btn.addEventListener("click", () => {
+    if (!viewer || !viewer.camera || !viewer.controls) return;
+    const v = btn.dataset.cam;
+    const d = 300;
+    const map = { iso: [d * 0.9, d * 0.7, d * 0.9], top: [0, d * 1.2, 1], front: [0, d * 0.4, d * 1.1], right: [d * 1.1, d * 0.4, 0] };
+    const p = map[v] || map.iso;
+    viewer.camera.position.set(p[0], p[1], p[2]);
+    if (viewer.controls) viewer.controls.update();
+  });
+});
+
+// Mute toggle (decorative)
+if (camSimMute) camSimMute.addEventListener("click", () => {
+  const curr = camSimMute.textContent.trim();
+  camSimMute.textContent = curr === "🔊" ? "🔇" : "🔊";
+});
+
+// New Part (reset sim) — toolbar button
+if (camSimNewpart) camSimNewpart.addEventListener("click", () => doReset());
+// New Workpiece — emergency section button
+const camSimNewwp = byId("cam-sim-newwp");
+if (camSimNewwp) camSimNewwp.addEventListener("click", () => doReset());
+
+// Jog buttons (decorative)
+document.querySelectorAll(".cam-jog").forEach(b => {
+  b.addEventListener("pointerdown", (e) => { e.preventDefault(); b.style.background = "#059669"; });
+  b.addEventListener("pointerup", () => { b.style.background = ""; });
+  b.addEventListener("pointerleave", () => { b.style.background = ""; });
+});
+
+// MDI Position go
+if (camMdiGo) camMdiGo.addEventListener("click", () => {
+  // decorative - no actual mill to move in CAM mode
+});
 
 camReviseBtn.addEventListener("click", () => { camReviseBox.hidden = !camReviseBox.hidden; });
 camReviseSubmit.addEventListener("click", () => { const change = camReviseInput.value.trim(); if (change) requestCamPlan(change); });
