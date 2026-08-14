@@ -321,7 +321,8 @@ let active = 'mill';
 /* ==================================================================== */
 /* ============================  TORNA MOTORU  ======================== */
 /* ==================================================================== */
-const N=260, STOCK_LEN=200, STOCK_R=60, TOOL_HALF_W=3.2;
+const N=260, TOOL_HALF_W=3.2;
+let STOCK_LEN=200, STOCK_R=60;
 function roundRect(ctx,x,y,w,h,r){const rr=Math.min(r,Math.abs(w)/2,Math.abs(h)/2);ctx.beginPath();ctx.moveTo(x+rr,y);ctx.arcTo(x+w,y,x+w,y+h,rr);ctx.arcTo(x+w,y+h,x,y+h,rr);ctx.arcTo(x,y+h,x,y,rr);ctx.arcTo(x,y,x+w,y,rr);ctx.closePath();}
 class LatheEngine{
   constructor(){this.radii=new Float32Array(N).fill(STOCK_R);this.chips=[];this.angle=0;this.jogX=0;this.jogZ=0;this.queue=[];this.moveActive=null;
@@ -406,8 +407,9 @@ new ResizeObserver(latheResize).observe(latheCanvas);
 /* ==================================================================== */
 /* ============================  FREZE (3B)  ========================== */
 /* ==================================================================== */
-const W=200, D=140, TOP=60, COLS=150, ROWS=105;
-const dx=W/(COLS-1), dz=D/(ROWS-1), MARGIN=6;
+let W=200, D=140, TOP=60;
+const COLS=150, ROWS=105, MARGIN=6;
+let dx=W/(COLS-1), dz=D/(ROWS-1);
 const mill={
   x:0,y:90,z:0, tx:0,ty:90,tz:0,
   spindleOn:false, spindleRpm:6000, actualRpm:0, feed:400, feedOverride:1,
@@ -499,6 +501,28 @@ function spawnChip(px,py,pz){
     c.vx=(Math.random()-.5)*120;c.vy=60+Math.random()*90;c.vz=(Math.random()-.5)*120;c.life=.8+Math.random()*.5;return;}}
 }
 function updateChips(dt){for(const c of chipPool){if(c.life>0){c.life-=dt;c.vy-=260*dt;c.mesh.position.x+=c.vx*dt;c.mesh.position.y+=c.vy*dt;c.mesh.position.z+=c.vz*dt;c.mesh.rotation.x+=dt*8;c.mesh.rotation.y+=dt*6;if(c.life<=0||c.mesh.position.y<-40)c.mesh.visible=false;}}}
+
+function resizeMillStock(newW, newD, newTop){
+  W=newW; D=newD; TOP=newTop;
+  dx=W/(COLS-1); dz=D/(ROWS-1);
+  heights=new Float32Array(COLS*ROWS).fill(TOP);
+  buildWorkpiece();
+  mill.x=0; mill.y=TOP+30; mill.z=0;
+  mill.running=false; mill.queue=[]; mill.moveActive=null; mill.removed=0;
+  controls.target.set(0,TOP*0.3,0);
+  setView("iso");
+}
+
+function resizeLatheStock(newLen, newR){
+  STOCK_LEN=newLen; STOCK_R=newR;
+  lathe.radii=new Float32Array(N).fill(STOCK_R);
+  lathe.initialVolume=lathe.volume();
+  lathe.chips=[];
+  lathe.s.x=STOCK_R+8; lathe.s.z=-12;
+  lathe.s.targetX=lathe.s.x; lathe.s.targetZ=lathe.s.z;
+  lathe.s.removed=0; lathe.s.running=false;
+  lathe.queue=[]; lathe.moveActive=null;
+}
 
 function millResize(){if(!renderer)return;const wrap=$("mill-canvas-wrap"),w=wrap.clientWidth||1,h=wrap.clientHeight||1;renderer.setSize(w,h,false);camera.aspect=w/h;camera.updateProjectionMatrix();}
 function setView(v){const d=360;const map={iso:[d*.9,d*.7,d*.9],top:[0,d*1.2,1],front:[0,d*.4,d*1.1],right:[d*1.1,d*.4,0]};const p=map[v]||map.iso;camera.position.set(p[0],p[1],p[2]);controls&&controls.update();}
@@ -618,6 +642,7 @@ function parseGcode(text, type){
   const lines=text.split(/\r?\n/);
   const q=[];
   let cur={x:0,y:type==="mill"?90:0,z:0}, feed=200, lastG=0;
+  const bounds={xMin:Infinity,xMax:-Infinity,yMin:Infinity,yMax:-Infinity,zMin:Infinity,zMax:-Infinity};
   for(let raw of lines){
     raw=raw.replace(/;.*$/,"").replace(/\(.*?\)/g,"").trim().toUpperCase();
     if(!raw) continue;
@@ -641,37 +666,66 @@ function parseGcode(text, type){
     if(lastG===0||lastG===1){
       if(type==="mill"){
         const nx="X" in p?p.X:cur.x, ny="Y" in p?p.Y:cur.y, nz="Z" in p?p.Z:cur.z;
-        q.push({type:lastG===0?"rapid":"feed",x:clamp(nx,-90,90),y:clamp(ny,0,120),z:clamp(nz,-65,65)});
+        if(lastG===1){bounds.xMin=Math.min(bounds.xMin,nx);bounds.xMax=Math.max(bounds.xMax,nx);bounds.yMin=Math.min(bounds.yMin,ny);bounds.yMax=Math.max(bounds.yMax,ny);bounds.zMin=Math.min(bounds.zMin,nz);bounds.zMax=Math.max(bounds.zMax,nz);}
+        q.push({type:lastG===0?"rapid":"feed",x:nx,y:ny,z:nz});
         cur={x:nx,y:ny,z:nz};
       } else {
         const nx="X" in p?p.X/2:cur.x, nz="Z" in p?p.Z:cur.z;
-        q.push({type:lastG===0?"rapid":"feed",x:clamp(nx,0,STOCK_R+12),z:clamp(nz,-20,STOCK_LEN)});
+        if(lastG===1){bounds.xMin=Math.min(bounds.xMin,nx);bounds.xMax=Math.max(bounds.xMax,nx);bounds.zMin=Math.min(bounds.zMin,nz);bounds.zMax=Math.max(bounds.zMax,nz);}
+        q.push({type:lastG===0?"rapid":"feed",x:nx,z:nz});
         cur={x:nx,z:nz};
       }
     }
   }
-  return q;
+  return {q, bounds};
 }
-function runMillGcode(q){
+
+function runMillGcode(parsed){
+  const {q, bounds}=parsed;
   if(!q.length) return;
+  if(bounds.xMax>bounds.xMin){
+    const margin=20;
+    const newW=Math.max(80, (bounds.xMax-bounds.xMin)+margin*2);
+    const newD=Math.max(60, (bounds.zMax-bounds.zMin)+margin*2);
+    const newTop=Math.max(20, bounds.yMax+10);
+    resizeMillStock(Math.round(newW), Math.round(newD), Math.round(newTop));
+    const cx=(bounds.xMax+bounds.xMin)/2, cz=(bounds.zMax+bounds.zMin)/2;
+    for(const m of q){
+      m.x=clamp(m.x-cx, -W/2+MARGIN*dx, W/2-MARGIN*dx);
+      if(m.z!==undefined) m.z=clamp(m.z-cz, -D/2+MARGIN*dz, D/2-MARGIN*dz);
+      if(m.y!==undefined) m.y=clamp(m.y, 0, TOP+40);
+    }
+  }
   mill.mode="AUTO"; mill.spindleOn=true; mill.paused=false;
   mill.queue=q; mill.moveActive=mill.queue.shift(); mill.running=true;
 }
-function runLatheGcode(q){
+
+function runLatheGcode(parsed){
+  const {q, bounds}=parsed;
   if(!q.length) return;
+  if(bounds.xMax>bounds.xMin){
+    const newR=Math.max(20, Math.round(bounds.xMax+10));
+    const newLen=Math.max(40, Math.round(Math.abs(bounds.zMax-bounds.zMin)+40));
+    resizeLatheStock(newLen, newR);
+    for(const m of q){
+      m.x=clamp(m.x, 0, STOCK_R+12);
+      m.z=clamp(m.z, -20, STOCK_LEN);
+    }
+  }
   lathe.setMode("AUTO"); lathe.s.spindleOn=true;
   lathe.queue=q; lathe.moveActive=lathe.queue.shift()||null; lathe.s.running=true;
 }
+
 $("m-file").onchange=e=>{
   const f=e.target.files[0]; if(!f) return;
   $("m-file-info").textContent=f.name; $("m-file-info").classList.remove("hidden");
-  f.text().then(txt=>{const q=parseGcode(txt,"mill"); runMillGcode(q);});
+  f.text().then(txt=>runMillGcode(parseGcode(txt,"mill")));
   e.target.value="";
 };
 $("l-file").onchange=e=>{
   const f=e.target.files[0]; if(!f) return;
   $("l-file-info").textContent=f.name; $("l-file-info").classList.remove("hidden");
-  f.text().then(txt=>{const q=parseGcode(txt,"lathe"); runLatheGcode(q);});
+  f.text().then(txt=>runLatheGcode(parseGcode(txt,"lathe")));
   e.target.value="";
 };
 
