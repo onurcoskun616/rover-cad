@@ -52,7 +52,7 @@
 
     <!-- ============================  FREZE (3B)  ========================== -->
     <div id="view-mill" class="flex h-full w-full flex-col gap-2 lg:flex-row">
-      <section class="relative flex-1 overflow-hidden rounded-md border border-zinc-700 bg-black">
+      <section class="relative min-h-[400px] flex-1 overflow-hidden rounded-md border border-zinc-700 bg-black">
         <div id="mill-canvas-wrap" class="absolute inset-0"></div>
         <div class="pointer-events-none absolute left-2 top-2 z-10 rounded bg-black/50 px-2 py-1 font-mono text-[10px] text-emerald-300 leading-tight">
           <div id="m-stat-pos">X 0.000 Y 0.000 Z 0.000</div>
@@ -77,7 +77,7 @@
       </section>
 
       <!-- FREZE PANELİ -->
-      <aside class="w-full shrink-0 overflow-y-auto lg:w-[380px]" style="max-height:calc(100vh - 70px)">
+      <aside class="w-full shrink-0 overflow-y-auto lg:w-[310px]" style="max-height:calc(100vh - 70px)">
         <div class="flex h-full flex-col gap-2 rounded-md bg-zinc-800 p-2 text-zinc-200">
           <!-- LCD -->
           <div class="rounded-sm border-4 border-zinc-500 bg-zinc-900 p-1.5">
@@ -191,12 +191,12 @@
 
     <!-- ============================  TORNA (2B)  ========================== -->
     <div id="view-lathe" class="hidden h-full w-full flex-col gap-2 lg:flex-row">
-      <section class="relative flex-1 overflow-hidden rounded-md border border-zinc-700 bg-black">
+      <section class="relative min-h-[400px] flex-1 overflow-hidden rounded-md border border-zinc-700 bg-black">
         <div class="pointer-events-none absolute left-2 top-2 z-10 rounded bg-black/40 px-2 py-1 font-mono text-[11px] text-cyan-300">SwanSoft CNC · FANUC 0i-T · Turning</div>
         <canvas id="lathe-canvas" class="block h-full w-full"></canvas>
         <div id="hud" class="pointer-events-none absolute bottom-2 left-2 z-10 rounded bg-black/50 px-2 py-1 font-mono text-[11px] text-emerald-300"></div>
       </section>
-      <aside class="w-full shrink-0 overflow-y-auto lg:w-[380px]" style="max-height:calc(100vh - 70px)">
+      <aside class="w-full shrink-0 overflow-y-auto lg:w-[310px]" style="max-height:calc(100vh - 70px)">
         <div class="flex h-full flex-col gap-2 rounded-md bg-zinc-800 p-2 text-zinc-200">
           <div class="rounded-sm border-4 border-zinc-500 bg-zinc-900 p-1.5">
             <div class="rounded-sm bg-[#0f261b] p-2 font-mono text-[11px] text-[#5be08a]">

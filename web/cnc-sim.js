@@ -485,7 +485,6 @@ function buildTool() {
   const tip = new THREE.Mesh(new THREE.CylinderGeometry(CUTTER_R * 0.9, 1, 5, 18), cutMat);
   tip.position.y = -1; spindleGrp.add(tip);
 
-  toolGroup.rotation.x = Math.PI;
   toolGroup.position.set(MW / 2, MTOP + 30, MD / 2);
   scene.add(toolGroup);
 }
