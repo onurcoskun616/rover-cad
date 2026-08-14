@@ -27,8 +27,8 @@
   .tb-icn:hover{filter:brightness(1.15);}
 </style>
 </head>
-<body class="text-zinc-100">
-<main class="flex min-h-screen flex-col bg-zinc-900 p-2 lg:h-screen lg:overflow-hidden">
+<body class="text-zinc-100 h-screen overflow-hidden">
+<main class="flex h-screen flex-col bg-zinc-900 p-2 overflow-hidden">
 
   <!-- ÜST BAR + SEÇİCİ -->
   <header class="mb-2 flex items-center justify-between rounded-md bg-zinc-800 px-3 py-2">
@@ -69,12 +69,17 @@
 
         <!-- sağ üst oynatma kontrolleri -->
         <div class="absolute right-2 top-2 z-10 flex gap-2">
+          <label id="m-load" title="G-Code Dosyası Yükle" class="tb-btn h-10 w-10 text-base cursor-pointer">
+            <input type="file" id="m-file" accept=".nc,.gcode,.ngc,.txt,.tap" class="hidden"/>📂
+          </label>
           <button id="m-play"  title="Cycle Start"  class="tb-btn h-10 w-10 text-lg">▶</button>
           <button id="m-pause" title="Feed Hold"    class="tb-btn h-10 w-10 text-lg">⏸</button>
           <button id="m-stop"  title="Stop"         class="tb-btn h-10 w-10 text-lg">⏹</button>
           <button id="m-new"   title="Yeni Parça"   class="tb-btn h-10 w-10 text-base">⤓</button>
           <button id="m-mute"  title="Ses"          class="tb-btn h-10 w-10 text-base">🔊</button>
         </div>
+        <!-- yüklenen dosya adı -->
+        <div id="m-file-info" class="hidden absolute right-2 top-14 z-10 rounded bg-black/70 px-2 py-1 font-mono text-[10px] text-cyan-300"></div>
 
         <!-- sol dikey kamera araç çubuğu -->
         <div class="absolute left-2 top-24 z-10 flex flex-col gap-2">
@@ -87,8 +92,8 @@
       </section>
 
       <!-- FREZE PANELİ -->
-      <aside class="w-full shrink-0 lg:w-[380px]">
-        <div class="flex h-full flex-col gap-2 rounded-md bg-zinc-800 p-2 text-zinc-200">
+      <aside class="w-full shrink-0 overflow-y-auto lg:w-[380px]">
+        <div class="flex h-full flex-col gap-1.5 rounded-md bg-zinc-800 p-2 text-zinc-200">
           <!-- LCD -->
           <div class="rounded-sm border-4 border-zinc-500 bg-zinc-900 p-1.5">
             <div class="rounded-sm bg-[#0f261b] p-2 font-mono text-[11px] text-[#5be08a]">
@@ -185,14 +190,14 @@
           </div>
 
           <!-- emergency -->
-          <div class="mt-auto flex items-center gap-3 rounded border border-zinc-600 bg-zinc-900/60 p-2">
-            <button id="mbtn-emg" aria-label="Emergency stop" class="flex h-16 w-16 shrink-0 items-center justify-center rounded-full border-4 border-yellow-400 bg-red-600 shadow-[0_4px_10px_rgba(0,0,0,.6)] active:translate-y-0.5">
-              <span class="h-9 w-9 rounded-full bg-red-500 shadow-inner"></span>
+          <div class="flex items-center gap-3 rounded border border-zinc-600 bg-zinc-900/60 p-2">
+            <button id="mbtn-emg" aria-label="Emergency stop" class="flex h-14 w-14 shrink-0 items-center justify-center rounded-full border-4 border-yellow-400 bg-red-600 shadow-[0_4px_10px_rgba(0,0,0,.6)] active:translate-y-0.5">
+              <span class="h-8 w-8 rounded-full bg-red-500 shadow-inner"></span>
             </button>
             <div class="flex flex-1 flex-col gap-1">
               <span class="text-[9px] font-bold uppercase text-red-400">Emergency Stop</span>
-              <button id="mbtn-reset" class="rounded bg-yellow-300 py-1.5 text-[10px] font-bold text-zinc-900 hover:bg-yellow-200">RESET / CLEAR ALARM</button>
-              <button id="mbtn-newp" class="rounded bg-zinc-600 py-1.5 text-[10px] font-bold hover:bg-zinc-500">NEW WORKPIECE</button>
+              <button id="mbtn-reset" class="rounded bg-yellow-300 py-1 text-[10px] font-bold text-zinc-900 hover:bg-yellow-200">RESET / CLEAR ALARM</button>
+              <button id="mbtn-newp" class="rounded bg-zinc-600 py-1 text-[10px] font-bold hover:bg-zinc-500">NEW WORKPIECE</button>
             </div>
           </div>
         </div>
@@ -205,11 +210,17 @@
     <div id="view-lathe" class="hidden h-full w-full flex-col gap-2 lg:flex-row">
       <section class="relative flex-1 overflow-hidden rounded-md border border-zinc-700 bg-black">
         <div class="pointer-events-none absolute left-2 top-2 z-10 rounded bg-black/40 px-2 py-1 font-mono text-[11px] text-cyan-300">Topkapı AI · FANUC 0i-T · Turning</div>
+        <div class="absolute right-2 top-2 z-10 flex gap-2">
+          <label title="G-Code Dosyası Yükle" class="tb-btn h-10 w-10 text-base cursor-pointer">
+            <input type="file" id="l-file" accept=".nc,.gcode,.ngc,.txt,.tap" class="hidden"/>📂
+          </label>
+        </div>
+        <div id="l-file-info" class="hidden absolute right-2 top-14 z-10 rounded bg-black/70 px-2 py-1 font-mono text-[10px] text-cyan-300"></div>
         <canvas id="lathe-canvas" class="block h-full w-full"></canvas>
         <div id="hud" class="pointer-events-none absolute bottom-2 left-2 z-10 rounded bg-black/50 px-2 py-1 font-mono text-[11px] text-emerald-300"></div>
       </section>
-      <aside class="w-full shrink-0 lg:w-[380px]">
-        <div class="flex h-full flex-col gap-2 rounded-md bg-zinc-800 p-2 text-zinc-200">
+      <aside class="w-full shrink-0 overflow-y-auto lg:w-[380px]">
+        <div class="flex h-full flex-col gap-1.5 rounded-md bg-zinc-800 p-2 text-zinc-200">
           <div class="rounded-sm border-4 border-zinc-500 bg-zinc-900 p-1.5">
             <div class="rounded-sm bg-[#0f261b] p-2 font-mono text-[11px] text-[#5be08a]">
               <div class="flex items-center justify-between bg-[#0d4a6b] px-1 text-[#cfe8ff]"><span>ACTUAL POSITION (ABS)</span><span>O0001</span><span>N0010</span></div>
@@ -283,12 +294,12 @@
             <button id="btn-hold" class="flex flex-col items-center gap-1 rounded bg-amber-500 py-2 text-[10px] font-bold text-zinc-900 hover:bg-amber-400"><span class="h-4 w-4 rounded-full bg-amber-200"></span>FEED HOLD</button>
           </div>
           <div class="rounded border border-zinc-600 bg-zinc-700/40 p-2"><div id="mdi-rows" class="grid grid-cols-6 gap-1"></div><div id="mdi-fn" class="mt-1 grid grid-cols-6 gap-1"></div></div>
-          <div class="mt-auto flex items-center gap-3 rounded border border-zinc-600 bg-zinc-900/60 p-2">
-            <button id="btn-emg" aria-label="Emergency stop" class="flex h-16 w-16 shrink-0 items-center justify-center rounded-full border-4 border-yellow-400 bg-red-600 shadow-[0_4px_10px_rgba(0,0,0,.6)] active:translate-y-0.5"><span class="h-9 w-9 rounded-full bg-red-500 shadow-inner"></span></button>
+          <div class="flex items-center gap-3 rounded border border-zinc-600 bg-zinc-900/60 p-2">
+            <button id="btn-emg" aria-label="Emergency stop" class="flex h-14 w-14 shrink-0 items-center justify-center rounded-full border-4 border-yellow-400 bg-red-600 shadow-[0_4px_10px_rgba(0,0,0,.6)] active:translate-y-0.5"><span class="h-8 w-8 rounded-full bg-red-500 shadow-inner"></span></button>
             <div class="flex flex-1 flex-col gap-1">
               <span class="text-[9px] font-bold uppercase text-red-400">Emergency Stop</span>
-              <button id="btn-reset" class="rounded bg-yellow-300 py-1.5 text-[10px] font-bold text-zinc-900 hover:bg-yellow-200">RESET / CLEAR ALARM</button>
-              <button id="btn-new" class="rounded bg-zinc-600 py-1.5 text-[10px] font-bold hover:bg-zinc-500">NEW WORKPIECE</button>
+              <button id="btn-reset" class="rounded bg-yellow-300 py-1 text-[10px] font-bold text-zinc-900 hover:bg-yellow-200">RESET / CLEAR ALARM</button>
+              <button id="btn-new" class="rounded bg-zinc-600 py-1 text-[10px] font-bold hover:bg-zinc-500">NEW WORKPIECE</button>
             </div>
           </div>
         </div>
@@ -599,6 +610,70 @@ function syncMill(dt){
   $("m-stat-cut").textContent="cutting_status = "+(mill.cutting?1:0);
   $("m-stat-fps").textContent="FPS: "+fps;
 }
+
+/* ==================================================================== */
+/* =========================  G-CODE PARSER  ========================== */
+/* ==================================================================== */
+function parseGcode(text, type){
+  const lines=text.split(/\r?\n/);
+  const q=[];
+  let cur={x:0,y:type==="mill"?90:0,z:0}, feed=200, lastG=0;
+  for(let raw of lines){
+    raw=raw.replace(/;.*$/,"").replace(/\(.*?\)/g,"").trim().toUpperCase();
+    if(!raw) continue;
+    const tokens=raw.match(/[A-Z][+-]?[\d.]+/g);
+    if(!tokens) continue;
+    const p={};
+    for(const t of tokens){const c=t[0],v=parseFloat(t.slice(1));p[c]=v;}
+    if("G" in p) lastG=p.G;
+    if("F" in p) feed=p.F;
+    if("S" in p && type==="mill") mill.spindleRpm=clamp(p.S,0,12000);
+    if("S" in p && type==="lathe") lathe.setSpindleRpm(p.S);
+    if("M" in p){
+      if(p.M===3||p.M===4){ if(type==="mill") mill.spindleOn=true; else lathe.s.spindleOn=true; }
+      if(p.M===5){ if(type==="mill") mill.spindleOn=false; else lathe.s.spindleOn=false; }
+      if(p.M===30||p.M===2) continue;
+    }
+    if("T" in p){
+      if(type==="mill") mill.toolNo=clamp(Math.round(p.T),1,40);
+      else lathe.setToolNo(Math.round(p.T/100)||1);
+    }
+    if(lastG===0||lastG===1){
+      if(type==="mill"){
+        const nx="X" in p?p.X:cur.x, ny="Y" in p?p.Y:cur.y, nz="Z" in p?p.Z:cur.z;
+        q.push({type:lastG===0?"rapid":"feed",x:clamp(nx,-90,90),y:clamp(ny,0,120),z:clamp(nz,-65,65)});
+        cur={x:nx,y:ny,z:nz};
+      } else {
+        const nx="X" in p?p.X/2:cur.x, nz="Z" in p?p.Z:cur.z;
+        q.push({type:lastG===0?"rapid":"feed",x:clamp(nx,0,STOCK_R+12),z:clamp(nz,-20,STOCK_LEN)});
+        cur={x:nx,z:nz};
+      }
+    }
+  }
+  return q;
+}
+function runMillGcode(q){
+  if(!q.length) return;
+  mill.mode="AUTO"; mill.spindleOn=true; mill.paused=false;
+  mill.queue=q; mill.moveActive=mill.queue.shift(); mill.running=true;
+}
+function runLatheGcode(q){
+  if(!q.length) return;
+  lathe.setMode("AUTO"); lathe.s.spindleOn=true;
+  lathe.queue=q; lathe.moveActive=lathe.queue.shift()||null; lathe.s.running=true;
+}
+$("m-file").onchange=e=>{
+  const f=e.target.files[0]; if(!f) return;
+  $("m-file-info").textContent=f.name; $("m-file-info").classList.remove("hidden");
+  f.text().then(txt=>{const q=parseGcode(txt,"mill"); runMillGcode(q);});
+  e.target.value="";
+};
+$("l-file").onchange=e=>{
+  const f=e.target.files[0]; if(!f) return;
+  $("l-file-info").textContent=f.name; $("l-file-info").classList.remove("hidden");
+  f.text().then(txt=>{const q=parseGcode(txt,"lathe"); runLatheGcode(q);});
+  e.target.value="";
+};
 
 /* ==================================================================== */
 /* ==========================  TAB DEĞİŞTİRME  ======================== */
