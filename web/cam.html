@@ -87,52 +87,50 @@
             </div>
 
             <div id="cam-preview-view" class="cam-preview-view" hidden>
-              <!-- DRO Bar -->
-              <div class="cam-dro">
-                <div class="cam-dro-axis"><span class="cam-dro-label">X</span><span id="cnc-cam-x" class="cam-dro-val">0.000</span></div>
-                <div class="cam-dro-axis"><span class="cam-dro-label">Y</span><span id="cnc-cam-y" class="cam-dro-val">0.000</span></div>
-                <div class="cam-dro-axis"><span class="cam-dro-label">Z</span><span id="cnc-cam-z" class="cam-dro-val">0.000</span></div>
-                <div class="cam-dro-axis cam-dro-feed"><span class="cam-dro-label">F</span><span id="cam-dro-f" class="cam-dro-val">0</span></div>
-                <div class="cam-dro-axis cam-dro-speed"><span class="cam-dro-label">S</span><span id="cam-dro-s" class="cam-dro-val">0</span></div>
+              <!-- Fanuc LCD -->
+              <div class="cnc-panel-lcd">
+                <div class="cnc-screen">
+                  <div class="cnc-screen-inner">
+                    <div class="cnc-pos-header">
+                      <span>ACTUAL POSITION</span><span>O0001</span><span id="cam-lcd-line-no">N0000</span>
+                    </div>
+                    <div class="cnc-pos-rows">
+                      <div class="cnc-pos-row"><span class="cnc-pos-label">X</span><span id="cnc-cam-x" class="cnc-pos-val">0.000</span></div>
+                      <div class="cnc-pos-row"><span class="cnc-pos-label">Y</span><span id="cnc-cam-y" class="cnc-pos-val">0.000</span></div>
+                      <div class="cnc-pos-row"><span class="cnc-pos-label">Z</span><span id="cnc-cam-z" class="cnc-pos-val">0.000</span></div>
+                    </div>
+                    <div class="cnc-info-grid">
+                      <span id="cam-dro-f">ACT.F 0</span><span id="cam-dro-s" class="cnc-right">S 0</span>
+                      <span id="cam-sim-op">Operasyon: —</span><span class="cnc-right">OVR 100%</span>
+                    </div>
+                    <div class="cnc-status-bar">
+                      <span id="cnc-cam-mode">FREZE</span>
+                      <span id="cnc-cam-status">HAZIR</span>
+                      <span class="cnc-run-label">STOP</span>
+                    </div>
+                  </div>
+                </div>
               </div>
 
-              <!-- LCD Display -->
-              <div class="cam-lcd">
-                <div class="cam-lcd-header">
-                  <span id="cnc-cam-status">HAZIR</span>
-                  <span id="cnc-cam-mode">FREZE</span>
-                </div>
+              <!-- G-code lines -->
+              <div class="cnc-gcode-section">
+                <div class="cnc-gcode-title">G-CODE</div>
                 <div id="cam-lcd-lines" class="cam-lcd-lines"></div>
-                <div class="cam-lcd-footer">
-                  <span id="cam-sim-op">Operasyon: —</span>
-                  <span id="cam-lcd-line-no">N0</span>
-                </div>
               </div>
 
-              <!-- Cycle Controls -->
-              <div class="cam-cycle-row">
-                <button id="cam-sim-play" class="cam-cycle-btn cam-btn-green" type="button">▶ Cycle Start</button>
-                <button id="cam-sim-pause" class="cam-cycle-btn cam-btn-yellow" type="button">⏸ Feed Hold</button>
-                <button id="cam-sim-reset" class="cam-cycle-btn cam-btn-red" type="button">⏹ Reset</button>
-              </div>
-
-              <!-- Progress -->
-              <div class="cam-progress-row">
-                <input id="cam-sim-progress" class="cam-sim-progress" type="range" min="0" max="1000" value="0" />
-              </div>
-
-              <!-- Speed / Feed Sliders -->
-              <div class="cam-slider-group">
-                <div class="cam-slider-row">
-                  <label>Hız:</label>
-                  <input id="cam-speed-slider" type="range" min="1" max="200" value="100" />
-                  <span id="cam-speed-pct">100%</span>
+              <!-- Spindle / Feed -->
+              <div class="cnc-sliders-section">
+                <div class="cnc-sliders-legend">Spindle / Feed</div>
+                <div class="cnc-slider-item">
+                  <span class="cnc-slider-name">Hız</span>
+                  <span id="cam-speed-pct" class="cnc-slider-val">100%</span>
                 </div>
-                <div class="cam-slider-row">
-                  <label>İlerleme:</label>
-                  <input id="cam-feed-slider" type="range" min="10" max="200" value="100" />
-                  <span id="cam-feed-pct">100%</span>
+                <input id="cam-speed-slider" type="range" min="1" max="200" value="100" class="cnc-range-input" />
+                <div class="cnc-slider-item">
+                  <span class="cnc-slider-name">İlerleme</span>
+                  <span id="cam-feed-pct" class="cnc-slider-val">100%</span>
                 </div>
+                <input id="cam-feed-slider" type="range" min="10" max="200" value="100" class="cnc-range-input" />
               </div>
 
               <!-- Speed presets -->
@@ -141,6 +139,22 @@
                 <button id="cam-sim-1x" type="button" class="cam-speed-btn active">1x</button>
                 <button id="cam-sim-2x" type="button" class="cam-speed-btn">2x</button>
                 <button id="cam-sim-5x" type="button" class="cam-speed-btn">5x</button>
+              </div>
+
+              <!-- Progress -->
+              <div class="cam-progress-row">
+                <input id="cam-sim-progress" class="cam-sim-progress" type="range" min="0" max="1000" value="0" />
+              </div>
+
+              <!-- Operation buttons -->
+              <div class="cnc-ops-row">
+                <button id="cam-sim-play" class="cnc-op-btn cnc-op-cycle" type="button">
+                  <span class="cnc-led-dot cnc-led-green"></span>CYCLE START
+                </button>
+                <button id="cam-sim-pause" class="cnc-op-btn cnc-op-hold" type="button">
+                  <span class="cnc-led-dot cnc-led-amber"></span>FEED HOLD
+                </button>
+                <button id="cam-sim-reset" class="cnc-op-btn cnc-op-stop" type="button">RESET</button>
               </div>
 
               <!-- Confirm/Reject Footer -->

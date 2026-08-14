@@ -529,216 +529,192 @@ button.secondary:hover:not(:disabled) {
   gap: 0.5rem;
 }
 
-/* === CNC Simulation Panel — Fanuc-inspired industrial design === */
+/* === CNC Simulation Panel — Fanuc-style (matches cnc-sim.html) === */
 .cam-preview-view {
   display: flex;
   flex-direction: column;
-  gap: 0;
+  gap: 6px;
   margin-top: 0.75rem;
-  border: 2px solid #1a2a44;
-  border-radius: 12px;
+  border-radius: 8px;
   overflow: hidden;
-  background: #080e1a;
+  background: #27272a;
+  padding: 8px;
   box-shadow: 0 12px 48px rgba(0,0,0,.6);
 }
 
-/* DRO Bar */
-.cam-dro {
-  display: flex;
-  gap: 1px;
-  background: #1a2a44;
+/* Fanuc LCD */
+.cnc-panel-lcd {
+  border: 4px solid #71717a;
+  border-radius: 4px;
+  background: #18181b;
+  padding: 6px;
 }
-.cam-dro-axis {
-  flex: 1;
+.cnc-screen {
+  border-radius: 4px;
+}
+.cnc-screen-inner {
+  border-radius: 4px;
+  background: #0f261b;
+  padding: 8px;
+  font-family: "JetBrains Mono", "Fira Code", "Courier New", monospace;
+  font-size: 11px;
+  color: #5be08a;
+}
+.cnc-pos-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #0d4a6b;
+  padding: 2px 6px;
+  color: #cfe8ff;
+  font-size: 11px;
+  font-weight: 700;
+}
+.cnc-pos-rows {
+  margin: 8px 0;
+  padding: 0 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.cnc-pos-row {
   display: flex;
   align-items: baseline;
-  gap: 6px;
-  padding: 8px 12px;
-  background: #0a1424;
-}
-.cam-dro-label {
-  color: #5a8ab5;
-  font-size: 11px;
-  font-weight: 800;
-  font-family: "JetBrains Mono", "Fira Code", monospace;
-}
-.cam-dro-val {
-  color: #00ff88;
-  font-size: 14px;
-  font-weight: 700;
-  font-family: "JetBrains Mono", "Fira Code", monospace;
-}
-.cam-dro-feed .cam-dro-val { color: #ffaa00; }
-.cam-dro-speed .cam-dro-val { color: #00ccff; }
-
-/* LCD Display */
-.cam-lcd {
-  margin: 10px;
-  border: 2px solid #1a3a20;
-  border-radius: 8px;
-  overflow: hidden;
-  background: #0a1a0a;
-  box-shadow: inset 0 0 20px rgba(0,255,80,.05);
-}
-.cam-lcd-header {
-  display: flex;
   justify-content: space-between;
-  padding: 6px 10px;
-  background: #0d200d;
-  border-bottom: 1px solid #1a3a20;
-  font-family: "JetBrains Mono", "Fira Code", monospace;
+}
+.cnc-pos-label {
+  font-size: 16px;
+  font-weight: 700;
+  color: #7effb0;
+}
+.cnc-pos-val {
+  font-size: 22px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: #eaffef;
+  letter-spacing: 0.05em;
+}
+.cnc-info-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px 12px;
+  border-top: 1px solid #1f5c42;
+  padding: 4px 6px 0;
   font-size: 10px;
+  color: #59c98e;
+}
+.cnc-right { text-align: right; }
+.cnc-status-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 4px;
+  border-top: 1px solid #1f5c42;
+  padding: 4px 6px 0;
+  font-size: 10px;
+  color: #59c98e;
+}
+.cnc-run-label { color: #59c98e; }
+
+/* G-code section */
+.cnc-gcode-section {
+  border: 1px solid #52525b;
+  border-radius: 4px;
+  background: rgba(24,24,27,0.6);
+  overflow: hidden;
+}
+.cnc-gcode-title {
+  padding: 4px 8px;
+  background: #0f261b;
+  border-bottom: 1px solid #1f5c42;
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  font-size: 9px;
   font-weight: 800;
-  color: #33ff66;
+  color: #59c98e;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
 }
 .cam-lcd-lines {
-  min-height: 80px;
-  max-height: 120px;
+  min-height: 60px;
+  max-height: 100px;
   overflow-y: auto;
   padding: 4px 0;
   font-family: "JetBrains Mono", "Fira Code", monospace;
   font-size: 11px;
   line-height: 1.6;
-  color: #22cc44;
+  color: #5be08a;
+  background: #0f261b;
 }
 .cam-lcd-line {
-  padding: 0 10px;
+  padding: 0 8px;
   white-space: nowrap;
   transition: background .1s;
 }
 .cam-lcd-line.active {
   background: rgba(0,255,80,.12);
-  color: #66ff88;
+  color: #7effb0;
   font-weight: 700;
-}
-.cam-lcd-footer {
-  display: flex;
-  justify-content: space-between;
-  padding: 4px 10px;
-  background: #0d200d;
-  border-top: 1px solid #1a3a20;
-  font-family: "JetBrains Mono", "Fira Code", monospace;
-  font-size: 9px;
-  color: #228844;
 }
 .cam-lcd-lines::-webkit-scrollbar { width: 4px; }
 .cam-lcd-lines::-webkit-scrollbar-track { background: transparent; }
-.cam-lcd-lines::-webkit-scrollbar-thumb { background: #1a3a20; border-radius: 2px; }
+.cam-lcd-lines::-webkit-scrollbar-thumb { background: #1f5c42; border-radius: 2px; }
 
-/* Cycle Controls */
-.cam-cycle-row {
-  display: flex;
-  gap: 4px;
-  padding: 8px 10px;
+/* Spindle / Feed sliders */
+.cnc-sliders-section {
+  border: 1px solid #52525b;
+  border-radius: 4px;
+  background: rgba(24,24,27,0.6);
+  padding: 8px;
 }
-.cam-cycle-btn {
-  flex: 1;
-  padding: 10px 6px;
-  border: none;
-  border-radius: 8px;
-  font-size: 11px;
+.cnc-sliders-legend {
+  font-size: 9px;
   font-weight: 800;
-  cursor: pointer;
+  text-transform: uppercase;
+  color: #67e8f9;
+  margin-bottom: 6px;
+  letter-spacing: 0.06em;
 }
-.cam-btn-green {
-  background: linear-gradient(180deg, #1a6b3a 0%, #0f4d28 100%);
-  color: #a8f0c6;
-  border: 1px solid #1a7a42;
-}
-.cam-btn-green:hover { background: linear-gradient(180deg, #1f8248 0%, #146435 100%); color: #fff; }
-.cam-btn-yellow {
-  background: linear-gradient(180deg, #6b5a1a 0%, #4d3f0f 100%);
-  color: #f0dca8;
-  border: 1px solid #7a6a1a;
-}
-.cam-btn-yellow:hover { background: linear-gradient(180deg, #827020 0%, #645418 100%); color: #fff; }
-.cam-btn-red {
-  background: linear-gradient(180deg, #5c2020 0%, #3e1515 100%);
-  color: #f0a8a8;
-  border: 1px solid #8b3030;
-}
-.cam-btn-red:hover { background: linear-gradient(180deg, #7a2828 0%, #521a1a 100%); color: #fff; }
-
-/* Progress Bar */
-.cam-progress-row {
-  padding: 4px 10px;
-}
-.cam-sim-progress {
-  width: 100%;
-  height: 4px;
-  -webkit-appearance: none;
-  appearance: none;
-  background: #1a3558;
-  border: none;
-  border-radius: 2px;
-  outline: none;
-  padding: 0;
-}
-.cam-sim-progress::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: #4a8dff;
-  cursor: pointer;
-}
-.cam-sim-progress::-moz-range-thumb {
-  width: 14px;
-  height: 14px;
-  border: 0;
-  border-radius: 50%;
-  background: #4a8dff;
-  cursor: pointer;
-}
-
-/* Speed / Feed Sliders */
-.cam-slider-group { padding: 6px 10px; }
-.cam-slider-row {
+.cnc-slider-item {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 4px 0;
-}
-.cam-slider-row label {
-  color: #5a8ab5;
+  justify-content: space-between;
   font-size: 10px;
-  font-weight: 700;
-  min-width: 60px;
+  margin-bottom: 2px;
 }
-.cam-slider-row input[type="range"] {
-  flex: 1;
-  height: 4px;
+.cnc-slider-name { color: #d4d4d8; }
+.cnc-slider-val {
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  color: #7effb0;
+  font-weight: 700;
+  font-size: 11px;
+}
+.cnc-range-input {
+  width: 100%;
+  height: 6px;
   -webkit-appearance: none;
   appearance: none;
-  background: #1a3558;
+  background: #3f3f46;
   border: none;
-  border-radius: 2px;
+  border-radius: 3px;
   outline: none;
-  padding: 0;
+  margin-bottom: 6px;
+  accent-color: #06b6d4;
 }
-.cam-slider-row input[type="range"]::-webkit-slider-thumb {
+.cnc-range-input::-webkit-slider-thumb {
   -webkit-appearance: none;
   width: 14px;
   height: 14px;
   border-radius: 50%;
-  background: #4a8dff;
+  background: #06b6d4;
   cursor: pointer;
 }
-.cam-slider-row input[type="range"]::-moz-range-thumb {
+.cnc-range-input::-moz-range-thumb {
   width: 14px;
   height: 14px;
   border: 0;
   border-radius: 50%;
-  background: #4a8dff;
+  background: #06b6d4;
   cursor: pointer;
-}
-.cam-slider-row span {
-  color: #8cc8ff;
-  font-size: 11px;
-  font-weight: 700;
-  font-family: "JetBrains Mono", monospace;
-  min-width: 38px;
-  text-align: right;
 }
 
 /* Speed Presets */
@@ -746,10 +722,10 @@ button.secondary:hover:not(:disabled) {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 10px 8px;
+  padding: 0;
 }
 .cam-speed-label {
-  color: #5a8ab5;
+  color: #a1a1aa;
   font-size: 10px;
   font-weight: 700;
 }
@@ -757,29 +733,113 @@ button.secondary:hover:not(:disabled) {
   width: auto;
   min-width: 38px;
   padding: 4px 10px;
-  border: 1px solid #1e3a5e;
-  border-radius: 6px;
-  background: #0e1e34;
-  color: #6a8ab0;
+  border: 1px solid #52525b;
+  border-radius: 4px;
+  background: #27272a;
+  color: #a1a1aa;
   font-size: 10px;
   font-weight: 700;
   cursor: pointer;
   text-align: center;
 }
-.cam-speed-btn:hover { background: #142a48; color: #a0c0e0; }
+.cam-speed-btn:hover { background: #3f3f46; color: #d4d4d8; }
 .cam-speed-btn.active {
-  background: #1a3a6a;
-  color: #8cc8ff;
-  border-color: #2a5a8a;
+  background: #0e7490;
+  color: #ecfeff;
+  border-color: #06b6d4;
+}
+
+/* Progress Bar */
+.cam-progress-row {
+  padding: 0;
+}
+.cam-sim-progress {
+  width: 100%;
+  height: 4px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: #3f3f46;
+  border: none;
+  border-radius: 2px;
+  outline: none;
+  padding: 0;
+  accent-color: #06b6d4;
+}
+.cam-sim-progress::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #06b6d4;
+  cursor: pointer;
+}
+.cam-sim-progress::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border: 0;
+  border-radius: 50%;
+  background: #06b6d4;
+  cursor: pointer;
+}
+
+/* Operation buttons — matches cnc-sim.html */
+.cnc-ops-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 8px;
+  border: 1px solid #52525b;
+  border-radius: 4px;
+  background: rgba(24,24,27,0.6);
+  padding: 8px;
+}
+.cnc-op-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  border-radius: 6px;
+  padding: 10px 6px;
+  font-size: 10px;
+  font-weight: 800;
+  cursor: pointer;
+  border: none;
+  transition: filter .1s;
+}
+.cnc-op-btn:hover { filter: brightness(1.15); }
+.cnc-op-btn:active { transform: translateY(1px); }
+.cnc-op-cycle {
+  background: #16a34a;
+  color: #fff;
+}
+.cnc-op-hold {
+  background: #f59e0b;
+  color: #18181b;
+}
+.cnc-op-stop {
+  background: #3f3f46;
+  color: #d4d4d8;
+}
+.cnc-op-stop:hover { background: #52525b; }
+.cnc-led-dot {
+  display: block;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+}
+.cnc-led-green {
+  background: #86efac;
+  box-shadow: 0 0 6px rgba(120,255,160,.9);
+}
+.cnc-led-amber {
+  background: #fde68a;
 }
 
 /* Confirm/Reject Footer */
 .cam-sim-footer {
   display: flex;
   gap: 8px;
-  padding: 10px;
-  background: linear-gradient(180deg, #0a1e38 0%, #081828 100%);
-  border-top: 1px solid #1a2a44;
+  padding: 0;
+  margin-top: 2px;
 }
 .cam-sim-footer button {
   flex: 1;
@@ -787,42 +847,39 @@ button.secondary:hover:not(:disabled) {
 .cnc-btn-approve {
   width: auto;
   padding: 10px 20px;
-  border-radius: 8px;
+  border-radius: 6px;
   font-size: 12px;
   font-weight: 800;
   cursor: pointer;
   transition: all .15s;
-  background: linear-gradient(180deg, #1a7a42 0%, #0f5c30 100%);
-  border: 1px solid #22a858;
-  color: #b8f5d0;
+  background: #16a34a;
+  border: 1px solid #22c55e;
+  color: #fff;
 }
 .cnc-btn-approve:hover {
-  background: linear-gradient(180deg, #20944e 0%, #147038 100%);
-  color: #fff;
-  box-shadow: 0 0 14px #22a85844;
+  background: #15803d;
+  box-shadow: 0 0 14px rgba(34,197,94,.3);
 }
 .cnc-btn-reject {
   width: auto;
   padding: 10px 20px;
-  border-radius: 8px;
+  border-radius: 6px;
   font-size: 12px;
   font-weight: 800;
   cursor: pointer;
   transition: all .15s;
-  background: linear-gradient(180deg, #5c2020 0%, #3e1515 100%);
-  border: 1px solid #8b3030;
-  color: #f0a8a8;
+  background: #3f3f46;
+  border: 1px solid #52525b;
+  color: #d4d4d8;
 }
 .cnc-btn-reject:hover {
-  background: linear-gradient(180deg, #7a2828 0%, #521a1a 100%);
+  background: #52525b;
   color: #fff;
 }
 
 /* Responsive CAM preview */
 @media (max-width: 520px) {
-  .cam-dro { flex-wrap: wrap; }
-  .cam-dro-axis { min-width: 30%; }
-  .cam-cycle-row { flex-wrap: wrap; }
+  .cnc-ops-row { grid-template-columns: 1fr; }
   .cam-sim-footer { flex-direction: column; }
 }
 

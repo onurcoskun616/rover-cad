@@ -194,12 +194,10 @@ async function setupSimulation(simulationUrl) {
       if (camSimOp) camSimOp.textContent = `Operasyon: ${op || "—"}`;
 
       if (camSim && !camSim.isPlaying()) {
-        camSimPlay.textContent = "▶ Cycle Start";
         const cncStatus = byId("cnc-cam-status");
         if (cncStatus && progress < 1) { cncStatus.textContent = "DURAKLATILDI"; }
       }
       if (progress >= 1) {
-        camSimPlay.textContent = "▶ Cycle Start";
         const cncStatus = byId("cnc-cam-status");
         if (cncStatus) { cncStatus.textContent = "BİTTİ"; }
       }
@@ -210,8 +208,8 @@ async function setupSimulation(simulationUrl) {
       if (cncX) cncX.textContent = x != null ? x.toFixed(3) : "0.000";
       if (cncY) cncY.textContent = y != null ? y.toFixed(3) : "0.000";
       if (cncZ) cncZ.textContent = z != null ? z.toFixed(3) : "0.000";
-      if (camDroF) camDroF.textContent = f != null ? String(Math.round(f)) : "0";
-      if (camDroS) camDroS.textContent = "1000";
+      if (camDroF) camDroF.textContent = "ACT.F " + (f != null ? Math.round(f) : 0);
+      if (camDroS) camDroS.textContent = "S 1000";
 
       if (coordX) {
         coordX.textContent = x != null ? x.toFixed(3) : "0.000";
@@ -272,7 +270,6 @@ async function setupSimulation(simulationUrl) {
   requestAnimationFrame(() => window.dispatchEvent(new Event("resize")));
 
   camSimProgress.value = "0";
-  camSimPlay.textContent = "▶ Cycle Start";
   setSimSpeed(1);
   const cncStatus = byId("cnc-cam-status");
   if (cncStatus) cncStatus.textContent = "HAZIR";
@@ -534,11 +531,9 @@ camSimPlay.addEventListener("click", () => {
   const cncStatus = byId("cnc-cam-status");
   if (camSim.isPlaying()) {
     camSim.pause();
-    camSimPlay.textContent = "▶ Cycle Start";
     if (cncStatus) cncStatus.textContent = "DURAKLATILDI";
   } else {
     camSim.play();
-    camSimPlay.textContent = "⏸ Feed Hold";
     if (cncStatus) cncStatus.textContent = "ÇALIŞIYOR";
   }
 });
@@ -547,7 +542,6 @@ if (camSimPause) {
   camSimPause.addEventListener("click", () => {
     if (!camSim || !camSim.isPlaying()) return;
     camSim.pause();
-    camSimPlay.textContent = "▶ Cycle Start";
     const cncStatus = byId("cnc-cam-status");
     if (cncStatus) cncStatus.textContent = "DURAKLATILDI";
   });
@@ -558,7 +552,6 @@ if (camSimReset) {
     if (!camSim) return;
     camSim.pause();
     camSim.seek(0);
-    camSimPlay.textContent = "▶ Cycle Start";
     camSimProgress.value = "0";
     const cncStatus = byId("cnc-cam-status");
     if (cncStatus) cncStatus.textContent = "HAZIR";
