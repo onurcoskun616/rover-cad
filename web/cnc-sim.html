@@ -852,15 +852,15 @@ function parseGcode(text, type){
       if(type==="mill") mill.toolNo=clamp(Math.round(p.T),1,40);
       else lathe.setToolNo(Math.round(p.T/100)||1);
     }
-    if(lastG===0||lastG===1){
+    if(lastG===0||lastG===1||lastG===2||lastG===3){
       if(type==="mill"){
         const nx="X" in p?p.X:cur.x, ny="Y" in p?p.Y:cur.y, nz="Z" in p?p.Z:cur.z;
-        if(lastG===1){bounds.xMin=Math.min(bounds.xMin,nx);bounds.xMax=Math.max(bounds.xMax,nx);bounds.yMin=Math.min(bounds.yMin,ny);bounds.yMax=Math.max(bounds.yMax,ny);bounds.zMin=Math.min(bounds.zMin,nz);bounds.zMax=Math.max(bounds.zMax,nz);}
+        if(lastG!==0){bounds.xMin=Math.min(bounds.xMin,nx);bounds.xMax=Math.max(bounds.xMax,nx);bounds.yMin=Math.min(bounds.yMin,ny);bounds.yMax=Math.max(bounds.yMax,ny);bounds.zMin=Math.min(bounds.zMin,nz);bounds.zMax=Math.max(bounds.zMax,nz);}
         q.push({type:lastG===0?"rapid":"feed",x:nx,y:ny,z:nz});
         cur={x:nx,y:ny,z:nz};
       } else {
         const nx="X" in p?p.X/2:cur.x, nz="Z" in p?p.Z:cur.z;
-        if(lastG===1){bounds.xMin=Math.min(bounds.xMin,nx);bounds.xMax=Math.max(bounds.xMax,nx);bounds.zMin=Math.min(bounds.zMin,nz);bounds.zMax=Math.max(bounds.zMax,nz);}
+        if(lastG!==0){bounds.xMin=Math.min(bounds.xMin,nx);bounds.xMax=Math.max(bounds.xMax,nx);bounds.zMin=Math.min(bounds.zMin,nz);bounds.zMax=Math.max(bounds.zMax,nz);}
         q.push({type:lastG===0?"rapid":"feed",x:nx,z:nz});
         cur={x:nx,z:nz};
       }
