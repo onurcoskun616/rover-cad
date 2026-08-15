@@ -145,6 +145,7 @@
                 <span id="ml-actf">ACT.F 0</span><span id="ml-rpm" class="text-right">S 0</span>
                 <span id="ml-tool">T01</span><span id="ml-ovr" class="text-right">OVR 100%</span>
                 <span id="ml-removed">REMOVED 0%</span><span id="ml-coolant" class="text-right text-[#59c98e]">COOLANT OFF</span>
+                <span id="ml-stock" class="col-span-2 text-[#59c98e]">STOCK 200x140x60</span>
               </div>
               <div class="mt-1 flex items-center justify-between border-t border-[#1f5c42] px-1 pt-1 text-[10px]">
                 <span id="ml-mode" class="text-[#59c98e]">MANUAL</span>
@@ -293,6 +294,7 @@
                 <span>PART COUNT 1</span><span id="lcd-tool" class="text-right">T0100</span>
                 <span id="lcd-ovr">OVR 100%</span><span id="lcd-removed" class="text-right">REMOVED 0%</span>
                 <span id="lcd-coolant" class="col-span-2 text-[#59c98e]">COOLANT OFF</span>
+                <span id="lcd-stock" class="col-span-2 text-[#59c98e]">STOCK Ø120x200</span>
               </div>
               <div class="mt-1 flex items-center justify-between border-t border-[#1f5c42] px-1 pt-1 text-[10px]">
                 <span id="lcd-mode" class="text-[#59c98e]">MANUAL</span><span id="lcd-alarm" class="text-[#59c98e]">READY</span><span id="lcd-run" class="text-[#59c98e]">STOP</span>
@@ -523,6 +525,7 @@ function syncLathe(){const s=lathe.s;$("lcd-x").textContent=fmt(s.x);$("lcd-z").
   $("btn-cycle").disabled=s.mode!=="AUTO"||s.running;$("btn-goto").disabled=s.mode!=="MANUAL";
   const lcl=s.coolantMode;$("lcoolant-label").textContent="COOLANT "+(lcl==="off"?"OFF":lcl.toUpperCase());$("lbtn-coolant").className="flex flex-1 flex-col items-center gap-1 rounded py-2 text-[10px] font-bold "+(lcl!=="off"?"bg-blue-600 text-white":"bg-zinc-700 text-zinc-200 hover:bg-zinc-600");$("lcoolant-icon").textContent=lcl==="flood"?"🌊":lcl==="mist"?"🌫️":"💧";
   $("lcd-coolant").textContent="COOLANT "+(lcl==="off"?"OFF":lcl.toUpperCase());$("lcd-coolant").className=lcl!=="off"?"col-span-2 text-cyan-300":"col-span-2 text-[#59c98e]";
+  $("lcd-stock").textContent="STOCK Ø"+(STOCK_R*2)+"x"+STOCK_LEN;
   $("hud").textContent="X "+fmt(s.x)+"   Z "+fmt(s.z)+"   "+(s.spindleOn?Math.round(s.actualRpm)+" rpm":"spindle off")+"   coolant: "+lcl;}
 const latheCanvas=$("lathe-canvas"),lctx=latheCanvas.getContext("2d");
 function latheResize(){const dpr=Math.min(window.devicePixelRatio||1,2),r=latheCanvas.getBoundingClientRect();latheCanvas.width=Math.max(1,r.width*dpr|0);latheCanvas.height=Math.max(1,r.height*dpr|0);lctx.setTransform(dpr,0,0,dpr,0,0);}
@@ -793,6 +796,7 @@ function syncMill(dt){
   $("mbtn-cycle").disabled=mill.mode!=="AUTO"||mill.running;$("me-go").disabled=mill.mode!=="MANUAL";
   const mcl=mill.coolantMode;$("mcoolant-label").textContent="COOLANT "+(mcl==="off"?"OFF":mcl.toUpperCase());$("mbtn-coolant").className="flex flex-1 flex-col items-center gap-1 rounded py-2 text-[10px] font-bold "+(mcl!=="off"?"bg-blue-600 text-white":"bg-zinc-700 text-zinc-200 hover:bg-zinc-600");$("mcoolant-icon").textContent=mcl==="flood"?"🌊":mcl==="mist"?"🌫️":"💧";
   $("ml-coolant").textContent="COOLANT "+(mcl==="off"?"OFF":mcl.toUpperCase());$("ml-coolant").className=mcl!=="off"?"text-right text-cyan-300":"text-right text-[#59c98e]";
+  $("ml-stock").textContent="STOCK "+W+"x"+D+"x"+TOP;
   $("m-stat-pos").textContent="X "+fmt(mill.x)+"  Y "+fmt(mill.y)+"  Z "+fmt(mill.z);
   $("m-stat-tool").textContent="tool_selected = "+mill.toolNo;
   $("m-stat-cut").textContent="cutting_status = "+(mill.cutting?1:0);
@@ -906,6 +910,15 @@ $("l-file").onchange=e=>{
 if(raw){try{const d=JSON.parse(raw);if(d.gcode){
   const isMill=!d.machineType||d.machineType==="freze"||d.machineType==="mill";
   if(d.material){const mk=d.material.toLowerCase();const map={"celik":"steel","çelik":"steel","steel":"steel","aluminyum":"aluminum","alüminyum":"aluminum","aluminum":"aluminum","pirinc":"brass","pirinç":"brass","brass":"brass","bakir":"copper","bakır":"copper","copper":"copper","dokme demir":"cast-iron","dökme demir":"cast-iron","cast-iron":"cast-iron","titanyum":"titanium","titanium":"titanium","ahsap":"wood","ahşap":"wood","wood":"wood","plastik":"plastic","plastic":"plastic","pom":"plastic","nylon":"plastic","akrilik":"acrylic","acrylic":"acrylic","pmma":"acrylic"};const matKey=map[mk];if(matKey)setMaterial(matKey);}
+  if(isMill){
+    const sw=d.stockWidth||d.bbox?.width, sl=d.stockLength||d.bbox?.length, sh=d.stockHeight||d.bbox?.height;
+    if(sw&&sl&&sh)resizeMillStock(Math.round(sw),Math.round(sl),Math.round(sh));
+    else if(sw&&sl)resizeMillStock(Math.round(sw),Math.round(sl),TOP);
+  } else {
+    const sd=d.stockDiameter, slen=d.stockLength||d.bbox?.length;
+    if(sd)resizeLatheStock(slen?Math.round(slen):STOCK_LEN, Math.round(sd/2));
+    else if(slen)resizeLatheStock(Math.round(slen), STOCK_R);
+  }
   setTimeout(()=>{
     if(isMill){setTab("mill");$("m-file-info").textContent="CAM çıktısı";$("m-file-info").classList.remove("hidden");runMillGcode(parseGcode(d.gcode,"mill"));}
     else{setTab("lathe");$("l-file-info").textContent="CAM çıktısı";$("l-file-info").classList.remove("hidden");runLatheGcode(parseGcode(d.gcode,"lathe"));}
@@ -1257,7 +1270,7 @@ function taiGetChips(){
       {l:"12mm delik aç",c:"12mm çapında 15mm derinlikte delik aç"},
       {l:"Dikdörtgen cep",c:"60x40mm 10mm derin dikdörtgen cep aç"},
       {l:"Örnek parçalar",c:"Örnek parçaları göster"},
-      {l:"🔩 Malzeme değiştir",c:"Malzeme alüminyum"},
+      {l:"📐 Stok boyutu",c:"Stok boyut 200x140x60"},
     ];
   } else {
     if(taiLastOp==="turn")return[
@@ -1282,7 +1295,7 @@ function taiGetChips(){
       {l:"Çapı 40mm yap",c:"Çapı 40mm'ye düşür"},
       {l:"Kanal aç",c:"8mm genişliğinde 15mm derin kanal aç"},
       {l:"Örnek parçalar",c:"Örnek parçaları göster"},
-      {l:"🔩 Malzeme değiştir",c:"Malzeme çelik"},
+      {l:"📐 Stok boyutu",c:"Stok boyut çap 80 uzunluk 200"},
     ];
   }
 }
@@ -1326,6 +1339,7 @@ function taiExec(raw){
 • <b>Pah kır:</b> "2mm pah kır"<br>
 • <b>Kontrol:</b> "devir 8000", "feed 500", "durdur"<br>
 • <b>Soğutma:</b> "soğutma aç", "coolant flood", "coolant mist", "soğutma kapat"<br>
+• <b>Stok boyutu:</b> "stok boyut 200x140x60" (genişlik x derinlik x yükseklik)<br>
 • <b>Malzeme:</b> "malzeme alüminyum", "malzeme ahşap"<br>
 • <b>Örnek parçalar:</b> "örnek parçaları göster"`;
     return `<b>Torna Komutları:</b><br>
@@ -1335,6 +1349,7 @@ function taiExec(raw){
 • <b>Konik torna:</b> "80mm'den 30mm'ye konik torna"<br>
 • <b>Kontrol:</b> "devir 2000", "feed 300", "durdur"<br>
 • <b>Soğutma:</b> "soğutma aç", "coolant flood", "coolant mist", "soğutma kapat"<br>
+• <b>Stok boyutu:</b> "stok boyut çap 80 uzunluk 200" veya "stok boyut 80x200"<br>
 • <b>Malzeme:</b> "malzeme pirinç", "malzeme plastik"<br>
 • <b>Örnek parçalar:</b> "örnek parçaları göster"`;
   }
@@ -1395,6 +1410,37 @@ function taiExec(raw){
   if(/^(reset|sifirla)$/i.test(t.trim())){if(im){mill.alarm=null;mill.emergency=false;}else lathe.clearAlarm();return A("✓ Alarm temizlendi, sistem sıfırlandı.");}
   if(/(acil|emergency|emg)/i.test(t)){if(im){mill.emergency=true;mill.running=false;mill.spindleOn=false;mill.coolantMode="off";mill.queue=[];mill.moveActive=null;mill.alarm="EMG";}else lathe.emergencyStop();return A("⚠ ACİL DURDURMA aktif!")+" RESET yazarak devam edebilirsiniz.";}
   if(/(yeni\s*parca|new\s*work|yeni\s*is)/i.test(t)){if(im)$("mbtn-newp").click();else lathe.reset();taiLastOp=null;return A("✓ Yeni iş parçası yüklendi.");}
+
+  /* --- stok boyutu ayarla --- */
+  if(/(stok|stock)\s*(boyut|olcu|ebat|size)/i.test(t)||/(boyut|olcu|ebat|size)\s*(ayarla|degistir|belirle|set)/i.test(t)){
+    if(im){
+      const dims=t.match(/(\d+\.?\d*)\s*x\s*(\d+\.?\d*)\s*(?:x\s*(\d+\.?\d*))?/i);
+      if(dims){const w=parseFloat(dims[1]),d=parseFloat(dims[2]),h=dims[3]?parseFloat(dims[3]):TOP;
+        resizeMillStock(Math.max(40,Math.round(w)),Math.max(30,Math.round(d)),Math.max(10,Math.round(h)));
+        return A("✓ Stok boyutu ayarlandı:")+" "+Math.round(w)+"x"+Math.round(d)+"x"+Math.round(h)+" mm.";}
+      return "Freze stok boyutunu şu formatta gir:<br><b>stok boyut 200x140x60</b> (genişlik x derinlik x yükseklik mm)";
+    } else {
+      let dia=taiNum(t,["cap","capi","capinda","dia","diameter","\\bø"]);
+      let len=taiNum(t,["uzunluk","uzunlugu","boy","length","long","len"]);
+      if(!dia&&!len){const dims=t.match(/(\d+\.?\d*)\s*x\s*(\d+\.?\d*)/i);if(dims){dia=parseFloat(dims[1]);len=parseFloat(dims[2]);}}
+      if(dia||len){resizeLatheStock(len?Math.max(20,Math.round(len)):STOCK_LEN,dia?Math.max(5,Math.round(dia/2)):STOCK_R);
+        return A("✓ Stok boyutu ayarlandı:")+" Ø"+(dia||STOCK_R*2)+"mm, uzunluk "+(len||STOCK_LEN)+"mm.";}
+      return "Torna stok boyutunu şu formatta gir:<br><b>stok boyut çap 80 uzunluk 200</b> veya <b>stok boyut 80x200</b> (çap x uzunluk mm)";
+    }
+  }
+  if(im&&/(stok|stock)\s*(\d+\.?\d*)\s*x\s*(\d+\.?\d*)\s*(?:x\s*(\d+\.?\d*))?/i.test(t)){
+    const m=t.match(/(\d+\.?\d*)\s*x\s*(\d+\.?\d*)\s*(?:x\s*(\d+\.?\d*))?/i);
+    const w=parseFloat(m[1]),d=parseFloat(m[2]),h=m[3]?parseFloat(m[3]):TOP;
+    resizeMillStock(Math.max(40,Math.round(w)),Math.max(30,Math.round(d)),Math.max(10,Math.round(h)));
+    return A("✓ Stok boyutu ayarlandı:")+" "+Math.round(w)+"x"+Math.round(d)+"x"+Math.round(h)+" mm.";
+  }
+  if(!im&&/(stok|stock)\s*(cap|capi|dia|diameter|\\bø)\s*(\d+\.?\d*)/i.test(t)){
+    const mc=t.match(/(cap|capi|dia|diameter|ø)\s*(\d+\.?\d*)/i);
+    const ml=t.match(/(uzunluk|uzunlugu|boy|length|len)\s*(\d+\.?\d*)/i);
+    const dia=mc?parseFloat(mc[2]):STOCK_R*2,len=ml?parseFloat(ml[2]):STOCK_LEN;
+    resizeLatheStock(Math.max(20,Math.round(len)),Math.max(5,Math.round(dia/2)));
+    return A("✓ Stok boyutu ayarlandı:")+" Ø"+Math.round(dia)+"mm, uzunluk "+Math.round(len)+"mm.";
+  }
 
   /* --- parametre ayarları --- */
   let rpm=t.match(/(?:devir|rpm)\s*(\d+)/i)||t.match(/(\d+)\s*(?:devir|rpm)/i);

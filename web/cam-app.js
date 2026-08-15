@@ -271,11 +271,17 @@ async function handleCamGenerate() {
     }
 
     cncSimBtn.onclick = () => {
-      sessionStorage.setItem("rover_cnc_gcode", JSON.stringify({
+      const stockData = {
         gcode: gcodeText,
         machineType: camAnswers.machineType || "freze",
         material: camAnswers.material || "",
-      }));
+      };
+      if (bbox) { stockData.bbox = bbox; }
+      if (camAnswers.stockWidth) stockData.stockWidth = Number(camAnswers.stockWidth);
+      if (camAnswers.stockLength) stockData.stockLength = Number(camAnswers.stockLength);
+      if (camAnswers.stockHeight) stockData.stockHeight = Number(camAnswers.stockHeight);
+      if (camAnswers.stockDiameter) stockData.stockDiameter = Number(camAnswers.stockDiameter);
+      sessionStorage.setItem("rover_cnc_gcode", JSON.stringify(stockData));
       window.open("cnc-sim.html", "_blank");
     };
 
