@@ -1780,6 +1780,9 @@ function collectMachineState() {
 function handleGcodeBlocks(blocks, opIndices) {
   const R = r();
   const im = (R.active === "mill");
+  var stockDims = im
+    ? { w: R.W, d: R.D, h: R.TOP }
+    : { len: R.STOCK_LEN, r: R.STOCK_R };
   blocks.forEach(function(block, i) {
     masterGcode.push({
       index: opIndices[i] !== undefined ? opIndices[i] : opCounter++,
@@ -1790,9 +1793,9 @@ function handleGcodeBlocks(blocks, opIndices) {
     const parsed = R.parseGcode(block, im ? "mill" : "lathe");
     if (parsed.q.length > 0) {
       if (im) {
-        R.runMillGcode(parsed);
+        R.runMillGcode(parsed, stockDims);
       } else {
-        R.runLatheGcode(parsed);
+        R.runLatheGcode(parsed, stockDims);
       }
       R.taiMsg('<span class="tai-msg-action">▶ G-code çalıştırıldı:</span> ' +
              parsed.q.length + " hareket komutu.", "bot");
