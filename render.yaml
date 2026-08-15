@@ -4,7 +4,7 @@ services:
     runtime: python
     rootDir: server
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn --worker-class eventlet -w 1 app:app --bind 0.0.0.0:$PORT
+    startCommand: python app.py
     envVars:
       - key: LLM_PROVIDER
         value: openai

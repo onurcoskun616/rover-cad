@@ -3,6 +3,12 @@ Rover CNC · LLM Chatbot Backend
 Flask + Flask-SocketIO + SQLite
 """
 
+try:
+    import eventlet
+    eventlet.monkey_patch()
+except ImportError:
+    pass
+
 import os
 import re
 import json
@@ -484,5 +490,7 @@ def export_nc(session_key):
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", "5050"))
+    is_dev = os.getenv("RENDER") is None
     log.info("Starting Rover CNC backend on :%d", port)
-    socketio.run(app, host="0.0.0.0", port=port, debug=True, allow_unsafe_werkzeug=True)
+    socketio.run(app, host="0.0.0.0", port=port,
+                 debug=is_dev, allow_unsafe_werkzeug=is_dev)
