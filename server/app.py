@@ -367,7 +367,18 @@ def on_chat_message(data):
     save_message(session_id, "user", user_msg)
 
     llm_messages = build_llm_context(session_id, machine_state)
-    llm_messages.append({"role": "user", "content": user_msg})
+
+    stock = machine_state.get("stock", {})
+    mt = machine_state.get("machineType", "mill")
+    if mt == "mill":
+        stock_tag = (f"[STOK: {stock.get('w')}x{stock.get('d')}x{stock.get('h')}mm | "
+                     f"X: -{stock.get('w',0)/2}..+{stock.get('w',0)/2}, "
+                     f"Y: -{stock.get('d',0)/2}..+{stock.get('d',0)/2}, "
+                     f"Z üst: {stock.get('h')}, güvenli Z: {stock.get('h',0)+10}]")
+    else:
+        stock_tag = (f"[STOK: çap={stock.get('r',0)*2}mm, uzunluk={stock.get('len')}mm]")
+
+    llm_messages.append({"role": "user", "content": f"{user_msg}\n\n{stock_tag}"})
 
     emit("chat_typing", {"typing": True})
 
