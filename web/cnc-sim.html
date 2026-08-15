@@ -1331,11 +1331,12 @@ function taiGetChips(){
 function taiRenderChips(){
   taiBadge.textContent=isMill()?"FREZE":"TORNA";
   taiChips.innerHTML="";
-  taiGetChips().forEach(c=>{const b=document.createElement("button");b.className="tai-chip";b.textContent=c.l;b.onclick=()=>taiUserInput(c.c);taiChips.appendChild(b);});
+  const R=window._rover||{taiGetChips,taiUserInput};
+  (R.taiGetChips||taiGetChips)().forEach(c=>{const b=document.createElement("button");b.className="tai-chip";b.textContent=c.l;b.onclick=()=>(R.taiUserInput||taiUserInput)(c.c);taiChips.appendChild(b);});
 }
 
 /* ---- ana komut işleyici ---- */
-function taiSendMsg(){const txt=taiInput.value.trim();if(!txt)return;taiInput.value="";taiUserInput(txt);}
+function taiSendMsg(){const txt=taiInput.value.trim();if(!txt)return;taiInput.value="";const R=window._rover;if(R&&R.taiUserInput)R.taiUserInput(txt);else taiUserInput(txt);}
 taiSend.onclick=taiSendMsg;
 taiInput.onkeydown=e=>{if(e.key==="Enter")taiSendMsg();};
 
@@ -1628,6 +1629,15 @@ function taiExec(raw){
 
 taiMsg("Merhaba! Ben <b>Topkapı AI</b>, CNC asistanın.<br>Doğal dilde komut verebilirsin:<br>• \"<b>12mm çapında 20mm delik aç</b>\"<br>• \"<b>60x40mm 10mm derin cep aç</b>\"<br>• \"<b>Soğutma aç</b>\" / \"<b>Coolant flood</b>\" / \"<b>M8</b>\"<br>• \"<b>Örnek parçaları göster</b>\"<br>• \"<b>Yardım</b>\" yazarak tüm komutları gör.","bot");
 taiRenderChips();
+
+window._rover = {
+  taiUserInput, taiExec, taiGetChips, taiNorm, taiMsg, taiRenderChips,
+  taiMessages, parseGcode, runMillGcode, runLatheGcode,
+  get active(){ return active; },
+  get W(){ return W; }, get D(){ return D; }, get TOP(){ return TOP; },
+  get STOCK_LEN(){ return STOCK_LEN; }, get STOCK_R(){ return STOCK_R; },
+  get mill(){ return mill; }, get lathe(){ return lathe; },
+};
 </script>
 
 <!-- ================================================================== -->
@@ -1637,6 +1647,9 @@ taiRenderChips();
 <script>
 (function(){
 "use strict";
+
+var R = null;
+function r(){ if(!R) R = window._rover; return R; }
 
 /* ------------------------------------------------------------------ */
 /*  CONFIG                                                             */
@@ -1659,6 +1672,7 @@ let socket = null;
 
 function wsConnect() {
   if (!ENABLE_LLM) return;
+  if (!window._rover) { setTimeout(wsConnect, 200); return; }
   try {
     socket = io(WS_URL, {
       transports: ["websocket", "polling"],
@@ -1675,7 +1689,7 @@ function wsConnect() {
     console.log("Rover WS: connected");
     socket.emit("init_session", {
       sessionKey: wsSessionKey,
-      machineType: active,
+      machineType: r().active,
     });
   });
 
@@ -1701,34 +1715,37 @@ function wsConnect() {
   socket.on("chat_response", function(data) {
     hideTypingIndicator();
     if (data.error) {
-      taiMsg("Hata: " + data.error, "bot");
+      r().taiMsg("Hata: " + data.error, "bot");
       return;
     }
     if (data.text) {
-      taiMsg(data.text, "bot");
+      r().taiMsg(data.text, "bot");
     }
     if (data.gcodeBlocks && data.gcodeBlocks.length > 0) {
       handleGcodeBlocks(data.gcodeBlocks, data.opIndices || []);
     }
-    taiRenderChips();
+    r().taiRenderChips();
   });
 
   socket.on("master_gcode", function(data) {
     if (data.gcode) {
       downloadNcFile(data.gcode, wsSessionKey);
     } else {
-      taiMsg("Henüz kaydedilmiş G-code operasyonu yok.", "bot");
+      r().taiMsg("Henüz kaydedilmiş G-code operasyonu yok.", "bot");
     }
   });
+
+  hookChatInput();
 }
 
 /* ------------------------------------------------------------------ */
 /*  MACHINE STATE COLLECTOR                                            */
 /* ------------------------------------------------------------------ */
 function collectMachineState() {
-  const im = (active === "mill");
+  const R = r();
+  const im = (R.active === "mill");
   const state = {
-    machineType: active,
+    machineType: R.active,
     stock: {},
     tool: {},
     spindleRpm: 0,
@@ -1739,19 +1756,19 @@ function collectMachineState() {
   };
 
   if (im) {
-    state.stock = { w: W, d: D, h: TOP };
-    state.tool = { x: mill.x, y: mill.y, z: mill.z };
-    state.spindleRpm = mill.spindleRpm;
-    state.feed = mill.feed;
-    state.coolantMode = mill.coolantMode || "off";
-    state.mode = mill.mode;
+    state.stock = { w: R.W, d: R.D, h: R.TOP };
+    state.tool = { x: R.mill.x, y: R.mill.y, z: R.mill.z };
+    state.spindleRpm = R.mill.spindleRpm;
+    state.feed = R.mill.feed;
+    state.coolantMode = R.mill.coolantMode || "off";
+    state.mode = R.mill.mode;
   } else {
-    state.stock = { len: STOCK_LEN, r: STOCK_R };
-    state.tool = { x: lathe.s.x, z: lathe.s.z };
-    state.spindleRpm = lathe.s.spindleRpm;
-    state.feed = lathe.s.feed;
-    state.coolantMode = lathe.s.coolantMode || "off";
-    state.mode = lathe.s.mode;
+    state.stock = { len: R.STOCK_LEN, r: R.STOCK_R };
+    state.tool = { x: R.lathe.s.x, z: R.lathe.s.z };
+    state.spindleRpm = R.lathe.s.spindleRpm;
+    state.feed = R.lathe.s.feed;
+    state.coolantMode = R.lathe.s.coolantMode || "off";
+    state.mode = R.lathe.s.mode;
   }
 
   return state;
@@ -1761,7 +1778,8 @@ function collectMachineState() {
 /*  G-CODE HANDLER (from LLM response <gcode> blocks)                  */
 /* ------------------------------------------------------------------ */
 function handleGcodeBlocks(blocks, opIndices) {
-  const im = (active === "mill");
+  const R = r();
+  const im = (R.active === "mill");
   blocks.forEach(function(block, i) {
     masterGcode.push({
       index: opIndices[i] !== undefined ? opIndices[i] : opCounter++,
@@ -1769,14 +1787,14 @@ function handleGcodeBlocks(blocks, opIndices) {
       timestamp: new Date().toISOString(),
     });
 
-    const parsed = parseGcode(block, im ? "mill" : "lathe");
+    const parsed = R.parseGcode(block, im ? "mill" : "lathe");
     if (parsed.q.length > 0) {
       if (im) {
-        runMillGcode(parsed);
+        R.runMillGcode(parsed);
       } else {
-        runLatheGcode(parsed);
+        R.runLatheGcode(parsed);
       }
-      taiMsg('<span class="tai-msg-action">▶ G-code çalıştırıldı:</span> ' +
+      R.taiMsg('<span class="tai-msg-action">▶ G-code çalıştırıldı:</span> ' +
              parsed.q.length + " hareket komutu.", "bot");
     }
   });
@@ -1792,8 +1810,8 @@ function showTypingIndicator() {
   typingEl = document.createElement("div");
   typingEl.className = "tai-msg tai-msg-bot";
   typingEl.innerHTML = '<span class="animate-spin-slow">⚙</span> Düşünüyorum...';
-  taiMessages.appendChild(typingEl);
-  taiMessages.scrollTop = taiMessages.scrollHeight;
+  r().taiMessages.appendChild(typingEl);
+  r().taiMessages.scrollTop = r().taiMessages.scrollHeight;
 }
 
 function hideTypingIndicator() {
@@ -1816,7 +1834,7 @@ function downloadNcFile(gcodeText, sessionKey) {
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
-  taiMsg('<span class="tai-msg-action">✓ NC dosyası indirildi:</span> ' + a.download, "bot");
+  r().taiMsg('<span class="tai-msg-action">✓ NC dosyası indirildi:</span> ' + a.download, "bot");
 }
 
 function exportMasterGcode() {
@@ -1825,10 +1843,10 @@ function exportMasterGcode() {
     return;
   }
   if (masterGcode.length === 0) {
-    taiMsg("Henüz kaydedilmiş G-code operasyonu yok.", "bot");
+    r().taiMsg("Henüz kaydedilmiş G-code operasyonu yok.", "bot");
     return;
   }
-  const lines = [
+  var lines = [
     "(Rover CNC · Local Export)",
     "(Date: " + new Date().toISOString().slice(0, 16) + ")",
     "(Operations: " + masterGcode.length + ")",
@@ -1844,65 +1862,64 @@ function exportMasterGcode() {
 }
 
 /* ------------------------------------------------------------------ */
-/*  OVERRIDE taiUserInput — route through WS when connected            */
+/*  HOOK taiUserInput — route through WS when connected                */
 /* ------------------------------------------------------------------ */
-const _origTaiUserInput = taiUserInput;
+function hookChatInput() {
+  const R = r();
+  const _origInput = R.taiUserInput;
+  const _origChips = R.taiGetChips;
 
-window.taiUserInput = function(text) {
-  const tNorm = taiNorm(text);
+  R.taiUserInput = function(text) {
+    var tNorm = R.taiNorm(text);
 
-  if (/^(nc|export|indir|download|kaydet)\s*(dosya|file|nc)?$/i.test(tNorm) ||
-      /(nc\s*(indir|export|dosya))|(master\s*gcode)|(dosya\s*indir)/i.test(tNorm)) {
-    taiMsg(text, "user");
-    exportMasterGcode();
-    return;
-  }
-
-  if (/(master|toplam|tum)\s*(gcode|g-code|operasyon|islem)/i.test(tNorm) &&
-      /(listele|goster|kac)/i.test(tNorm)) {
-    taiMsg(text, "user");
-    taiMsg('<span class="tai-msg-action">Master G-Code:</span> ' +
-           masterGcode.length + " operasyon kayıtlı." +
-           (masterGcode.length > 0 ? '<br>"<b>nc indir</b>" yazarak .nc dosyası indirebilirsin.' : ""),
-           "bot");
-    return;
-  }
-
-  if (wsConnected && ENABLE_LLM) {
-    taiMsg(text, "user");
-
-    const localResult = taiExec(text);
-    if (localResult) {
-      taiMsg(localResult, "bot");
-      taiRenderChips();
+    if (/^(nc|export|indir|download|kaydet)\s*(dosya|file|nc)?$/i.test(tNorm) ||
+        /(nc\s*(indir|export|dosya))|(master\s*gcode)|(dosya\s*indir)/i.test(tNorm)) {
+      R.taiMsg(text, "user");
+      exportMasterGcode();
       return;
     }
 
-    const machineState = collectMachineState();
-    socket.emit("chat_message", {
-      sessionKey: wsSessionKey,
-      message: text,
-      machineState: machineState,
-    });
-    return;
-  }
+    if (/(master|toplam|tum)\s*(gcode|g-code|operasyon|islem)/i.test(tNorm) &&
+        /(listele|goster|kac)/i.test(tNorm)) {
+      R.taiMsg(text, "user");
+      R.taiMsg('<span class="tai-msg-action">Master G-Code:</span> ' +
+             masterGcode.length + " operasyon kayıtlı." +
+             (masterGcode.length > 0 ? '<br>"<b>nc indir</b>" yazarak .nc dosyası indirebilirsin.' : ""),
+             "bot");
+      return;
+    }
 
-  _origTaiUserInput(text);
-};
+    if (wsConnected && ENABLE_LLM) {
+      R.taiMsg(text, "user");
 
-/* ------------------------------------------------------------------ */
-/*  EXTRA CHAT CHIPS for LLM mode                                     */
-/* ------------------------------------------------------------------ */
-const _origTaiGetChips = taiGetChips;
+      var localResult = R.taiExec(text);
+      if (localResult) {
+        R.taiMsg(localResult, "bot");
+        R.taiRenderChips();
+        return;
+      }
 
-window.taiGetChips = function() {
-  const chips = _origTaiGetChips();
-  if (masterGcode.length > 0) {
-    chips.push({ l: "📥 NC İndir", c: "nc indir" });
-    chips.push({ l: "📋 Operasyonlar", c: "master gcode listele" });
-  }
-  return chips;
-};
+      var machineState = collectMachineState();
+      socket.emit("chat_message", {
+        sessionKey: wsSessionKey,
+        message: text,
+        machineState: machineState,
+      });
+      return;
+    }
+
+    _origInput(text);
+  };
+
+  R.taiGetChips = function() {
+    var chips = _origChips();
+    if (masterGcode.length > 0) {
+      chips.push({ l: "📥 NC İndir", c: "nc indir" });
+      chips.push({ l: "📋 Operasyonlar", c: "master gcode listele" });
+    }
+    return chips;
+  };
+}
 
 /* ------------------------------------------------------------------ */
 /*  INIT                                                               */
