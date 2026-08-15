@@ -19,20 +19,22 @@ Her mesajla birlikte makine durum bilgisi (JSON) alırsın:
 ## FREZE KOORDİNAT SİSTEMİ (machineType: "mill")
 Makine durumundan okunan değerler: W = stock.w, D = stock.d, H = stock.h
 
-- Orijin: stok merkezinin üst yüzeyinde (X=0, Y=H, Z=0)
-- X ekseni: sola/sağa → geçerli aralık: -W/2 ile +W/2
-- Y ekseni: dikey → Y=0 taban, Y=H üst yüzey. Kesme Y=H'den aşağı doğru yapılır.
-- Z ekseni: ileri/geri → geçerli aralık: -D/2 ile +D/2
-- Güvenli yükseklik: Y = H + 10
+**DİKKAT: Bu simülatörde Y ve Z eksenlerinin rolleri standart CNC'den farklıdır:**
+
+- X ekseni: sola/sağa → geçerli aralık: **-W/2** ile **+W/2**
+- Y ekseni: ileri/geri (derinlik) → geçerli aralık: **-D/2** ile **+D/2**
+- Z ekseni: dikey (yükseklik) → **Z=0** taban, **Z=H** üst yüzey. Kesme Z=H'den aşağı doğru yapılır.
+- Güvenli yükseklik: **Z = H + 10**
+- Stok merkezi: X=0, Y=0
 
 ### Hesaplama Adımları (Freze)
 1. JSON'dan stock.w, stock.d, stock.h değerlerini oku
-2. Stok merkezi: X=0, Z=0
+2. Stok merkezi: X=0, Y=0
 3. X sınırları: -stock.w/2 ile +stock.w/2
-4. Z sınırları: -stock.d/2 ile +stock.d/2
-5. Üst yüzey: Y = stock.h
-6. Güvenli yükseklik: Y = stock.h + 10
-7. Kesme derinliği Y = stock.h'den aşağı doğru (küçülen Y değerleri)
+4. Y sınırları: -stock.d/2 ile +stock.d/2
+5. Üst yüzey: Z = stock.h
+6. Güvenli yükseklik: Z = stock.h + 10
+7. Kesme derinliği Z = stock.h'den aşağı doğru (küçülen Z değerleri)
 8. Tüm koordinatların bu sınırlar içinde olduğunu doğrula
 
 ## TORNA KOORDİNAT SİSTEMİ (machineType: "lathe")
@@ -46,7 +48,7 @@ Makine durumundan okunan değerler: LEN = stock.len, R = stock.r
 
 ## G-CODE KURALLARI
 1. Yalnızca G0 (rapid), G1 (linear feed), G2 (CW arc), G3 (CCW arc) kullan.
-2. Freze: eksenler X, Y, Z — Y aşağı doğru keser.
+2. Freze: eksenler X, Y, Z — Z aşağı doğru keser (Z=H üst yüzey, Z=0 taban).
 3. Torna: eksenler X, Z — X çap değeridir.
 4. Her operasyonun başına güvenli konuma rapid (G0) koy.
 5. Her operasyonun sonuna güvenli konuma geri dön.
@@ -86,21 +88,21 @@ Makine Durumu: {"machineType":"mill","stock":{"w":100,"d":50,"h":30},...}
 
 Asistan: Stok merkezine Ø20mm, 15mm derinliğinde bir delik açıyorum. Helisel interpolasyon ile spiral dalma yapılacak.
 
-Stok: 100x50x30mm → X aralığı: -50..+50, Y üst: 30, Z aralığı: -25..+25, güvenli Y: 40
+Stok: 100x50x30mm → X: -50..+50, Y: -25..+25, Z üst: 30, güvenli Z: 40
 
 <gcode>
 ; Ø20mm delik — spiral dalma (stok: 100x50x30)
-; Güvenli yükseklik Y=40 (stock.h + 10 = 30 + 10)
-; Stok merkezi X=0, Z=0
-; Üst yüzey Y=30 (stock.h)
-G0 X0 Y40 Z0
-G0 X5 Y40 Z0
-; Dalma: Y=30'dan Y=15'e (15mm derinlik)
-G3 X5 Y25 Z0 I-5 J0 F200
-G3 X5 Y20 Z0 I-5 J0 F200
-G3 X5 Y15 Z0 I-5 J0 F200
+; Güvenli yükseklik Z=40 (stock.h + 10 = 30 + 10)
+; Stok merkezi X=0, Y=0
+; Üst yüzey Z=30 (stock.h)
+G0 X0 Y0 Z40
+G0 X5 Y0 Z40
+; Dalma: Z=30'dan Z=15'e (15mm derinlik)
+G3 X5 Y0 Z25 I-5 J0 F200
+G3 X5 Y0 Z20 I-5 J0 F200
+G3 X5 Y0 Z15 I-5 J0 F200
 ; Güvenli konuma dön
-G0 X0 Y40 Z0
+G0 X0 Y0 Z40
 </gcode>
 
 ## ÖRNEK: KÜÇÜK STOK
@@ -110,19 +112,62 @@ Makine Durumu: {"machineType":"mill","stock":{"w":20,"d":20,"h":20},...}
 
 Asistan: 20x20x20mm stokta merkeze Ø10mm delik açıyorum.
 
-Stok: 20x20x20mm → X aralığı: -10..+10, Y üst: 20, Z aralığı: -10..+10, güvenli Y: 30
+Stok: 20x20x20mm → X: -10..+10, Y: -10..+10, Z üst: 20, güvenli Z: 30
 
 <gcode>
 ; Ø10mm delik (stok: 20x20x20)
-; Güvenli yükseklik Y=30 (stock.h + 10 = 20 + 10)
-G0 X0 Y30 Z0
-; Dalma başlangıcı: spiral yarıçap=5mm (delik çapı/2)
-G0 X2.5 Y30 Z0
-; Spiral dalma Y=20'den Y=10'a (10mm derinlik)
-G3 X2.5 Y17 Z0 I-2.5 J0 F150
-G3 X2.5 Y14 Z0 I-2.5 J0 F150
-G3 X2.5 Y11 Z0 I-2.5 J0 F150
-G3 X2.5 Y10 Z0 I-2.5 J0 F150
+; Güvenli yükseklik Z=30 (stock.h + 10 = 20 + 10)
+G0 X0 Y0 Z30
+; Dalma başlangıcı: spiral yarıçap=2.5mm (delik çapı/2)
+G0 X2.5 Y0 Z30
+; Spiral dalma Z=20'den Z=10'a (10mm derinlik)
+G3 X2.5 Y0 Z17 I-2.5 J0 F150
+G3 X2.5 Y0 Z14 I-2.5 J0 F150
+G3 X2.5 Y0 Z11 I-2.5 J0 F150
+G3 X2.5 Y0 Z10 I-2.5 J0 F150
 ; Güvenli konuma dön
-G0 X0 Y30 Z0
+G0 X0 Y0 Z30
+</gcode>
+
+## ÖRNEK: CEP İŞLEME
+
+Kullanıcı: "Stokun ortasına 30x20mm dikdörtgen cep aç, 10mm derinlik"
+Makine Durumu: {"machineType":"mill","stock":{"w":100,"d":60,"h":40},...}
+
+Asistan: 100x60x40mm stokta merkeze 30x20mm dikdörtgen cep açıyorum, 10mm derinlikte.
+
+Stok: 100x60x40mm → X: -50..+50, Y: -30..+30, Z üst: 40, güvenli Z: 50
+
+<gcode>
+; 30x20mm dikdörtgen cep, 10mm derinlik (stok: 100x60x40)
+; Güvenli Z=50, üst yüzey Z=40
+; Cep merkez X=0, Y=0, köşeler X=±15, Y=±10
+G0 X0 Y0 Z50
+; 1. pas: Z=37 (3mm derinlik)
+G0 X-15 Y-10 Z50
+G1 X-15 Y-10 Z37 F200
+G1 X15 Y-10 Z37 F200
+G1 X15 Y10 Z37 F200
+G1 X-15 Y10 Z37 F200
+G1 X-15 Y-10 Z37 F200
+; 2. pas: Z=34
+G1 X-15 Y-10 Z34 F200
+G1 X15 Y-10 Z34 F200
+G1 X15 Y10 Z34 F200
+G1 X-15 Y10 Z34 F200
+G1 X-15 Y-10 Z34 F200
+; 3. pas: Z=31
+G1 X-15 Y-10 Z31 F200
+G1 X15 Y-10 Z31 F200
+G1 X15 Y10 Z31 F200
+G1 X-15 Y10 Z31 F200
+G1 X-15 Y-10 Z31 F200
+; 4. pas: Z=30 (final — tam 10mm derinlik: 40-30=10)
+G1 X-15 Y-10 Z30 F200
+G1 X15 Y-10 Z30 F200
+G1 X15 Y10 Z30 F200
+G1 X-15 Y10 Z30 F200
+G1 X-15 Y-10 Z30 F200
+; Güvenli konuma dön
+G0 X0 Y0 Z50
 </gcode>
