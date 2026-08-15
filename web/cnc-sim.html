@@ -1389,7 +1389,7 @@ function taiExec(raw){
 
   /* --- malzeme değiştir --- */
   {const matMap={"celik":"steel","cilik":"steel","steel":"steel","aluminyum":"aluminum","aluminum":"aluminum","pirinc":"brass","brass":"brass","bakir":"copper","copper":"copper","dokme demir":"cast-iron","dokmedemir":"cast-iron","titanyum":"titanium","titanium":"titanium","ahsap":"wood","wood":"wood","tahta":"wood","plastik":"plastic","plastic":"plastic","pom":"plastic","nylon":"plastic","akrilik":"acrylic","acrylic":"acrylic","pmma":"acrylic"};
-  if(/(malzeme|material|stok|stock)/i.test(t)){for(const[k,v] of Object.entries(matMap)){if(t.includes(k)){setMaterial(v);const md=MAT_DB[v];return A("✓ Malzeme değiştirildi:")+" "+md.label+".";}}
+  if(/(malzeme|material)/i.test(t)){for(const[k,v] of Object.entries(matMap)){if(t.includes(k)){setMaterial(v);const md=MAT_DB[v];return A("✓ Malzeme değiştirildi:")+" "+md.label+".";}}
   const list=Object.values(MAT_DB).map(m=>m.label).join(", ");return "Hangi malzeme? Seçenekler: "+list;}}
 
   /* --- spindle kontrol --- */
