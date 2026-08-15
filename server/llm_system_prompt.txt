@@ -56,6 +56,14 @@ Makine durumundan okunan değerler: LEN = stock.len, R = stock.r
 7. Derinlik adımı (step-down) 3-5mm arası ol.
 8. Yorum satırları (;) ile açıklama ekle.
 
+### KRİTİK: GERİ ÇEKİLME KURALI
+**Takım stok yüzeyinde veya altındayken (Z ≤ H) ASLA yatay (XY) hareket yapma.**
+Her delik/cep/slot arasında şu sırayı MUTLAKA uygula:
+1. Önce G0 ile güvenli Z'ye çek (Z = H + 10)
+2. Sonra G0 ile yeni XY konumuna git
+3. Sonra G1 ile kesme derinliğine in
+Bu kural ihlal edilirse takım stok malzemeye çarpar.
+
 ## ÇIKTI FORMATI
 ```
 Kısa açıklama metni burada.
@@ -127,6 +135,40 @@ G3 X2.5 Y0 Z11 I-2.5 J0 F150
 G3 X2.5 Y0 Z10 I-2.5 J0 F150
 ; Güvenli konuma dön
 G0 X0 Y0 Z30
+</gcode>
+
+## ÖRNEK: ÇOKLU DELİK (GERİ ÇEKİLME)
+
+Kullanıcı: "Köşelere 10mm çapında 4 delik aç"
+Makine Durumu: {"machineType":"mill","stock":{"w":200,"d":150,"h":70},...}
+
+Asistan: 200x150x70mm stokta köşelere Ø10mm çapında 4 adet delik açıyorum.
+
+Stok: 200x150x70mm → X: -100..+100, Y: -75..+75, Z üst: 70, güvenli Z: 80
+
+<gcode>
+; 4 köşe deliği Ø10mm (stok: 200x150x70)
+; Güvenli Z=80, üst yüzey Z=70
+; Köşe pozisyonları: kenardan 15mm içeride
+; Delik 1: sol-ön
+G0 X0 Y0 Z80
+G0 X-85 Y-60 Z80
+G1 X-85 Y-60 Z60 F200
+G0 X-85 Y-60 Z80
+; Delik 2: sağ-ön — ÖNCE güvenli Z'ye çek, SONRA XY'ye git
+G0 X85 Y-60 Z80
+G1 X85 Y-60 Z60 F200
+G0 X85 Y-60 Z80
+; Delik 3: sağ-arka
+G0 X85 Y60 Z80
+G1 X85 Y60 Z60 F200
+G0 X85 Y60 Z80
+; Delik 4: sol-arka
+G0 X-85 Y60 Z80
+G1 X-85 Y60 Z60 F200
+G0 X-85 Y60 Z80
+; Güvenli konuma dön
+G0 X0 Y0 Z80
 </gcode>
 
 ## ÖRNEK: CEP İŞLEME
