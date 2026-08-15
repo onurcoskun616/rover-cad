@@ -564,7 +564,102 @@ const mill={
 let heights=new Float32Array(COLS*ROWS).fill(TOP);
 
 let renderer,scene,camera,controls,plane,planeGeo,toolGroup,chipPool=[],raf3d;
-const CUTTER_R=13, CUTTER_H=26;
+let CUTTER_R=13, CUTTER_H=26;
+
+const TOOL_LIBRARY=[
+  {id:1, name:"Ø6 Parmak Freze",   type:"endmill",  dia:6,  fluteLen:20, totalLen:50, maxRpm:12000},
+  {id:2, name:"Ø10 Parmak Freze",  type:"endmill",  dia:10, fluteLen:25, totalLen:60, maxRpm:10000},
+  {id:3, name:"Ø16 Parmak Freze",  type:"endmill",  dia:16, fluteLen:30, totalLen:70, maxRpm:9000},
+  {id:4, name:"Ø20 Parmak Freze",  type:"endmill",  dia:20, fluteLen:35, totalLen:75, maxRpm:8000},
+  {id:5, name:"Ø26 Parmak Freze",  type:"endmill",  dia:26, fluteLen:26, totalLen:70, maxRpm:7000},
+  {id:6, name:"Ø32 Kaba Freze",    type:"roughing", dia:32, fluteLen:35, totalLen:80, maxRpm:6000},
+  {id:7, name:"Ø8 Matkap",         type:"drill",    dia:8,  fluteLen:40, totalLen:80, maxRpm:6000},
+  {id:8, name:"Ø12 Matkap",        type:"drill",    dia:12, fluteLen:50, totalLen:90, maxRpm:5000},
+  {id:9, name:"Ø5 Top Freze",      type:"ballmill", dia:5,  fluteLen:15, totalLen:45, maxRpm:15000},
+  {id:10,name:"Ø10 Top Freze",     type:"ballmill", dia:10, fluteLen:20, totalLen:55, maxRpm:12000},
+  {id:11,name:"Ø3 Pah Freze",      type:"chamfer",  dia:3,  fluteLen:10, totalLen:40, maxRpm:18000},
+  {id:12,name:"Ø6 Pah Freze",      type:"chamfer",  dia:6,  fluteLen:12, totalLen:45, maxRpm:15000},
+];
+
+class ToolMagazine{
+  constructor(cap=40){
+    this.capacity=cap;
+    this.slots=new Array(cap).fill(null);
+    this.activeSlot=4;
+  }
+  loadDefaults(){
+    for(let i=0;i<TOOL_LIBRARY.length&&i<this.capacity;i++) this.slots[i]=i;
+    this.activeSlot=4;
+    this._applyTool();
+  }
+  getActiveTool(){
+    const idx=this.slots[this.activeSlot];
+    return idx!==null&&idx!==undefined?TOOL_LIBRARY[idx]:null;
+  }
+  getToolInSlot(s){
+    if(s<0||s>=this.capacity)return null;
+    const idx=this.slots[s];
+    return idx!==null&&idx!==undefined?TOOL_LIBRARY[idx]:null;
+  }
+  findSlotForOp(opType,reqDia,reqDepth){
+    let best=-1,bestScore=Infinity;
+    for(let s=0;s<this.capacity;s++){
+      const idx=this.slots[s];
+      if(idx===null||idx===undefined)continue;
+      const tl=TOOL_LIBRARY[idx];
+      if(tl.fluteLen<reqDepth)continue;
+      let score=Infinity;
+      if(opType==="drill"){
+        if(tl.type!=="endmill"&&tl.type!=="drill")continue;
+        if(tl.dia>reqDia)continue;
+        score=(reqDia-tl.dia)+0.01;
+        if(tl.type==="drill")score-=0.005;
+      }else if(opType==="pocket"||opType==="slot"){
+        if(tl.type!=="endmill"&&tl.type!=="roughing")continue;
+        if(tl.dia>=reqDia)continue;
+        score=1/(tl.dia+1);
+      }else if(opType==="face"||opType==="contour"){
+        if(tl.type!=="endmill"&&tl.type!=="roughing")continue;
+        score=1/(tl.dia+1);
+      }else if(opType==="chamfer"){
+        if(tl.type!=="chamfer"&&tl.type!=="endmill")continue;
+        score=tl.type==="chamfer"?0:1;
+      }else{
+        if(tl.type!=="endmill")continue;
+        score=Math.abs(tl.dia-reqDia);
+      }
+      if(score<bestScore){bestScore=score;best=s;}
+    }
+    return best;
+  }
+  requestChange(targetSlot){
+    if(targetSlot<0||targetSlot>=this.capacity)return false;
+    if(this.slots[targetSlot]===null||this.slots[targetSlot]===undefined)return false;
+    this.activeSlot=targetSlot;
+    this._applyTool();
+    return true;
+  }
+  _applyTool(){
+    const tl=this.getActiveTool();
+    if(tl){CUTTER_R=tl.dia/2;CUTTER_H=tl.fluteLen;mill.toolNo=this.activeSlot+1;}
+  }
+  genToolChange(targetSlot,safeY){
+    if(targetSlot===this.activeSlot)return[];
+    return[{type:"rapid",x:mill.x,y:safeY||TOP+8,z:mill.z},{type:"tc",targetSlot:targetSlot}];
+  }
+  listTools(){
+    const lines=[];
+    for(let s=0;s<this.capacity;s++){
+      const tl=this.getToolInSlot(s);
+      if(!tl)continue;
+      const tag=s===this.activeSlot?" ◄":"";
+      lines.push("T"+String(s+1).padStart(2,"0")+": "+tl.name+" (Ø"+tl.dia+"mm, boy:"+tl.fluteLen+"mm)"+tag);
+    }
+    return lines;
+  }
+}
+const magazine=new ToolMagazine();
+magazine.loadDefaults();
 
 function initMill(){
   const wrap=$("mill-canvas-wrap");
@@ -626,12 +721,17 @@ function buildWorkpiece(){
 }
 
 function buildTool(){
+  if(toolGroup){
+    while(toolGroup.children.length){const c=toolGroup.children[0];c.geometry.dispose();c.material.dispose();toolGroup.remove(c);}
+    scene.remove(toolGroup);
+  }
   toolGroup=new THREE.Group();
   const steel=new THREE.MeshStandardMaterial({color:0xd7dde2,metalness:.9,roughness:.25});
   const dark=new THREE.MeshStandardMaterial({color:0x3a3f45,metalness:.7,roughness:.4});
   const gold=new THREE.MeshStandardMaterial({color:0xd8a52a,metalness:.6,roughness:.4});
   const cutter=new THREE.Mesh(new THREE.CylinderGeometry(CUTTER_R,CUTTER_R,CUTTER_H,24),dark);cutter.position.y=CUTTER_H/2;cutter.castShadow=true;toolGroup.add(cutter);
-  for(let i=0;i<4;i++){const t=new THREE.Mesh(new THREE.BoxGeometry(3,3,4),gold);const a=i/4*Math.PI*2;t.position.set(Math.cos(a)*CUTTER_R,2,Math.sin(a)*CUTTER_R);toolGroup.add(t);}
+  const insR=Math.max(CUTTER_R,3);
+  for(let i=0;i<4;i++){const t=new THREE.Mesh(new THREE.BoxGeometry(3,3,4),gold);const a=i/4*Math.PI*2;t.position.set(Math.cos(a)*insR,2,Math.sin(a)*insR);toolGroup.add(t);}
   const shaft=new THREE.Mesh(new THREE.CylinderGeometry(CUTTER_R*.7,CUTTER_R*.7,40,24),steel);shaft.position.y=CUTTER_H+20;shaft.castShadow=true;toolGroup.add(shaft);
   const holder=new THREE.Mesh(new THREE.CylinderGeometry(CUTTER_R*1.5,CUTTER_R*.9,46,24),steel);holder.position.y=CUTTER_H+40+23;holder.castShadow=true;toolGroup.add(holder);
   const taper=new THREE.Mesh(new THREE.CylinderGeometry(CUTTER_R*2.2,CUTTER_R*1.5,40,24),steel);taper.position.y=CUTTER_H+40+46+20;toolGroup.add(taper);
@@ -742,10 +842,15 @@ function updateMill(dt){
       mill.z=clamp(mill.z+mill.jog.z*rate*dt,-D/2+MARGIN*dz,D/2-MARGIN*dz);
       mill.y=clamp(mill.y+mill.jog.y*rate*dt,0,120);
     }
-    if(mill.moveActive){const m=mill.moveActive,rate=m.type==="feed"?feedRate:rapid;
+    if(mill.moveActive){const m=mill.moveActive;
+      if(m.type==="tc"){
+        if(!m._t){m._t=0;mill.spindleOn=false;mill.coolantMode="off";}
+        m._t+=dt;
+        if(m._t>=0.5){magazine.requestChange(m.targetSlot);buildTool();mill.spindleOn=true;mill.coolantMode="flood";mill.moveActive=mill.queue.shift()||null;if(!mill.moveActive&&mill.running)mill.running=false;}
+      }else{const rate=m.type==="feed"?feedRate:rapid;
       const ex=m.x-mill.x,ey=m.y-mill.y,ez=m.z-mill.z,dist=Math.hypot(ex,ey,ez),stepv=rate*dt;
       if(dist<=stepv||dist<1e-4){mill.x=m.x;mill.y=m.y;mill.z=m.z;mill.moveActive=mill.queue.shift()||null;if(!mill.moveActive&&mill.running)mill.running=false;}
-      else{mill.x+=ex/dist*stepv;mill.y+=ey/dist*stepv;mill.z+=ez/dist*stepv;}}
+      else{mill.x+=ex/dist*stepv;mill.y+=ey/dist*stepv;mill.z+=ez/dist*stepv;}}}
     // talaş kaldırma
     let cutting=false;
     if(mill.actualRpm>60){const cut=carve(mill.x,mill.z,mill.y);if(cut){cutting=true;if(Math.random()<.8)spawnChip(mill.x,mill.y+2,mill.z);}}
@@ -766,7 +871,8 @@ $("mrng-feed").oninput=e=>{mill.feed=clamp(+e.target.value,1,2000);$("mlbl-feed"
 $("mrng-ovr").oninput=e=>{mill.feedOverride=clamp(+e.target.value,0,1.2);$("mlbl-ovr").textContent=Math.round(mill.feedOverride*100)+"%";};
 $("me-go").onclick=()=>{const x=parseFloat($("me-x").value),y=parseFloat($("me-z").value),z=parseFloat($("me-y").value);millGoto(Number.isFinite(x)?x:mill.x,Number.isFinite(y)?y:mill.y,Number.isFinite(z)?z:mill.z);};
 $("mmode-manual").onclick=()=>{if(!mill.running)mill.mode="MANUAL";};$("mmode-auto").onclick=()=>{if(!mill.running)mill.mode="AUTO";};
-$("mtool-minus").onclick=()=>mill.toolNo=clamp(mill.toolNo-1,1,40);$("mtool-plus").onclick=()=>mill.toolNo=clamp(mill.toolNo+1,1,40);
+$("mtool-minus").onclick=()=>{const s=clamp(mill.toolNo-2,0,39);if(magazine.getToolInSlot(s)){magazine.requestChange(s);buildTool();}};
+$("mtool-plus").onclick=()=>{const s=clamp(mill.toolNo,0,39);if(magazine.getToolInSlot(s)){magazine.requestChange(s);buildTool();}};
 document.querySelectorAll(".mjog").forEach(b=>{const a=b.dataset.a,d=+b.dataset.d;const dn=e=>{e.preventDefault();mill.jog[a]=d;},up=()=>mill.jog[a]=0;b.addEventListener("pointerdown",dn);b.addEventListener("pointerup",up);b.addEventListener("pointerleave",up);b.addEventListener("pointercancel",up);});
 $("mbtn-spindle").onclick=()=>{if(!mill.emergency)mill.spindleOn=!mill.spindleOn;};
 $("mbtn-cycle").onclick=()=>millStartCycle(); $("mbtn-hold").onclick=()=>mill.paused=!mill.paused;
@@ -802,13 +908,13 @@ function syncMill(dt){
   $("ml-x").textContent=fmt(mill.x);$("ml-y").textContent=fmt(mill.y);$("ml-z").textContent=fmt(mill.z);
   $("ml-actf").textContent="ACT.F "+Math.round(mill.spindleOn?mill.feed*mill.feedOverride:0);
   $("ml-rpm").textContent="S "+Math.round(mill.actualRpm);
-  $("ml-tool").textContent="T"+String(mill.toolNo).padStart(2,"0");
+  const _at=magazine.getActiveTool();$("ml-tool").textContent="T"+String(mill.toolNo).padStart(2,"0")+(_at?" Ø"+_at.dia:"");
   $("ml-ovr").textContent="OVR "+Math.round(mill.feedOverride*100)+"%";
   $("ml-removed").textContent="REMOVED "+Math.round(mill.removed*100)+"%";
   $("ml-mode").textContent=mill.mode;$("ml-mode").className=mill.mode==="AUTO"?"text-[#eaffef]":"text-[#59c98e]";
   const al=$("ml-alarm");if(mill.alarm){al.textContent=mill.paused?"HOLD":"-EMG-";al.className="animate-pulse font-bold text-red-400";}else if(mill.paused){al.textContent="HOLD";al.className="font-bold text-amber-300";}else{al.textContent="READY";al.className="text-[#59c98e]";}
   $("ml-run").textContent=mill.running?"RUN":"STOP";$("ml-run").className=mill.running?"font-bold text-[#7effb0]":"text-[#59c98e]";
-  $("mlbl-tool").textContent="T"+String(mill.toolNo).padStart(2,"0");
+  $("mlbl-tool").textContent="T"+String(mill.toolNo).padStart(2,"0")+(_at?" "+_at.name:"");
   const A="bg-amber-400 text-zinc-900",I="bg-zinc-700 text-zinc-200 hover:bg-zinc-600";
   $("mmode-manual").className="rounded py-2 text-[10px] font-bold "+(mill.mode==="MANUAL"?A:I)+(mill.running?" opacity-40":"");
   $("mmode-auto").className="rounded py-2 text-[10px] font-bold "+(mill.mode==="AUTO"?A:I)+(mill.running?" opacity-40":"");
@@ -818,7 +924,7 @@ function syncMill(dt){
   $("ml-coolant").textContent="COOLANT "+(mcl==="off"?"OFF":mcl.toUpperCase());$("ml-coolant").className=mcl!=="off"?"text-right text-cyan-300":"text-right text-[#59c98e]";
   $("ml-stock").textContent="STOCK "+W+"x"+D+"x"+TOP;
   $("m-stat-pos").textContent="X "+fmt(mill.x)+"  Y "+fmt(mill.y)+"  Z "+fmt(mill.z);
-  $("m-stat-tool").textContent="tool_selected = "+mill.toolNo;
+  $("m-stat-tool").textContent="tool = T"+mill.toolNo+(_at?" "+_at.name+" R"+CUTTER_R:"");
   $("m-stat-cut").textContent="cutting_status = "+(mill.cutting?1:0);
   $("m-stat-fps").textContent="FPS: "+fps;
 }
@@ -851,7 +957,7 @@ function parseGcode(text, type){
       if(p.M===30||p.M===2) continue;
     }
     if("T" in p){
-      if(type==="mill") mill.toolNo=clamp(Math.round(p.T),1,40);
+      if(type==="mill"){const tSlot=clamp(Math.round(p.T),1,40)-1;q.push({type:"tc",targetSlot:tSlot});}
       else lathe.setToolNo(Math.round(p.T/100)||1);
     }
     if(lastG===0||lastG===1||lastG===2||lastG===3){
@@ -905,10 +1011,12 @@ class SafetyInterceptor {
   }
   validateMill(queue, sw, sd, sh, spindleOn, cx, cy, cz){
     const xLim=sw/2+20, zLim=sd/2+20, yMax=sh+60, maxPlunge=10, errs=[];
-    const toolR=CUTTER_R;
+    let toolR=CUTTER_R;
     let px=cx, py=cy, pz=cz;
     for(let i=0;i<queue.length;i++){
-      const m=queue[i], nx=m.x, ny=m.y, nz=m.z;
+      const m=queue[i];
+      if(m.type==="tc"){const tl=magazine.getToolInSlot(m.targetSlot);if(tl)toolR=tl.dia/2;continue;}
+      const nx=m.x, ny=m.y, nz=m.z;
       if(Math.abs(nx)>xLim)
         errs.push(`Satır ${i+1}: X soft limit aşımı (${nx.toFixed(1)}mm, limit ±${xLim.toFixed(0)}mm) — takım tezgah dışına çıkar`);
       if(ny<-0.5)
@@ -983,7 +1091,7 @@ const safetyInterceptor=new SafetyInterceptor();
 function runMillGcode(parsed, stockDims){
   const {q, bounds}=parsed;
   if(!q.length) return;
-  for(const m of q){const gy=m.y,gz=m.z;m.y=gz;m.z=gy;}
+  for(const m of q){if(m.type==="tc")continue;const gy=m.y,gz=m.z;m.y=gz;m.z=gy;}
   const bYmin=bounds.yMin,bYmax=bounds.yMax,bZmin=bounds.zMin,bZmax=bounds.zMax;
   bounds.yMin=bZmin;bounds.yMax=bZmax;bounds.zMin=bYmin;bounds.zMax=bYmax;
   if(stockDims){
@@ -1471,6 +1579,20 @@ function taiUserInput(text){
 
 function taiRunMill(q){mill.queue=q;mill.moveActive=q.shift();mill.running=true;}
 function taiRunLathe(q){lathe.queue=q;lathe.moveActive=lathe.queue.shift()||null;lathe.s.running=true;}
+function taiRunMillWithTool(opType,reqDia,reqDepth,genQ){
+  const slot=magazine.findSlotForOp(opType,reqDia,reqDepth);
+  if(slot===-1)return null;
+  let tcPre=[];
+  if(slot!==magazine.activeSlot){tcPre=[{type:"rapid",x:mill.x,y:TOP+8,z:mill.z},{type:"tc",targetSlot:slot}];}
+  const newTl=magazine.getToolInSlot(slot);
+  const oldR=CUTTER_R,oldH=CUTTER_H;
+  CUTTER_R=newTl.dia/2;CUTTER_H=newTl.fluteLen;
+  const opQ=genQ();
+  CUTTER_R=oldR;CUTTER_H=oldH;
+  const q=[...tcPre,...opQ];
+  taiRunMill(q);
+  return slot;
+}
 
 function taiExec(raw){
   const t=taiNorm(raw);
@@ -1488,6 +1610,7 @@ function taiExec(raw){
 • <b>Kontur kes:</b> "10mm kontur kes"<br>
 • <b>Pah kır:</b> "2mm pah kır"<br>
 • <b>Kontrol:</b> "devir 8000", "feed 500", "durdur"<br>
+• <b>Takım:</b> "takım 3", "magazin göster", "takım listesi"<br>
 • <b>Soğutma:</b> "soğutma aç", "coolant flood", "coolant mist", "soğutma kapat"<br>
 • <b>Stok boyutu:</b> "stok boyut 200x140x60" (genişlik x derinlik x yükseklik)<br>
 • <b>Malzeme:</b> "malzeme alüminyum", "malzeme ahşap"<br>
@@ -1600,7 +1723,11 @@ function taiExec(raw){
   let ovr=t.match(/(?:override|ovr)\s*(\d+)/i)||t.match(/(\d+)\s*%?\s*(?:override|ovr)/i);
   if(ovr){const v=parseInt(ovr[1])/100;if(im){mill.feedOverride=clamp(v,0,1.2);$("mrng-ovr").value=mill.feedOverride;$("mlbl-ovr").textContent=Math.round(mill.feedOverride*100)+"%";}else{lathe.setFeedOverride(v);$("rng-ovr").value=lathe.s.feedOverride;$("lbl-ovr").textContent=Math.round(lathe.s.feedOverride*100)+"%";}return A("✓ Override %"+Math.round(v*100));}
   let tc=t.match(/(?:takim|tool)\s*(\d+)/i)||t.match(/(\d+)\s*(?:no.?lu\s*takim)/i);
-  if(tc){const v=parseInt(tc[1]);if(im)mill.toolNo=clamp(v,1,40);else lathe.setToolNo(v);return A("✓ Takım T"+String(v).padStart(2,"0")+" seçildi.");}
+  if(tc){const v=parseInt(tc[1]);if(im){const slot=clamp(v,1,40)-1;const tl=magazine.getToolInSlot(slot);if(!tl)return A("⛔ T"+String(v).padStart(2,"0")+" slotunda takım yok.");magazine.requestChange(slot);buildTool();return A("✓ Takım T"+String(v).padStart(2,"0")+" seçildi: "+tl.name+" (Ø"+tl.dia+"mm, boy:"+tl.fluteLen+"mm)");}else{lathe.setToolNo(v);return A("✓ Takım T"+String(v).padStart(2,"0")+" seçildi.");}}
+  if(im&&(/(magazin|magazine|takim\s*list|tool\s*list)/i.test(t)||(/(takim|tool)/i.test(t)&&/(goster|listele|liste)/i.test(t)))){
+    const lines=magazine.listTools();
+    return "<b>Takım Magazini ("+lines.length+"/"+magazine.capacity+" dolu):</b><br>"+lines.map(l=>"• "+l).join("<br>");
+  }
 
   /* --- mod değiştir --- */
   if(/(auto|otomatik)\s*(mod)?/i.test(t)||/mod.*auto/i.test(t)){if(im){if(!mill.running)mill.mode="AUTO";}else lathe.setMode("AUTO");return A("✓ AUTO modu.");}
@@ -1632,9 +1759,10 @@ function taiExec(raw){
       const posM=t.match(/x\s*([+-]?\d+\.?\d*)/i);if(posM)cx=parseFloat(posM[1]);
       const posZ=t.match(/z\s*([+-]?\d+\.?\d*)/i);if(posZ)cz=parseFloat(posZ[1]);
       taiLastOp="drill";
-      const q=tpMillDrill(dia,dep,cx,cz);
-      taiRunMill(q);
-      return A("✓ Delik delme başlatıldı:")+" Ø"+dia+"mm, "+dep+"mm derin"+(cx||cz?" (X"+cx+" Z"+cz+")":"")+".<br>Spindle "+mill.spindleRpm+" RPM, Feed "+mill.feed+" mm/m.";
+      const slot=taiRunMillWithTool("drill",dia,dep,()=>tpMillDrill(dia,dep,cx,cz));
+      if(slot===null)return A("⛔ Magazinde Ø"+dia+"mm delik için uygun takım yok! İşlem iptal edildi.");
+      const tn=magazine.getToolInSlot(slot);
+      return A("✓ Delik delme başlatıldı:")+" Ø"+dia+"mm, "+dep+"mm derin"+(cx||cz?" (X"+cx+" Z"+cz+")":"")+"<br>Takım: "+tn.name+" | Spindle "+mill.spindleRpm+" RPM";
     }
 
     /* --- dikdörtgen cep --- */
@@ -1645,10 +1773,12 @@ function taiExec(raw){
       let cx=0,cz=0;
       const posM=t.match(/x\s*([+-]?\d+\.?\d*)\s*(?:z|,)\s*([+-]?\d+\.?\d*)/i);
       if(posM){cx=parseFloat(posM[1]);cz=parseFloat(posM[2]);}
-      if(pw<CUTTER_R*2.5)pw=CUTTER_R*2.5;if(pl<CUTTER_R*2.5)pl=CUTTER_R*2.5;
+      const minDim=Math.min(pw,pl);
       taiLastOp="pocket";
-      taiRunMill(tpMillRectPocket(pw,pl,dep,cx,cz));
-      return A("✓ Dikdörtgen cep açılıyor:")+" "+pw+"x"+pl+"mm, "+dep+"mm derin.<br>Spindle "+mill.spindleRpm+" RPM, Feed "+mill.feed+" mm/m.";
+      const slot=taiRunMillWithTool("pocket",minDim,dep,()=>tpMillRectPocket(pw,pl,dep,cx,cz));
+      if(slot===null)return A("⛔ Magazinde "+pw+"x"+pl+"mm cep için uygun takım yok! İşlem iptal edildi.");
+      const tn=magazine.getToolInSlot(slot);
+      return A("✓ Dikdörtgen cep açılıyor:")+" "+pw+"x"+pl+"mm, "+dep+"mm derin<br>Takım: "+tn.name+" | Spindle "+mill.spindleRpm+" RPM";
     }
 
     /* --- daire cep --- */
@@ -1656,8 +1786,10 @@ function taiExec(raw){
       let dia=taiNum(t,["cap","capi","capinda","dia","\\bø"])||40;
       let dep=taiNum(t,["derin","derinlik","derinlig","depth"])||10;
       taiLastOp="pocket";
-      taiRunMill(tpMillCircPocket(dia,dep,0,0));
-      return A("✓ Daire cep açılıyor:")+" Ø"+dia+"mm, "+dep+"mm derin.";
+      const slot=taiRunMillWithTool("pocket",dia,dep,()=>tpMillCircPocket(dia,dep,0,0));
+      if(slot===null)return A("⛔ Magazinde Ø"+dia+"mm daire cep için uygun takım yok!");
+      const tn=magazine.getToolInSlot(slot);
+      return A("✓ Daire cep açılıyor:")+" Ø"+dia+"mm, "+dep+"mm derin<br>Takım: "+tn.name;
     }
 
     /* --- kanal / slot --- */
@@ -1666,32 +1798,40 @@ function taiExec(raw){
       let sl=taiNum(t,["uzunluk","uzunlugu","boy","length","long"])||60;
       let dep=taiNum(t,["derin","derinlik","derinlig","depth"])||10;
       taiLastOp="pocket";
-      taiRunMill(tpMillSlot(sw,sl,dep,0,0,0));
-      return A("✓ Kanal açılıyor:")+" "+sw+"mm genişlik, "+sl+"mm uzunluk, "+dep+"mm derin.";
+      const slot=taiRunMillWithTool("slot",sw,dep,()=>tpMillSlot(sw,sl,dep,0,0,0));
+      if(slot===null)return A("⛔ Magazinde "+sw+"mm kanal için uygun takım yok!");
+      const tn=magazine.getToolInSlot(slot);
+      return A("✓ Kanal açılıyor:")+" "+sw+"mm genişlik, "+sl+"mm uzunluk, "+dep+"mm derin<br>Takım: "+tn.name;
     }
 
     /* --- yüzey düzeltme --- */
     if(/(yuzey|surface|surfacing|face|facing)\s*(duzelt|temizle|al|isle)?/i.test(t)||/(duzelt|surfacing|facing)/i.test(t)){
       let dep=taiNum(t,["derin","derinlik","mm","depth"])||taiAllNums(t)[0]||3;
       taiLastOp="face";
-      taiRunMill(tpMillFace(dep));
-      return A("✓ Yüzey düzeltme başlatıldı:")+" "+dep+"mm talaş kaldırılıyor.";
+      const slot=taiRunMillWithTool("face",999,dep,()=>tpMillFace(dep));
+      if(slot===null)return A("⛔ Magazinde yüzey düzeltme için uygun takım yok!");
+      const tn=magazine.getToolInSlot(slot);
+      return A("✓ Yüzey düzeltme başlatıldı:")+" "+dep+"mm talaş kaldırılıyor<br>Takım: "+tn.name;
     }
 
     /* --- kontur --- */
     if(/(kontur|contour)\s*(kes|isle|ac)?/i.test(t)){
       let dep=taiNum(t,["derin","derinlik","mm","depth"])||taiAllNums(t)[0]||10;
       taiLastOp="pocket";
-      taiRunMill(tpMillContour(dep));
-      return A("✓ Kontur kesme başlatıldı:")+" "+dep+"mm derin dış kontur.";
+      const slot=taiRunMillWithTool("contour",999,dep,()=>tpMillContour(dep));
+      if(slot===null)return A("⛔ Magazinde kontur kesme için uygun takım yok!");
+      const tn=magazine.getToolInSlot(slot);
+      return A("✓ Kontur kesme başlatıldı:")+" "+dep+"mm derin dış kontur<br>Takım: "+tn.name;
     }
 
     /* --- pah kırma --- */
     if(/(pah|chamfer)\s*(kir|ac|isle)?/i.test(t)){
       let dep=taiNum(t,["mm","derin","derinlik","depth"])||taiAllNums(t)[0]||2;
       taiLastOp="pocket";
-      taiRunMill(tpMillChamfer(dep));
-      return A("✓ Pah kırma başlatıldı:")+" "+dep+"mm pah.";
+      const slot=taiRunMillWithTool("chamfer",dep*2,dep,()=>tpMillChamfer(dep));
+      if(slot===null)return A("⛔ Magazinde pah kırma için uygun takım yok!");
+      const tn=magazine.getToolInSlot(slot);
+      return A("✓ Pah kırma başlatıldı:")+" "+dep+"mm pah<br>Takım: "+tn.name;
     }
   }
 
@@ -1754,6 +1894,8 @@ taiRenderChips();
 window._rover = {
   taiUserInput, taiExec, taiGetChips, taiNorm, taiMsg, taiRenderChips,
   taiMessages, parseGcode, runMillGcode, runLatheGcode, safetyInterceptor,
+  magazine, TOOL_LIBRARY, buildTool,
+  get CUTTER_R(){ return CUTTER_R; }, get CUTTER_H(){ return CUTTER_H; },
   get active(){ return active; },
   get W(){ return W; }, get D(){ return D; }, get TOP(){ return TOP; },
   get STOCK_LEN(){ return STOCK_LEN; }, get STOCK_R(){ return STOCK_R; },
@@ -1882,7 +2024,8 @@ function collectMachineState() {
 
   if (im) {
     state.stock = { w: R.W, d: R.D, h: R.TOP };
-    state.tool = { x: R.mill.x, y: R.mill.y, z: R.mill.z };
+    var at = R.magazine.getActiveTool();
+    state.tool = { x: R.mill.x, y: R.mill.y, z: R.mill.z, no: R.mill.toolNo, dia: at ? at.dia : 26, name: at ? at.name : "Ø26" };
     state.spindleRpm = R.mill.spindleRpm;
     state.feed = R.mill.feed;
     state.coolantMode = R.mill.coolantMode || "off";
@@ -2036,6 +2179,8 @@ function hookChatInput() {
         /(stok|stock)\s*(boyut|olcu|ebat|size|cap|capi|dia|\d)/i.test(tNorm) ||
         /(boyut|olcu|ebat|size)\s*(ayarla|degistir)/i.test(tNorm) ||
         /(takim|tool)\s*\d/i.test(tNorm) ||
+        /(magazin|magazine|takim\s*list|tool\s*list)/i.test(tNorm) ||
+        (/(takim|tool)/i.test(tNorm) && /(goster|listele|liste)/i.test(tNorm)) ||
         /(ornek|sample).*(goster|listele)/i.test(tNorm) ||
         /^(g\d|m\d|[gnomxyzfs\d\s.;]+)$/i.test(tNorm.trim());
 
