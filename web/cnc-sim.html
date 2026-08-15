@@ -877,20 +877,26 @@ function runMillGcode(parsed, stockDims){
   for(const m of q){const gy=m.y,gz=m.z;m.y=gz;m.z=gy;}
   const bYmin=bounds.yMin,bYmax=bounds.yMax,bZmin=bounds.zMin,bZmax=bounds.zMax;
   bounds.yMin=bZmin;bounds.yMax=bZmax;bounds.zMin=bYmin;bounds.zMax=bYmax;
-  if(bounds.xMax>bounds.xMin){
-    if(stockDims){resizeMillStock(stockDims.w,stockDims.d,stockDims.h);}
-    else{const margin=20;
-      const newW=Math.max(80,(bounds.xMax-bounds.xMin)+margin*2);
-      const newD=Math.max(60,(bounds.zMax-bounds.zMin)+margin*2);
-      const newTop=Math.max(20,Math.round(bounds.yMax+10));
-      resizeMillStock(Math.round(newW),Math.round(newD),newTop);}
+  if(stockDims){
+    resizeMillStock(stockDims.w,stockDims.d,stockDims.h);
+    for(const m of q){
+      m.x=clamp(m.x, -W/2+MARGIN*dx, W/2-MARGIN*dx);
+      if(m.z!==undefined) m.z=clamp(m.z, -D/2+MARGIN*dz, D/2-MARGIN*dz);
+      if(m.y!==undefined) m.y=clamp(m.y, 0, TOP+40);
+    }
+  } else if(bounds.xMax>bounds.xMin){
+    const margin=20;
+    const newW=Math.max(80,(bounds.xMax-bounds.xMin)+margin*2);
+    const newD=Math.max(60,(bounds.zMax-bounds.zMin)+margin*2);
+    const newTop=Math.max(20,Math.round(bounds.yMax+10));
+    resizeMillStock(Math.round(newW),Math.round(newD),newTop);
     const cx=(bounds.xMax+bounds.xMin)/2, cz=(bounds.zMax+bounds.zMin)/2;
     for(const m of q){
       m.x=clamp(m.x-cx, -W/2+MARGIN*dx, W/2-MARGIN*dx);
       if(m.z!==undefined) m.z=clamp(m.z-cz, -D/2+MARGIN*dz, D/2-MARGIN*dz);
       if(m.y!==undefined) m.y=clamp(m.y, 0, TOP+40);
     }
-  } else if(stockDims){resizeMillStock(stockDims.w,stockDims.d,stockDims.h);}
+  }
   mill.mode="AUTO"; mill.spindleOn=true; mill.paused=false; if(mill.coolantMode==="off")mill.coolantMode="flood";
   mill.queue=q; mill.moveActive=mill.queue.shift(); mill.running=true;
 }
