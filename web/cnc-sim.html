@@ -696,8 +696,8 @@ function computeRemoved(){let s=0,n=0;for(let iy=MARGIN;iy<ROWS-MARGIN;iy++)for(
 
 function millStartCycle(){
   if(mill.emergency||mill.mode!=="AUTO")return;mill.spindleOn=true;mill.paused=false;if(mill.coolantMode==="off")mill.coolantMode="flood";
-  const q=[],safeY=TOP+8,step=CUTTER_R*1.25,x0=-58,x1=58,z0=-38,z1=38;
-  for(const depth of [46,34]){
+  const q=[],safeY=TOP+8,step=CUTTER_R*1.25,x0=-W*0.29,x1=W*0.29,z0=-D*0.27,z1=D*0.27;
+  for(const depth of [TOP-14,TOP-26]){
     q.push({type:"rapid",x:x0,y:safeY,z:z0});
     q.push({type:"feed", x:x0,y:depth,z:z0});
     let z=z0,dir=1;
@@ -705,10 +705,10 @@ function millStartCycle(){
       if(z>z1)break;}
     q.push({type:"rapid",x:q[q.length-1].x,y:safeY,z:z1});
   }
-  q.push({type:"rapid",x:0,y:90,z:0});
+  q.push({type:"rapid",x:0,y:TOP+30,z:0});
   mill.queue=q;mill.moveActive=q.shift();mill.running=true;
 }
-function millStop(){mill.queue=[];mill.moveActive={type:"rapid",x:mill.x,y:90,z:mill.z};mill.running=false;mill.paused=false;}
+function millStop(){mill.queue=[];mill.moveActive={type:"rapid",x:mill.x,y:TOP+30,z:mill.z};mill.running=false;mill.paused=false;}
 function millGoto(x,y,z){if(mill.emergency||mill.mode!=="MANUAL")return;mill.moveActive={type:"rapid",x:clamp(x,-W/2+MARGIN*dx,W/2-MARGIN*dx),y:clamp(y,0,120),z:clamp(z,-D/2+MARGIN*dz,D/2-MARGIN*dz)};}
 
 function updateMill(dt){
@@ -752,7 +752,7 @@ $("mbtn-spindle").onclick=()=>{if(!mill.emergency)mill.spindleOn=!mill.spindleOn
 $("mbtn-cycle").onclick=()=>millStartCycle(); $("mbtn-hold").onclick=()=>mill.paused=!mill.paused;
 $("mbtn-emg").onclick=()=>{mill.emergency=true;mill.running=false;mill.spindleOn=false;mill.coolantMode="off";mill.queue=[];mill.moveActive=null;mill.alarm="EMG";};
 $("mbtn-reset").onclick=()=>{mill.alarm=null;mill.emergency=false;};
-$("mbtn-newp").onclick=()=>{heights=new Float32Array(COLS*ROWS).fill(TOP);const pos=planeGeo.attributes.position;for(let i=0;i<pos.count;i++)pos.setY(i,TOP);pos.needsUpdate=true;planeGeo.computeVertexNormals();mill.removed=0;mill.running=false;mill.queue=[];mill.moveActive=null;mill.x=0;mill.y=90;mill.z=0;};
+$("mbtn-newp").onclick=()=>{heights=new Float32Array(COLS*ROWS).fill(TOP);const pos=planeGeo.attributes.position;for(let i=0;i<pos.count;i++)pos.setY(i,TOP);pos.needsUpdate=true;planeGeo.computeVertexNormals();mill.removed=0;mill.running=false;mill.queue=[];mill.moveActive=null;mill.x=0;mill.y=TOP+30;mill.z=0;};
 $("m-play").onclick=()=>{mill.mode="AUTO";millStartCycle();};
 $("m-pause").onclick=()=>mill.paused=!mill.paused;
 $("m-stop").onclick=()=>millStop();
@@ -851,43 +851,45 @@ function parseGcode(text, type){
   return {q, bounds};
 }
 
-function runMillGcode(parsed){
+function runMillGcode(parsed, stockDims){
   const {q, bounds}=parsed;
   if(!q.length) return;
   for(const m of q){const gy=m.y,gz=m.z;m.y=gz;m.z=gy;}
   const bYmin=bounds.yMin,bYmax=bounds.yMax,bZmin=bounds.zMin,bZmax=bounds.zMax;
   bounds.yMin=bZmin;bounds.yMax=bZmax;bounds.zMin=bYmin;bounds.zMax=bYmax;
   if(bounds.xMax>bounds.xMin){
-    const margin=20;
-    const newW=Math.max(80, (bounds.xMax-bounds.xMin)+margin*2);
-    const newD=Math.max(60, (bounds.zMax-bounds.zMin)+margin*2);
-    const newTop=Math.max(20, Math.round(bounds.yMax+10));
-    resizeMillStock(Math.round(newW), Math.round(newD), newTop);
+    if(stockDims){resizeMillStock(stockDims.w,stockDims.d,stockDims.h);}
+    else{const margin=20;
+      const newW=Math.max(80,(bounds.xMax-bounds.xMin)+margin*2);
+      const newD=Math.max(60,(bounds.zMax-bounds.zMin)+margin*2);
+      const newTop=Math.max(20,Math.round(bounds.yMax+10));
+      resizeMillStock(Math.round(newW),Math.round(newD),newTop);}
     const cx=(bounds.xMax+bounds.xMin)/2, cz=(bounds.zMax+bounds.zMin)/2;
     for(const m of q){
       m.x=clamp(m.x-cx, -W/2+MARGIN*dx, W/2-MARGIN*dx);
       if(m.z!==undefined) m.z=clamp(m.z-cz, -D/2+MARGIN*dz, D/2-MARGIN*dz);
       if(m.y!==undefined) m.y=clamp(m.y, 0, TOP+40);
     }
-  }
+  } else if(stockDims){resizeMillStock(stockDims.w,stockDims.d,stockDims.h);}
   mill.mode="AUTO"; mill.spindleOn=true; mill.paused=false; if(mill.coolantMode==="off")mill.coolantMode="flood";
   mill.queue=q; mill.moveActive=mill.queue.shift(); mill.running=true;
 }
 
-function runLatheGcode(parsed){
+function runLatheGcode(parsed, stockDims){
   const {q, bounds}=parsed;
   if(!q.length) return;
   if(bounds.xMax>bounds.xMin||bounds.zMax>bounds.zMin){
-    const newR=Math.max(20, Math.round(bounds.xMax+10));
-    const zRange=Math.abs(bounds.zMax-bounds.zMin);
-    const newLen=Math.max(40, Math.round(zRange+40));
-    resizeLatheStock(newLen, newR);
+    if(stockDims){resizeLatheStock(stockDims.len,stockDims.r);}
+    else{const newR=Math.max(20,Math.round(bounds.xMax+10));
+      const zRange=Math.abs(bounds.zMax-bounds.zMin);
+      const newLen=Math.max(40,Math.round(zRange+40));
+      resizeLatheStock(newLen,newR);}
     const zOff=bounds.zMin<0?-bounds.zMin+20:0;
     for(const m of q){
       m.x=clamp(m.x, 0, STOCK_R+12);
       m.z=clamp(m.z+zOff, -20, STOCK_LEN);
     }
-  }
+  } else if(stockDims){resizeLatheStock(stockDims.len,stockDims.r);}
   lathe.setMode("AUTO"); lathe.s.spindleOn=true; if(lathe.s.coolantMode==="off")lathe.s.coolantMode="flood";
   lathe.queue=q; lathe.moveActive=lathe.queue.shift()||null; lathe.s.running=true;
 }
@@ -910,18 +912,19 @@ $("l-file").onchange=e=>{
 if(raw){try{const d=JSON.parse(raw);if(d.gcode){
   const isMill=!d.machineType||d.machineType==="freze"||d.machineType==="mill";
   if(d.material){const mk=d.material.toLowerCase();const map={"celik":"steel","çelik":"steel","steel":"steel","aluminyum":"aluminum","alüminyum":"aluminum","aluminum":"aluminum","pirinc":"brass","pirinç":"brass","brass":"brass","bakir":"copper","bakır":"copper","copper":"copper","dokme demir":"cast-iron","dökme demir":"cast-iron","cast-iron":"cast-iron","titanyum":"titanium","titanium":"titanium","ahsap":"wood","ahşap":"wood","wood":"wood","plastik":"plastic","plastic":"plastic","pom":"plastic","nylon":"plastic","akrilik":"acrylic","acrylic":"acrylic","pmma":"acrylic"};const matKey=map[mk];if(matKey)setMaterial(matKey);}
+  let camStock=null;
   if(isMill){
     const sw=d.stockWidth||d.bbox?.width, sl=d.stockLength||d.bbox?.length, sh=d.stockHeight||d.bbox?.height;
-    if(sw&&sl&&sh)resizeMillStock(Math.round(sw),Math.round(sl),Math.round(sh));
-    else if(sw&&sl)resizeMillStock(Math.round(sw),Math.round(sl),TOP);
+    if(sw&&sl&&sh)camStock={w:Math.round(sw),d:Math.round(sl),h:Math.round(sh)};
+    else if(sw&&sl)camStock={w:Math.round(sw),d:Math.round(sl),h:TOP};
   } else {
     const sd=d.stockDiameter, slen=d.stockLength||d.bbox?.length;
-    if(sd)resizeLatheStock(slen?Math.round(slen):STOCK_LEN, Math.round(sd/2));
-    else if(slen)resizeLatheStock(Math.round(slen), STOCK_R);
+    if(sd)camStock={len:slen?Math.round(slen):STOCK_LEN,r:Math.round(sd/2)};
+    else if(slen)camStock={len:Math.round(slen),r:STOCK_R};
   }
   setTimeout(()=>{
-    if(isMill){setTab("mill");$("m-file-info").textContent="CAM çıktısı";$("m-file-info").classList.remove("hidden");runMillGcode(parseGcode(d.gcode,"mill"));}
-    else{setTab("lathe");$("l-file-info").textContent="CAM çıktısı";$("l-file-info").classList.remove("hidden");runLatheGcode(parseGcode(d.gcode,"lathe"));}
+    if(isMill){setTab("mill");$("m-file-info").textContent="CAM çıktısı";$("m-file-info").classList.remove("hidden");runMillGcode(parseGcode(d.gcode,"mill"),camStock);}
+    else{setTab("lathe");$("l-file-info").textContent="CAM çıktısı";$("l-file-info").classList.remove("hidden");runLatheGcode(parseGcode(d.gcode,"lathe"),camStock);}
   },300);
   sessionStorage.removeItem("rover_cnc_gcode");
 }}catch(e){console.error("CAM gcode yüklenemedi:",e);}}}
