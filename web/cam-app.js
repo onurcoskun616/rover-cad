@@ -274,6 +274,7 @@ async function handleCamGenerate() {
       sessionStorage.setItem("rover_cnc_gcode", JSON.stringify({
         gcode: gcodeText,
         machineType: camAnswers.machineType || "freze",
+        material: camAnswers.material || "",
       }));
       window.open("cnc-sim.html", "_blank");
     };

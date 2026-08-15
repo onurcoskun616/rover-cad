@@ -225,6 +225,22 @@
             <div id="mmdi" class="grid grid-cols-6 gap-1"></div>
           </div>
 
+          <!-- malzeme seçimi -->
+          <div class="rounded border border-zinc-600 bg-zinc-900/60 p-2">
+            <div class="mb-1 text-[9px] font-bold uppercase text-cyan-300">Malzeme / Material</div>
+            <select id="mmat-sel" class="w-full rounded bg-zinc-950 px-2 py-1.5 text-[11px] text-zinc-200 outline-none ring-1 ring-zinc-700 focus:ring-cyan-400">
+              <option value="steel">Çelik (Steel)</option>
+              <option value="aluminum">Alüminyum</option>
+              <option value="brass">Pirinç (Brass)</option>
+              <option value="copper">Bakır (Copper)</option>
+              <option value="cast-iron">Dökme Demir</option>
+              <option value="titanium">Titanyum</option>
+              <option value="wood">Ahşap (Wood)</option>
+              <option value="plastic">Plastik (POM/Nylon)</option>
+              <option value="acrylic">Akrilik (PMMA)</option>
+            </select>
+          </div>
+
           <!-- emergency -->
           <div class="flex items-center gap-3 rounded border border-zinc-600 bg-zinc-900/60 p-2">
             <button id="mbtn-emg" aria-label="Emergency stop" class="flex h-14 w-14 shrink-0 items-center justify-center rounded-full border-4 border-yellow-400 bg-red-600 shadow-[0_4px_10px_rgba(0,0,0,.6)] active:translate-y-0.5">
@@ -330,6 +346,21 @@
             <button id="btn-hold" class="flex flex-col items-center gap-1 rounded bg-amber-500 py-2 text-[10px] font-bold text-zinc-900 hover:bg-amber-400"><span class="h-4 w-4 rounded-full bg-amber-200"></span>FEED HOLD</button>
           </div>
           <div class="rounded border border-zinc-600 bg-zinc-700/40 p-2"><div id="mdi-rows" class="grid grid-cols-6 gap-1"></div><div id="mdi-fn" class="mt-1 grid grid-cols-6 gap-1"></div></div>
+          <!-- malzeme seçimi -->
+          <div class="rounded border border-zinc-600 bg-zinc-900/60 p-2">
+            <div class="mb-1 text-[9px] font-bold uppercase text-cyan-300">Malzeme / Material</div>
+            <select id="lmat-sel" class="w-full rounded bg-zinc-950 px-2 py-1.5 text-[11px] text-zinc-200 outline-none ring-1 ring-zinc-700 focus:ring-cyan-400">
+              <option value="steel">Çelik (Steel)</option>
+              <option value="aluminum">Alüminyum</option>
+              <option value="brass">Pirinç (Brass)</option>
+              <option value="copper">Bakır (Copper)</option>
+              <option value="cast-iron">Dökme Demir</option>
+              <option value="titanium">Titanyum</option>
+              <option value="wood">Ahşap (Wood)</option>
+              <option value="plastic">Plastik (POM/Nylon)</option>
+              <option value="acrylic">Akrilik (PMMA)</option>
+            </select>
+          </div>
           <div class="flex items-center gap-3 rounded border border-zinc-600 bg-zinc-900/60 p-2">
             <button id="btn-emg" aria-label="Emergency stop" class="flex h-14 w-14 shrink-0 items-center justify-center rounded-full border-4 border-yellow-400 bg-red-600 shadow-[0_4px_10px_rgba(0,0,0,.6)] active:translate-y-0.5"><span class="h-8 w-8 rounded-full bg-red-500 shadow-inner"></span></button>
             <div class="flex flex-1 flex-col gap-1">
@@ -375,6 +406,19 @@ const $ = id => document.getElementById(id);
 const clamp = (v,lo,hi) => Math.max(lo, Math.min(hi, v));
 const fmt = n => n.toFixed(3);
 let active = 'mill';
+
+const MAT_DB={
+  steel:      {label:"Çelik",       color:0x7a8a9a, bottom:0x5a6a7a, metalness:.65, roughness:.40, chip:0xa8b8c8, lathe:["#b0bec5","#78909c","#90a4ae","#607d8b","#455a64"], latheEnd:["#607d8b","#90a4ae","#78909c"], latheChip:"#b0bec5", stripe:"rgba(200,220,240,.08)"},
+  aluminum:   {label:"Alüminyum",   color:0xc8d0d8, bottom:0xa8b0b8, metalness:.80, roughness:.25, chip:0xd8e0e8, lathe:["#e0e5ea","#b8c4cc","#d0d8de","#a0aeb8","#8898a4"], latheEnd:["#a0aeb8","#d0d8de","#b8c4cc"], latheChip:"#dce4ea", stripe:"rgba(255,255,255,.12)"},
+  brass:      {label:"Pirinç",      color:0xc8a832, bottom:0xa08828, metalness:.75, roughness:.30, chip:0xe0c848, lathe:["#e8d060","#c8a832","#dcc040","#a89028","#8a7820"], latheEnd:["#a89028","#dcc040","#c8a832"], latheChip:"#e8d060", stripe:"rgba(255,240,180,.10)"},
+  copper:     {label:"Bakır",       color:0xc06838, bottom:0x985028, metalness:.80, roughness:.30, chip:0xd87848, lathe:["#e08858","#c06838","#d07848","#a05828","#884820"], latheEnd:["#a05828","#d07848","#c06838"], latheChip:"#e08858", stripe:"rgba(255,200,160,.10)"},
+  "cast-iron":{label:"Dökme Demir", color:0x505558, bottom:0x383c40, metalness:.50, roughness:.60, chip:0x606568, lathe:["#686e72","#505558","#585e62","#404548","#303538"], latheEnd:["#404548","#585e62","#505558"], latheChip:"#606568", stripe:"rgba(180,190,200,.06)"},
+  titanium:   {label:"Titanyum",    color:0x888898, bottom:0x686878, metalness:.70, roughness:.35, chip:0xa0a0b0, lathe:["#a0a0b0","#888898","#9898a8","#707080","#585868"], latheEnd:["#707080","#9898a8","#888898"], latheChip:"#a8a8b8", stripe:"rgba(200,200,240,.08)"},
+  wood:       {label:"Ahşap",       color:0xb08040, bottom:0x886030, metalness:.0,  roughness:.90, chip:0xd0a060, lathe:["#e7a86a","#c9843f","#f0c290","#b9752f","#8a531f"], latheEnd:["#a9691f","#f0c290","#c9843f"], latheChip:"#ffd9a0", stripe:"rgba(255,255,255,.10)"},
+  plastic:    {label:"Plastik",     color:0xe8e8e0, bottom:0xc8c8c0, metalness:.0,  roughness:.55, chip:0xf0f0e8, lathe:["#f0f0e8","#d8d8d0","#e8e8e0","#c0c0b8","#a8a8a0"], latheEnd:["#c0c0b8","#e8e8e0","#d8d8d0"], latheChip:"#f0f0e8", stripe:"rgba(255,255,255,.06)"},
+  acrylic:    {label:"Akrilik",     color:0xd0e8f8, bottom:0xb0c8d8, metalness:.05, roughness:.15, chip:0xe0f0ff, lathe:["#e0f0ff","#b8d8f0","#d0e8f8","#90b8d8","#70a0c0"], latheEnd:["#90b8d8","#d0e8f8","#b8d8f0"], latheChip:"#e0f0ff", stripe:"rgba(200,230,255,.12)"},
+};
+let curMat="steel";
 
 /* ==================================================================== */
 /* ============================  TORNA MOTORU  ======================== */
@@ -422,11 +466,12 @@ class LatheEngine{
     const chX=zX(STOCK_LEN),chW=46,chR=STOCK_R+30,chg=ctx.createLinearGradient(0,cy-chR*sX,0,cy+chR*sX);chg.addColorStop(0,"#cfd6dc");chg.addColorStop(.5,"#8b949c");chg.addColorStop(1,"#565d63");ctx.fillStyle=chg;roundRect(ctx,chX-chW,cy-chR*sX,chW+6,chR*2*sX,6);ctx.fill();
     ctx.save();ctx.translate(chX,cy);for(let j=0;j<3;j++){const a=this.angle*.25+(j*Math.PI*2)/3,jr=chR*sX*.72;ctx.fillStyle="#3f464b";ctx.save();ctx.rotate(a);roundRect(ctx,-8,-jr,16,jr*.42,3);ctx.fill();ctx.restore();}ctx.restore();
     ctx.beginPath();ctx.moveTo(zX(STOCK_LEN),rT(this.radii[N-1]));for(let i=N-1;i>=0;i--){const z=(i/(N-1))*STOCK_LEN;ctx.lineTo(zX(z),rT(this.radii[i]));}for(let i=0;i<N;i++){const z=(i/(N-1))*STOCK_LEN;ctx.lineTo(zX(z),rB(this.radii[i]));}ctx.closePath();
-    const wg=ctx.createLinearGradient(0,cy-STOCK_R*sX,0,cy+STOCK_R*sX);wg.addColorStop(0,"#e7a86a");wg.addColorStop(.35,"#c9843f");wg.addColorStop(.5,"#f0c290");wg.addColorStop(.65,"#b9752f");wg.addColorStop(1,"#8a531f");ctx.fillStyle=wg;ctx.fill();
-    ctx.save();ctx.clip();ctx.strokeStyle="rgba(255,255,255,.10)";const ph=(this.angle*12)%22;for(let sx=mL-22+ph;sx<mL+uW;sx+=22){ctx.beginPath();ctx.moveTo(sx,cy-STOCK_R*sX);ctx.lineTo(sx,cy+STOCK_R*sX);ctx.stroke();}ctx.restore();
+    const md=MAT_DB[curMat]||MAT_DB.wood,lc=md.lathe;
+    const wg=ctx.createLinearGradient(0,cy-STOCK_R*sX,0,cy+STOCK_R*sX);wg.addColorStop(0,lc[0]);wg.addColorStop(.35,lc[1]);wg.addColorStop(.5,lc[2]);wg.addColorStop(.65,lc[3]);wg.addColorStop(1,lc[4]);ctx.fillStyle=wg;ctx.fill();
+    ctx.save();ctx.clip();ctx.strokeStyle=md.stripe;const ph=(this.angle*12)%22;for(let sx=mL-22+ph;sx<mL+uW;sx+=22){ctx.beginPath();ctx.moveTo(sx,cy-STOCK_R*sX);ctx.lineTo(sx,cy+STOCK_R*sX);ctx.stroke();}ctx.restore();
     ctx.strokeStyle="rgba(0,0,0,.35)";ctx.lineWidth=1.2;ctx.stroke();
-    const endR=this.radii[0],ex=zX(0),eY=endR*sX;ctx.beginPath();ctx.ellipse(ex,cy,8,eY,0,0,Math.PI*2);const eg=ctx.createLinearGradient(ex-8,0,ex+8,0);eg.addColorStop(0,"#a9691f");eg.addColorStop(.5,"#f0c290");eg.addColorStop(1,"#c9843f");ctx.fillStyle=eg;ctx.fill();ctx.strokeStyle="rgba(0,0,0,.35)";ctx.stroke();ctx.strokeStyle="rgba(60,30,10,.5)";ctx.beginPath();ctx.moveTo(ex,cy);ctx.lineTo(ex+Math.cos(this.angle)*5,cy+Math.sin(this.angle)*eY);ctx.stroke();
-    ctx.fillStyle="#ffd9a0";for(const c of this.chips){ctx.globalAlpha=Math.max(0,c.life);ctx.fillRect(zX(c.px),rB(c.py),c.size,c.size);}ctx.globalAlpha=1;
+    const le=md.latheEnd,endR=this.radii[0],ex=zX(0),eY=endR*sX;ctx.beginPath();ctx.ellipse(ex,cy,8,eY,0,0,Math.PI*2);const eg=ctx.createLinearGradient(ex-8,0,ex+8,0);eg.addColorStop(0,le[0]);eg.addColorStop(.5,le[1]);eg.addColorStop(1,le[2]);ctx.fillStyle=eg;ctx.fill();ctx.strokeStyle="rgba(0,0,0,.35)";ctx.stroke();ctx.strokeStyle="rgba(60,30,10,.5)";ctx.beginPath();ctx.moveTo(ex,cy);ctx.lineTo(ex+Math.cos(this.angle)*5,cy+Math.sin(this.angle)*eY);ctx.stroke();
+    ctx.fillStyle=md.latheChip;for(const c of this.chips){ctx.globalAlpha=Math.max(0,c.life);ctx.fillRect(zX(c.px),rB(c.py),c.size,c.size);}ctx.globalAlpha=1;
     const tx=zX(this.s.z),ty=rB(this.s.x);ctx.fillStyle="#c7ccd1";ctx.strokeStyle="#2a2e31";ctx.lineWidth=1;roundRect(ctx,tx-6,ty+8,12,h-(ty+8),2);ctx.fill();ctx.stroke();ctx.beginPath();ctx.moveTo(tx,ty);ctx.lineTo(tx+12,ty+16);ctx.lineTo(tx-12,ty+16);ctx.closePath();ctx.fillStyle="#f2c94c";ctx.fill();ctx.strokeStyle="#8a6d12";ctx.stroke();
     ctx.strokeStyle="rgba(120,220,160,.6)";ctx.setLineDash([4,4]);ctx.beginPath();ctx.moveTo(tx,0);ctx.lineTo(tx,h);ctx.moveTo(0,ty);ctx.lineTo(w,ty);ctx.stroke();ctx.setLineDash([]);}
 }
@@ -515,24 +560,25 @@ function initMill(){
   millResize();
 }
 
-let sideMeshes=[];
+let sideMeshes=[], stockMat=null, bottomMat=null;
 function buildWorkpiece(){
   if(plane){scene.remove(plane);planeGeo.dispose();}
   sideMeshes.forEach(m=>scene.remove(m));sideMeshes=[];
-  const blue=new THREE.MeshStandardMaterial({color:0x1a9fd0,metalness:.15,roughness:.55,side:THREE.DoubleSide});
+  const md=MAT_DB[curMat]||MAT_DB.steel;
+  stockMat=new THREE.MeshStandardMaterial({color:md.color,metalness:md.metalness,roughness:md.roughness,side:THREE.DoubleSide});
+  bottomMat=new THREE.MeshStandardMaterial({color:md.bottom,metalness:md.metalness,roughness:md.roughness});
   planeGeo=new THREE.PlaneGeometry(W,D,COLS-1,ROWS-1);
   planeGeo.rotateX(-Math.PI/2);
   const pos=planeGeo.attributes.position;
   for(let i=0;i<pos.count;i++) pos.setY(i,TOP);
   pos.needsUpdate=true;planeGeo.computeVertexNormals();
-  plane=new THREE.Mesh(planeGeo,blue);plane.castShadow=true;plane.receiveShadow=true;scene.add(plane);
-  // yan duvarlar + taban
-  const mk=(w,h,rx,ry,px,py,pz)=>{const m=new THREE.Mesh(new THREE.PlaneGeometry(w,h),blue);m.rotation.set(rx,ry,0);m.position.set(px,py,pz);m.castShadow=true;scene.add(m);sideMeshes.push(m);};
-  mk(W,TOP,0,0,0,TOP/2, D/2);            // ön
-  mk(W,TOP,0,Math.PI,0,TOP/2,-D/2);      // arka
-  mk(D,TOP,0,-Math.PI/2,-W/2,TOP/2,0);   // sol
-  mk(D,TOP,0,Math.PI/2, W/2,TOP/2,0);    // sağ
-  const bottom=new THREE.Mesh(new THREE.PlaneGeometry(W,D),new THREE.MeshStandardMaterial({color:0x14799e}));
+  plane=new THREE.Mesh(planeGeo,stockMat);plane.castShadow=true;plane.receiveShadow=true;scene.add(plane);
+  const mk=(w,h,rx,ry,px,py,pz)=>{const m=new THREE.Mesh(new THREE.PlaneGeometry(w,h),stockMat);m.rotation.set(rx,ry,0);m.position.set(px,py,pz);m.castShadow=true;scene.add(m);sideMeshes.push(m);};
+  mk(W,TOP,0,0,0,TOP/2, D/2);
+  mk(W,TOP,0,Math.PI,0,TOP/2,-D/2);
+  mk(D,TOP,0,-Math.PI/2,-W/2,TOP/2,0);
+  mk(D,TOP,0,Math.PI/2, W/2,TOP/2,0);
+  const bottom=new THREE.Mesh(new THREE.PlaneGeometry(W,D),bottomMat);
   bottom.rotation.x=Math.PI/2;bottom.position.y=0;scene.add(bottom);sideMeshes.push(bottom);
 }
 
@@ -549,10 +595,12 @@ function buildTool(){
   scene.add(toolGroup);
 }
 
+let chipMat=null;
 function buildChipPool(){
   const geo=new THREE.BoxGeometry(3,3,3);
-  const mat=new THREE.MeshStandardMaterial({color:0x3fc3f0,metalness:.2,roughness:.5});
-  for(let i=0;i<160;i++){const m=new THREE.Mesh(geo,mat);m.visible=false;m.castShadow=true;scene.add(m);chipPool.push({mesh:m,vx:0,vy:0,vz:0,life:0});}
+  const md=MAT_DB[curMat]||MAT_DB.steel;
+  chipMat=new THREE.MeshStandardMaterial({color:md.chip,metalness:Math.min(md.metalness+.1,.9),roughness:md.roughness});
+  for(let i=0;i<160;i++){const m=new THREE.Mesh(geo,chipMat);m.visible=false;m.castShadow=true;scene.add(m);chipPool.push({mesh:m,vx:0,vy:0,vz:0,life:0});}
 }
 function spawnChip(px,py,pz){
   for(const c of chipPool){if(c.life<=0){c.mesh.visible=true;c.mesh.position.set(px+(Math.random()-.5)*10,py,pz+(Math.random()-.5)*10);
@@ -668,6 +716,17 @@ $("m-new").onclick=()=>$("mbtn-newp").click();
 $("m-mute").onclick=()=>{mill.muted=!mill.muted;$("m-mute").textContent=mill.muted?"🔇":"🔊";};
 $("m-wire").onclick=()=>{plane.material.wireframe=!plane.material.wireframe;};
 document.querySelectorAll("[data-view]").forEach(b=>b.onclick=()=>setView(b.dataset.view));
+
+function setMaterial(key){
+  if(!MAT_DB[key])return;curMat=key;
+  const md=MAT_DB[key];
+  if(stockMat){stockMat.color.setHex(md.color);stockMat.metalness=md.metalness;stockMat.roughness=md.roughness;stockMat.needsUpdate=true;}
+  if(bottomMat){bottomMat.color.setHex(md.bottom);bottomMat.metalness=md.metalness;bottomMat.roughness=md.roughness;bottomMat.needsUpdate=true;}
+  if(chipMat){chipMat.color.setHex(md.chip);chipMat.needsUpdate=true;}
+  $("mmat-sel").value=key;$("lmat-sel").value=key;
+}
+$("mmat-sel").onchange=e=>setMaterial(e.target.value);
+$("lmat-sel").onchange=e=>setMaterial(e.target.value);
 
 let fpsT=0,fpsC=0,fps=0;
 function syncMill(dt){
@@ -796,6 +855,7 @@ $("l-file").onchange=e=>{
 {const raw=sessionStorage.getItem("rover_cnc_gcode");
 if(raw){try{const d=JSON.parse(raw);if(d.gcode){
   const isMill=!d.machineType||d.machineType==="freze"||d.machineType==="mill";
+  if(d.material){const mk=d.material.toLowerCase();const map={"celik":"steel","çelik":"steel","steel":"steel","aluminyum":"aluminum","alüminyum":"aluminum","aluminum":"aluminum","pirinc":"brass","pirinç":"brass","brass":"brass","bakir":"copper","bakır":"copper","copper":"copper","dokme demir":"cast-iron","dökme demir":"cast-iron","cast-iron":"cast-iron","titanyum":"titanium","titanium":"titanium","ahsap":"wood","ahşap":"wood","wood":"wood","plastik":"plastic","plastic":"plastic","pom":"plastic","nylon":"plastic","akrilik":"acrylic","acrylic":"acrylic","pmma":"acrylic"};const matKey=map[mk];if(matKey)setMaterial(matKey);}
   setTimeout(()=>{
     if(isMill){setTab("mill");$("m-file-info").textContent="CAM çıktısı";$("m-file-info").classList.remove("hidden");runMillGcode(parseGcode(d.gcode,"mill"));}
     else{setTab("lathe");$("l-file-info").textContent="CAM çıktısı";$("l-file-info").classList.remove("hidden");runLatheGcode(parseGcode(d.gcode,"lathe"));}
@@ -1146,8 +1206,8 @@ function taiGetChips(){
     return[
       {l:"12mm delik aç",c:"12mm çapında 15mm derinlikte delik aç"},
       {l:"Dikdörtgen cep",c:"60x40mm 10mm derin dikdörtgen cep aç"},
-      {l:"Yüzey düzelt",c:"3mm yüzey düzelt"},
       {l:"Örnek parçalar",c:"Örnek parçaları göster"},
+      {l:"🔩 Malzeme değiştir",c:"Malzeme alüminyum"},
     ];
   } else {
     if(taiLastOp==="turn")return[
@@ -1171,8 +1231,8 @@ function taiGetChips(){
     return[
       {l:"Çapı 40mm yap",c:"Çapı 40mm'ye düşür"},
       {l:"Kanal aç",c:"8mm genişliğinde 15mm derin kanal aç"},
-      {l:"Alın torna",c:"5mm alın tornalama yap"},
       {l:"Örnek parçalar",c:"Örnek parçaları göster"},
+      {l:"🔩 Malzeme değiştir",c:"Malzeme çelik"},
     ];
   }
 }
@@ -1215,6 +1275,7 @@ function taiExec(raw){
 • <b>Kontur kes:</b> "10mm kontur kes"<br>
 • <b>Pah kır:</b> "2mm pah kır"<br>
 • <b>Kontrol:</b> "devir 8000", "feed 500", "durdur"<br>
+• <b>Malzeme:</b> "malzeme alüminyum", "malzeme ahşap"<br>
 • <b>Örnek parçalar:</b> "örnek parçaları göster"`;
     return `<b>Torna Komutları:</b><br>
 • <b>Çap düşür:</b> "Çapı 40mm'ye düşür"<br>
@@ -1222,6 +1283,7 @@ function taiExec(raw){
 • <b>Kanal aç:</b> "8mm genişliğinde 15mm derin kanal"<br>
 • <b>Konik torna:</b> "80mm'den 30mm'ye konik torna"<br>
 • <b>Kontrol:</b> "devir 2000", "feed 300", "durdur"<br>
+• <b>Malzeme:</b> "malzeme pirinç", "malzeme plastik"<br>
 • <b>Örnek parçalar:</b> "örnek parçaları göster"`;
   }
 
@@ -1254,6 +1316,11 @@ function taiExec(raw){
     if(/(kanalli|grooved)\s*(mil|shaft)/i.test(t)){taiLastOp="sample";taiRunLathe(sampleGroovedShaft());return A("✓ Kanallı mil başlatıldı:")+" Ø80 mil üzerine 3 kanal.";}
     if(/(civata|bolt)\s*(profil|profile|govde)/i.test(t)){taiLastOp="sample";taiRunLathe(sampleBoltProfile());return A("✓ Cıvata profili başlatıldı:")+" Ø40 gövde + kanal.";}
   }
+
+  /* --- malzeme değiştir --- */
+  {const matMap={"celik":"steel","cilik":"steel","steel":"steel","aluminyum":"aluminum","aluminum":"aluminum","pirinc":"brass","brass":"brass","bakir":"copper","copper":"copper","dokme demir":"cast-iron","dokmedemir":"cast-iron","titanyum":"titanium","titanium":"titanium","ahsap":"wood","wood":"wood","tahta":"wood","plastik":"plastic","plastic":"plastic","pom":"plastic","nylon":"plastic","akrilik":"acrylic","acrylic":"acrylic","pmma":"acrylic"};
+  if(/(malzeme|material|stok|stock)/i.test(t)){for(const[k,v] of Object.entries(matMap)){if(t.includes(k)){setMaterial(v);const md=MAT_DB[v];return A("✓ Malzeme değiştirildi:")+" "+md.label+".";}}
+  const list=Object.values(MAT_DB).map(m=>m.label).join(", ");return "Hangi malzeme? Seçenekler: "+list;}}
 
   /* --- spindle kontrol --- */
   if(/(mil|spindle).*(ac|on|baslat|calistir)/i.test(t)||/ac.*mil/i.test(t)){
