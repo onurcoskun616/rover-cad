@@ -49,7 +49,7 @@ LLM_MAX_HISTORY = int(os.getenv("LLM_MAX_HISTORY", "20"))
 app = Flask(__name__)
 app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "rover-cnc-secret")
 CORS(app, resources={r"/*": {"origins": "*"}})
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
+socketio = SocketIO(app, cors_allowed_origins="*")
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("rover-cnc")
@@ -79,7 +79,9 @@ def load_system_prompt():
         return f.read()
 
 
-SYSTEM_PROMPT = ""
+init_db()
+SYSTEM_PROMPT = load_system_prompt()
+log.info("Database and system prompt loaded")
 
 # ---------------------------------------------------------------------------
 # LLM client — supports OpenAI-compatible APIs (OpenRouter, Qwen, etc.)
@@ -481,7 +483,6 @@ def export_nc(session_key):
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    init_db()
-    SYSTEM_PROMPT = load_system_prompt()
-    log.info("Starting Rover CNC backend on :5050")
-    socketio.run(app, host="0.0.0.0", port=5050, debug=True, allow_unsafe_werkzeug=True)
+    port = int(os.getenv("PORT", "5050"))
+    log.info("Starting Rover CNC backend on :%d", port)
+    socketio.run(app, host="0.0.0.0", port=port, debug=True, allow_unsafe_werkzeug=True)

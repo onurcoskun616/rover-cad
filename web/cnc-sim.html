@@ -1654,7 +1654,11 @@ function r(){ if(!R) R = window._rover; return R; }
 /* ------------------------------------------------------------------ */
 /*  CONFIG                                                             */
 /* ------------------------------------------------------------------ */
-const WS_URL = window.ROVER_WS_URL || "http://localhost:5050";
+const WS_URL = window.ROVER_WS_URL || (
+  (location.hostname === "localhost" || location.hostname === "127.0.0.1")
+    ? "http://localhost:5050"
+    : "https://rover-cnc-backend.onrender.com"
+);
 const ENABLE_LLM = window.ROVER_ENABLE_LLM !== false;
 
 /* ------------------------------------------------------------------ */
