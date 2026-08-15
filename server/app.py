@@ -99,8 +99,9 @@ def call_llm(messages: list[dict]) -> str:
         "messages": messages,
         "max_tokens": 2048,
         "temperature": 0.3,
-        "chat_template_kwargs": {"enable_thinking": False},
     }
+    if "openrouter" in LLM_BASE_URL and "qwen" in LLM_MODEL.lower():
+        payload["chat_template_kwargs"] = {"enable_thinking": False}
 
     req = urllib.request.Request(
         f"{LLM_BASE_URL}/chat/completions",
