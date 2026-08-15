@@ -871,6 +871,79 @@ function parseGcode(text, type){
   return {q, bounds};
 }
 
+/* ==================================================================== */
+/* ========  SafetyInterceptor (Çarpışma ve Güvenlik Katmanı)  ======== */
+/* ==================================================================== */
+class SafetyInterceptor {
+  validateMill(queue, sw, sd, sh, spindleOn, cx, cy, cz){
+    const xLim=sw/2+20, zLim=sd/2+20, yMax=sh+60, maxPlunge=10, errs=[];
+    let px=cx, py=cy, pz=cz;
+    for(let i=0;i<queue.length;i++){
+      const m=queue[i], nx=m.x, ny=m.y, nz=m.z;
+      if(Math.abs(nx)>xLim)
+        errs.push(`Satır ${i+1}: X soft limit aşımı (${nx.toFixed(1)}mm, limit ±${xLim.toFixed(0)}mm) — takım tezgah dışına çıkar`);
+      if(ny<-0.5)
+        errs.push(`Satır ${i+1}: Z alt limit aşımı (${ny.toFixed(1)}mm) — takım tabla altına iner`);
+      if(ny>yMax)
+        errs.push(`Satır ${i+1}: Z üst limit aşımı (${ny.toFixed(1)}mm, limit ${yMax.toFixed(0)}mm)`);
+      if(Math.abs(nz)>zLim)
+        errs.push(`Satır ${i+1}: Y soft limit aşımı (${nz.toFixed(1)}mm, limit ±${zLim.toFixed(0)}mm) — takım tezgah dışına çıkar`);
+      if(m.type==="rapid"){
+        const hd=Math.hypot(nx-px,nz-pz);
+        if(hd>0.5&&(py<=sh+0.5||ny<=sh+0.5))
+          errs.push(`Satır ${i+1}: G00 rapid yatay hareket stok seviyesinde (Z=${Math.min(py,ny).toFixed(1)}mm, stok üst: ${sh}mm) — çarpışma riski`);
+        if(ny<sh-0.5&&py>sh+0.5)
+          errs.push(`Satır ${i+1}: G00 ile malzemeye dalma (Z: ${py.toFixed(1)}→${ny.toFixed(1)}mm) — G01 feed kullanılmalı`);
+      }
+      if(m.type==="feed"&&!spindleOn&&ny<=sh+0.5)
+        errs.push(`Satır ${i+1}: Spindle kapalı, malzemeye dalma girişimi (Z=${ny.toFixed(1)}mm) — takım/malzeme hasar riski`);
+      if(m.type==="feed"&&py-ny>maxPlunge&&ny<sh)
+        errs.push(`Satır ${i+1}: Tek seferde ${(py-ny).toFixed(1)}mm dalma (max ${maxPlunge}mm) — takım kırılma riski`);
+      px=nx;py=ny;pz=nz;
+    }
+    return errs;
+  }
+  validateLathe(queue, sLen, sR, spindleOn, cx, cz){
+    const xMax=sR*2+20, zMin=-25, zMax=sLen+20, errs=[];
+    let px=cx, pz=cz;
+    for(let i=0;i<queue.length;i++){
+      const m=queue[i];
+      if(m.x<-0.5)
+        errs.push(`Satır ${i+1}: X negatif limit (${m.x.toFixed(1)}mm) — merkez altı`);
+      if(m.x>xMax)
+        errs.push(`Satır ${i+1}: X limit aşımı (${m.x.toFixed(1)}mm, limit ${xMax.toFixed(0)}mm)`);
+      if(m.z<zMin)
+        errs.push(`Satır ${i+1}: Z limit aşımı (${m.z.toFixed(1)}mm, limit ${zMin}mm) — aynaya çarpma riski`);
+      if(m.z>zMax)
+        errs.push(`Satır ${i+1}: Z limit aşımı (${m.z.toFixed(1)}mm, limit ${zMax.toFixed(0)}mm)`);
+      if(m.type==="rapid"){
+        const inStock=m.z>=-0.5&&m.z<=sLen+0.5;
+        if(m.x<sR-0.5&&px>=sR-0.5&&inStock)
+          errs.push(`Satır ${i+1}: G00 rapid stok içine dalıyor (X=${m.x.toFixed(1)}mm, stok R: ${sR}mm) — çarpışma riski`);
+        if(px<sR-0.5&&inStock&&Math.abs(m.z-pz)>0.5)
+          errs.push(`Satır ${i+1}: G00 rapid stok içinde yatay hareket (X=${px.toFixed(1)}mm < stok R: ${sR}mm) — çarpışma riski`);
+      }
+      if(m.type==="feed"&&!spindleOn&&m.x<=sR+0.5&&m.z>=-0.5&&m.z<=sLen+0.5)
+        errs.push(`Satır ${i+1}: Spindle kapalı, malzemeye dalma (X=${m.x.toFixed(1)}mm) — hasar riski`);
+      px=m.x;pz=m.z;
+    }
+    return errs;
+  }
+  _eStop(target, taiMsgFn, errs){
+    if(target.emergency!==undefined){
+      target.emergency=true;target.running=false;target.spindleOn=false;
+      target.coolantMode="off";target.queue=[];target.moveActive=null;target.alarm="SAFETY";
+    } else {
+      target.emergencyStop();
+    }
+    const unique=[...new Set(errs)];
+    taiMsgFn('<span style="color:#ff4444;font-weight:bold">⛔ GÜVENLİK İHLALİ — E-STOP</span><br>'+
+      unique.map(m=>'<span style="color:#ff6666">• '+m+'</span>').join('<br>')+
+      '<br><span style="color:#ffaa44">Sistemi sıfırlamak için <b>RESET</b> yazın.</span>',"bot");
+  }
+}
+const safetyInterceptor=new SafetyInterceptor();
+
 function runMillGcode(parsed, stockDims){
   const {q, bounds}=parsed;
   if(!q.length) return;
@@ -897,6 +970,8 @@ function runMillGcode(parsed, stockDims){
       if(m.y!==undefined) m.y=clamp(m.y, 0, TOP+40);
     }
   }
+  const sfErrs=safetyInterceptor.validateMill(q,W,D,TOP,mill.spindleOn,mill.x,mill.y,mill.z);
+  if(sfErrs.length){safetyInterceptor._eStop(mill,taiMsg,sfErrs);return;}
   mill.mode="AUTO"; mill.spindleOn=true; mill.paused=false; if(mill.coolantMode==="off")mill.coolantMode="flood";
   mill.queue=q; mill.moveActive=mill.queue.shift(); mill.running=true;
 }
@@ -916,6 +991,8 @@ function runLatheGcode(parsed, stockDims){
       m.z=clamp(m.z+zOff, -20, STOCK_LEN);
     }
   } else if(stockDims){resizeLatheStock(stockDims.len,stockDims.r);}
+  const sfErrsL=safetyInterceptor.validateLathe(q,STOCK_LEN,STOCK_R,lathe.s.spindleOn,lathe.s.x,lathe.s.z);
+  if(sfErrsL.length){safetyInterceptor._eStop(lathe,taiMsg,sfErrsL);return;}
   lathe.setMode("AUTO"); lathe.s.spindleOn=true; if(lathe.s.coolantMode==="off")lathe.s.coolantMode="flood";
   lathe.queue=q; lathe.moveActive=lathe.queue.shift()||null; lathe.s.running=true;
 }
@@ -1640,7 +1717,7 @@ taiRenderChips();
 
 window._rover = {
   taiUserInput, taiExec, taiGetChips, taiNorm, taiMsg, taiRenderChips,
-  taiMessages, parseGcode, runMillGcode, runLatheGcode,
+  taiMessages, parseGcode, runMillGcode, runLatheGcode, safetyInterceptor,
   get active(){ return active; },
   get W(){ return W; }, get D(){ return D; }, get TOP(){ return TOP; },
   get STOCK_LEN(){ return STOCK_LEN; }, get STOCK_R(){ return STOCK_R; },
