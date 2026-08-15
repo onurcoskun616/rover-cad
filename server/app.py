@@ -53,7 +53,7 @@ def get_db():
 
 def init_db():
     conn = get_db()
-    with open(SCHEMA_PATH) as f:
+    with open(SCHEMA_PATH, encoding="utf-8") as f:
         conn.executescript(f.read())
     conn.close()
     log.info("Database initialized at %s", DB_PATH)
