@@ -24,6 +24,21 @@ BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = BASE_DIR / "rover_cnc.db"
 SCHEMA_PATH = BASE_DIR / "schema.sql"
 PROMPT_PATH = BASE_DIR / "llm_system_prompt.txt"
+ENV_PATH = BASE_DIR / ".env"
+
+def load_dotenv():
+    if ENV_PATH.exists():
+        for line in ENV_PATH.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if "=" in line:
+                k, v = line.split("=", 1)
+                k, v = k.strip(), v.strip().strip('"').strip("'")
+                if k and k not in os.environ:
+                    os.environ[k] = v
+
+load_dotenv()
 
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "openai")  # "openai" | "anthropic"
 LLM_MODEL = os.getenv("LLM_MODEL", "qwen/qwen3-32b")
