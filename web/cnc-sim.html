@@ -27,13 +27,17 @@
   .tb-icn:hover{filter:brightness(1.15);}
 
   /* Topkapı AI Chat Bot */
-  #tai-toggle{position:fixed;right:20px;bottom:20px;z-index:10000;width:56px;height:56px;border-radius:50%;
-    border:none;background:linear-gradient(135deg,#18181b 0%,#27272a 100%);color:#fff;font-size:22px;
-    cursor:pointer;box-shadow:0 4px 20px rgba(0,0,0,.5),0 0 0 2px #3f3f46;display:flex;align-items:center;justify-content:center;transition:transform .2s,box-shadow .2s;}
-  #tai-toggle:hover{transform:scale(1.08);box-shadow:0 6px 28px rgba(0,0,0,.6),0 0 0 2px #06b6d4;}
-  #tai-toggle .tai-badge{position:absolute;top:-2px;right:-2px;background:#06b6d4;color:#fff;font-size:8px;font-weight:800;
-    padding:2px 5px;border-radius:10px;letter-spacing:.04em;}
-  #tai-panel{position:fixed;right:20px;bottom:88px;z-index:10001;width:360px;max-height:520px;
+  #tai-toggle{display:none;}
+  .tai-open-btn{display:flex;align-items:center;gap:10px;width:100%;padding:10px 12px;border-radius:8px;border:1px solid rgba(6,182,212,.3);
+    background:linear-gradient(135deg,#0c1a24 0%,#18181b 100%);cursor:pointer;transition:border-color .2s,box-shadow .2s;}
+  .tai-open-btn:hover{border-color:#06b6d4;box-shadow:0 0 12px rgba(6,182,212,.2);}
+  .tai-open-btn .tai-robot{width:36px;height:36px;border-radius:8px;background:#083344;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+  .tai-open-btn .tai-info{flex:1;text-align:left;}
+  .tai-open-btn .tai-label{font-size:12px;font-weight:700;color:#67e8f9;letter-spacing:.02em;}
+  .tai-open-btn .tai-sub{font-size:9px;color:#a1a1aa;margin-top:1px;}
+  .tai-open-btn .tai-sub .tai-mode-tag{display:inline-block;background:#06b6d4;color:#fff;font-size:8px;font-weight:800;
+    padding:1px 6px;border-radius:8px;margin-left:4px;letter-spacing:.04em;vertical-align:middle;}
+  #tai-panel{position:fixed;right:20px;bottom:20px;z-index:10001;width:360px;max-height:520px;
     border-radius:14px;background:#18181b;border:1px solid #3f3f46;box-shadow:0 12px 40px rgba(0,0,0,.6);
     display:none;flex-direction:column;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;}
   #tai-panel.open{display:flex;}
@@ -250,6 +254,12 @@
             </select>
           </div>
 
+          <!-- Topkapı AI chatbot -->
+          <button class="tai-open-btn" id="mtai-btn" type="button">
+            <div class="tai-robot"><svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#67e8f9" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="9" width="18" height="12" rx="3"/><circle cx="9" cy="15" r="1.5" fill="#67e8f9"/><circle cx="15" cy="15" r="1.5" fill="#67e8f9"/><line x1="9" y1="18" x2="15" y2="18"/><line x1="12" y1="3" x2="12" y2="9"/><circle cx="12" cy="3" r="2"/><line x1="1" y1="13" x2="3" y2="13"/><line x1="21" y1="13" x2="23" y2="13"/></svg></div>
+            <div class="tai-info"><div class="tai-label">Topkapi AI</div><div class="tai-sub">CNC Asistan <span class="tai-mode-tag" id="mtai-mode">FREZE</span></div></div>
+          </button>
+
           <!-- emergency -->
           <div class="flex items-center gap-3 rounded border border-zinc-600 bg-zinc-900/60 p-2">
             <button id="mbtn-emg" aria-label="Emergency stop" class="flex h-14 w-14 shrink-0 items-center justify-center rounded-full border-4 border-yellow-400 bg-red-600 shadow-[0_4px_10px_rgba(0,0,0,.6)] active:translate-y-0.5">
@@ -379,6 +389,13 @@
               <option value="acrylic">Akrilik (PMMA)</option>
             </select>
           </div>
+
+          <!-- Topkapı AI chatbot -->
+          <button class="tai-open-btn" id="ltai-btn" type="button">
+            <div class="tai-robot"><svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#67e8f9" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="9" width="18" height="12" rx="3"/><circle cx="9" cy="15" r="1.5" fill="#67e8f9"/><circle cx="15" cy="15" r="1.5" fill="#67e8f9"/><line x1="9" y1="18" x2="15" y2="18"/><line x1="12" y1="3" x2="12" y2="9"/><circle cx="12" cy="3" r="2"/><line x1="1" y1="13" x2="3" y2="13"/><line x1="21" y1="13" x2="23" y2="13"/></svg></div>
+            <div class="tai-info"><div class="tai-label">Topkapi AI</div><div class="tai-sub">CNC Asistan <span class="tai-mode-tag" id="ltai-mode">TORNA</span></div></div>
+          </button>
+
           <div class="flex items-center gap-3 rounded border border-zinc-600 bg-zinc-900/60 p-2">
             <button id="btn-emg" aria-label="Emergency stop" class="flex h-14 w-14 shrink-0 items-center justify-center rounded-full border-4 border-yellow-400 bg-red-600 shadow-[0_4px_10px_rgba(0,0,0,.6)] active:translate-y-0.5"><span class="h-8 w-8 rounded-full bg-red-500 shadow-inner"></span></button>
             <div class="flex flex-1 flex-col gap-1">
@@ -395,12 +412,12 @@
 </main>
 
 <!-- Topkapı AI Chat Bot -->
-<button id="tai-toggle" title="Topkapı AI"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a7 7 0 0 1 7 7c0 3-2 5.5-4 7l-3 3-3-3c-2-1.5-4-4-4-7a7 7 0 0 1 7-7z"/><circle cx="12" cy="9" r="2" fill="currentColor"/></svg><span class="tai-badge">FREZE</span></button>
+<button id="tai-toggle" title="Topkapı AI"></button>
 
 <div id="tai-panel">
   <div class="tai-header">
     <div class="tai-header-left">
-      <div class="tai-header-logo"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#a1a1aa" stroke-width="2"><path d="M12 2a7 7 0 0 1 7 7c0 3-2 5.5-4 7l-3 3-3-3c-2-1.5-4-4-4-7a7 7 0 0 1 7-7z"/><circle cx="12" cy="9" r="2" fill="#a1a1aa"/></svg></div>
+      <div class="tai-header-logo"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#a1a1aa" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="9" width="18" height="12" rx="3"/><circle cx="9" cy="15" r="1.5" fill="#a1a1aa"/><circle cx="15" cy="15" r="1.5" fill="#a1a1aa"/><line x1="9" y1="18" x2="15" y2="18"/><line x1="12" y1="3" x2="12" y2="9"/><circle cx="12" cy="3" r="2"/></svg></div>
       <span class="tai-header-title">Topkapı AI</span>
       <span class="tai-header-badge" id="tai-mode-badge">FREZE</span>
     </div>
@@ -942,6 +959,10 @@ function setTab(t){
   $("tab-mill").className="px-4 py-1.5 text-[12px] font-bold "+(t==="mill"?on:off);
   $("tab-lathe").className="px-4 py-1.5 text-[12px] font-bold "+(t==="lathe"?on:off);
   if(t==="mill"){millResize();} else {latheResize();}
+  const modeLabel=t==="mill"?"FREZE":"TORNA";
+  const mb=$("tai-mode-badge");if(mb)mb.textContent=modeLabel;
+  const mm=$("mtai-mode");if(mm)mm.textContent=modeLabel;
+  const lm=$("ltai-mode");if(lm)lm.textContent=modeLabel;
 }
 $("tab-mill").onclick=()=>setTab("mill");
 $("tab-lathe").onclick=()=>setTab("lathe");
@@ -969,7 +990,10 @@ const taiMessages=$("tai-messages"), taiInput=$("tai-input"), taiSend=$("tai-sen
 const taiBadge=$("tai-mode-badge");
 let taiLastOp=null;
 
-taiToggle.onclick=()=>{ taiPanel.classList.toggle("open"); if(taiPanel.classList.contains("open")){ taiInput.focus(); taiRenderChips(); }};
+function taiOpen(){taiPanel.classList.toggle("open");if(taiPanel.classList.contains("open")){taiInput.focus();taiRenderChips();}}
+taiToggle.onclick=taiOpen;
+$("mtai-btn").onclick=taiOpen;
+$("ltai-btn").onclick=taiOpen;
 taiClose.onclick=()=>taiPanel.classList.remove("open");
 
 function taiMsg(text,who){const d=document.createElement("div");d.className="tai-msg "+(who==="bot"?"tai-msg-bot":"tai-msg-user");d.innerHTML=text;taiMessages.appendChild(d);taiMessages.scrollTop=taiMessages.scrollHeight;return d;}
