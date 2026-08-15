@@ -1892,11 +1892,32 @@ function hookChatInput() {
     if (wsConnected && ENABLE_LLM) {
       R.taiMsg(text, "user");
 
-      var localResult = R.taiExec(text);
-      if (localResult) {
-        R.taiMsg(localResult, "bot");
-        R.taiRenderChips();
-        return;
+      var isControl = /^(yardim|help|komutlar)/i.test(tNorm) ||
+        /(mil|spindle).*(ac|on|kapat|off)/i.test(tNorm) ||
+        /(sogutma|coolant)/i.test(tNorm) ||
+        /^m[789]$/i.test(tNorm.trim()) ||
+        /(?:devir|rpm)\s*\d/i.test(tNorm) || /\d+\s*(?:devir|rpm)/i.test(tNorm) ||
+        /(?:feed|ilerleme)\s*\d/i.test(tNorm) || /\d+\s*(?:feed|ilerleme)/i.test(tNorm) ||
+        /(?:override|ovr)\s*\d/i.test(tNorm) ||
+        /^(baslat|start|cycle|durdur|dur|stop|devam|resume|reset|sifirla)$/i.test(tNorm.trim()) ||
+        /(acil|emergency|emg)/i.test(tNorm) ||
+        /^(auto|otomatik|manual|manuel|jog|mdi)\s*(mod)?$/i.test(tNorm.trim()) ||
+        /(ustten|onden|yandan|izometrik|wireframe|tel\s*kafes)\s*(gorunum|view)?/i.test(tNorm) ||
+        /(yeni\s*parca|new\s*work)/i.test(tNorm) ||
+        /(malzeme|material)/i.test(tNorm) ||
+        /(stok|stock)\s*(boyut|olcu|ebat|size|\d)/i.test(tNorm) ||
+        /(boyut|olcu|ebat|size)\s*(ayarla|degistir)/i.test(tNorm) ||
+        /(takim|tool)\s*\d/i.test(tNorm) ||
+        /(ornek|sample).*(goster|listele)/i.test(tNorm) ||
+        /^(g\d|m\d|[gnomxyzfs\d\s.;]+)$/i.test(tNorm.trim());
+
+      if (isControl) {
+        var localResult = R.taiExec(text);
+        if (localResult) {
+          R.taiMsg(localResult, "bot");
+          R.taiRenderChips();
+          return;
+        }
       }
 
       var machineState = collectMachineState();
