@@ -670,6 +670,7 @@ function spawnCoolant(){
 function updateCoolant(dt){for(const c of coolantPool){if(c.life>0){c.life-=dt*1.5;c.vy-=80*dt;c.mesh.position.x+=c.vx*dt;c.mesh.position.y+=c.vy*dt;c.mesh.position.z+=c.vz*dt;if(c.life<=0||c.mesh.position.y<-10)c.mesh.visible=false;}}}
 
 function resizeMillStock(newW, newD, newTop){
+  if(W===newW && D===newD && TOP===newTop) return;
   W=newW; D=newD; TOP=newTop;
   dx=W/(COLS-1); dz=D/(ROWS-1);
   heights=new Float32Array(COLS*ROWS).fill(TOP);
@@ -681,6 +682,7 @@ function resizeMillStock(newW, newD, newTop){
 }
 
 function resizeLatheStock(newLen, newR){
+  if(STOCK_LEN===newLen && STOCK_R===newR) return;
   STOCK_LEN=newLen; STOCK_R=newR;
   lathe.radii=new Float32Array(N).fill(STOCK_R);
   lathe.initialVolume=lathe.volume();
