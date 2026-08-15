@@ -875,8 +875,37 @@ function parseGcode(text, type){
 /* ========  SafetyInterceptor (Çarpışma ve Güvenlik Katmanı)  ======== */
 /* ==================================================================== */
 class SafetyInterceptor {
+  _heightAt(x,z){
+    const col=Math.round((x+W/2)/dx), row=Math.round((z+D/2)/dz);
+    if(col<0||col>=COLS||row<0||row>=ROWS) return 0;
+    return heights[row*COLS+col];
+  }
+  _maxHeightInRadius(x,z,r){
+    let h=this._heightAt(x,z);
+    const R7=r*0.707;
+    const pts=[[r,0],[-r,0],[0,r],[0,-r],[R7,R7],[-R7,R7],[R7,-R7],[-R7,-R7]];
+    for(const p of pts) h=Math.max(h,this._heightAt(x+p[0],z+p[1]));
+    return h;
+  }
+  _pathCollision(px,py,pz,nx,ny,nz,toolR){
+    const hLen=Math.hypot(nx-px,nz-pz);
+    if(hLen<0.1){
+      const surfH=this._maxHeightInRadius(nx,nz,toolR);
+      if(ny<=surfH+0.3&&ny<py) return {hit:true,surfH,toolY:ny};
+      return {hit:false};
+    }
+    const steps=Math.max(3,Math.ceil(hLen/3));
+    for(let s=1;s<=steps;s++){
+      const t=s/steps;
+      const sx=px+(nx-px)*t, sy=py+(ny-py)*t, sz=pz+(nz-pz)*t;
+      const surfH=this._maxHeightInRadius(sx,sz,toolR);
+      if(sy<=surfH+0.3) return {hit:true,surfH,toolY:sy};
+    }
+    return {hit:false};
+  }
   validateMill(queue, sw, sd, sh, spindleOn, cx, cy, cz){
     const xLim=sw/2+20, zLim=sd/2+20, yMax=sh+60, maxPlunge=10, errs=[];
+    const toolR=CUTTER_R;
     let px=cx, py=cy, pz=cz;
     for(let i=0;i<queue.length;i++){
       const m=queue[i], nx=m.x, ny=m.y, nz=m.z;
@@ -889,16 +918,23 @@ class SafetyInterceptor {
       if(Math.abs(nz)>zLim)
         errs.push(`Satır ${i+1}: Y soft limit aşımı (${nz.toFixed(1)}mm, limit ±${zLim.toFixed(0)}mm) — takım tezgah dışına çıkar`);
       if(m.type==="rapid"){
-        const hd=Math.hypot(nx-px,nz-pz);
-        if(hd>0.5&&(py<=sh+0.5||ny<=sh+0.5))
-          errs.push(`Satır ${i+1}: G00 rapid yatay hareket stok seviyesinde (Z=${Math.min(py,ny).toFixed(1)}mm, stok üst: ${sh}mm) — çarpışma riski`);
-        if(ny<sh-0.5&&py>sh+0.5)
-          errs.push(`Satır ${i+1}: G00 ile malzemeye dalma (Z: ${py.toFixed(1)}→${ny.toFixed(1)}mm) — G01 feed kullanılmalı`);
+        const chk=this._pathCollision(px,py,pz,nx,ny,nz,toolR);
+        if(chk.hit)
+          errs.push(`Satır ${i+1}: G00 rapid çarpışma — takım Z=${chk.toolY.toFixed(1)}mm, yüzey: ${chk.surfH.toFixed(1)}mm (heightmap)`);
+        const destSurf=this._maxHeightInRadius(nx,nz,toolR);
+        if(!chk.hit&&ny<destSurf-0.5&&py>destSurf+0.5)
+          errs.push(`Satır ${i+1}: G00 ile malzemeye dalma (Z: ${py.toFixed(1)}→${ny.toFixed(1)}mm, yüzey: ${destSurf.toFixed(1)}mm) — G01 feed kullanılmalı`);
       }
-      if(m.type==="feed"&&!spindleOn&&ny<=sh+0.5)
-        errs.push(`Satır ${i+1}: Spindle kapalı, malzemeye dalma girişimi (Z=${ny.toFixed(1)}mm) — takım/malzeme hasar riski`);
-      if(m.type==="feed"&&py-ny>maxPlunge&&ny<sh)
-        errs.push(`Satır ${i+1}: Tek seferde ${(py-ny).toFixed(1)}mm dalma (max ${maxPlunge}mm) — takım kırılma riski`);
+      if(m.type==="feed"&&!spindleOn){
+        const surfH=this._maxHeightInRadius(nx,nz,toolR);
+        if(ny<=surfH+0.5)
+          errs.push(`Satır ${i+1}: Spindle kapalı, malzemeye dalma girişimi (Z=${ny.toFixed(1)}mm, yüzey: ${surfH.toFixed(1)}mm)`);
+      }
+      if(m.type==="feed"&&py-ny>maxPlunge){
+        const surfH=this._maxHeightInRadius(nx,nz,toolR);
+        if(ny<surfH)
+          errs.push(`Satır ${i+1}: Tek seferde ${(py-ny).toFixed(1)}mm dalma (max ${maxPlunge}mm, yüzey: ${surfH.toFixed(1)}mm) — takım kırılma riski`);
+      }
       px=nx;py=ny;pz=nz;
     }
     return errs;
