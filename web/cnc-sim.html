@@ -1629,5 +1629,287 @@ function taiExec(raw){
 taiMsg("Merhaba! Ben <b>Topkapı AI</b>, CNC asistanın.<br>Doğal dilde komut verebilirsin:<br>• \"<b>12mm çapında 20mm delik aç</b>\"<br>• \"<b>60x40mm 10mm derin cep aç</b>\"<br>• \"<b>Soğutma aç</b>\" / \"<b>Coolant flood</b>\" / \"<b>M8</b>\"<br>• \"<b>Örnek parçaları göster</b>\"<br>• \"<b>Yardım</b>\" yazarak tüm komutları gör.","bot");
 taiRenderChips();
 </script>
+
+<!-- ================================================================== -->
+<!-- ==========  KATMAN 1: WebSocket + LLM Entegrasyon Script  ======== -->
+<!-- ================================================================== -->
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+<script>
+(function(){
+"use strict";
+
+/* ------------------------------------------------------------------ */
+/*  CONFIG                                                             */
+/* ------------------------------------------------------------------ */
+const WS_URL = window.ROVER_WS_URL || "http://localhost:5050";
+const ENABLE_LLM = window.ROVER_ENABLE_LLM !== false;
+
+/* ------------------------------------------------------------------ */
+/*  STATE                                                              */
+/* ------------------------------------------------------------------ */
+let wsConnected = false;
+let wsSessionKey = localStorage.getItem("rover_cnc_session") || "";
+let masterGcode = [];
+let opCounter = 0;
+
+/* ------------------------------------------------------------------ */
+/*  WEBSOCKET CONNECTION                                               */
+/* ------------------------------------------------------------------ */
+let socket = null;
+
+function wsConnect() {
+  if (!ENABLE_LLM) return;
+  try {
+    socket = io(WS_URL, {
+      transports: ["websocket", "polling"],
+      reconnectionAttempts: 5,
+      reconnectionDelay: 2000,
+    });
+  } catch (e) {
+    console.warn("Rover WS: socket.io not available, LLM mode disabled");
+    return;
+  }
+
+  socket.on("connect", function() {
+    wsConnected = true;
+    console.log("Rover WS: connected");
+    socket.emit("init_session", {
+      sessionKey: wsSessionKey,
+      machineType: active,
+    });
+  });
+
+  socket.on("session_ready", function(data) {
+    wsSessionKey = data.sessionKey;
+    localStorage.setItem("rover_cnc_session", wsSessionKey);
+    console.log("Rover WS: session", wsSessionKey);
+  });
+
+  socket.on("disconnect", function() {
+    wsConnected = false;
+    console.log("Rover WS: disconnected");
+  });
+
+  socket.on("connect_error", function() {
+    wsConnected = false;
+  });
+
+  socket.on("chat_typing", function() {
+    showTypingIndicator();
+  });
+
+  socket.on("chat_response", function(data) {
+    hideTypingIndicator();
+    if (data.error) {
+      taiMsg("Hata: " + data.error, "bot");
+      return;
+    }
+    if (data.text) {
+      taiMsg(data.text, "bot");
+    }
+    if (data.gcodeBlocks && data.gcodeBlocks.length > 0) {
+      handleGcodeBlocks(data.gcodeBlocks, data.opIndices || []);
+    }
+    taiRenderChips();
+  });
+
+  socket.on("master_gcode", function(data) {
+    if (data.gcode) {
+      downloadNcFile(data.gcode, wsSessionKey);
+    } else {
+      taiMsg("Henüz kaydedilmiş G-code operasyonu yok.", "bot");
+    }
+  });
+}
+
+/* ------------------------------------------------------------------ */
+/*  MACHINE STATE COLLECTOR                                            */
+/* ------------------------------------------------------------------ */
+function collectMachineState() {
+  const im = (active === "mill");
+  const state = {
+    machineType: active,
+    stock: {},
+    tool: {},
+    spindleRpm: 0,
+    feed: 0,
+    coolantMode: "off",
+    material: "",
+    mode: "",
+  };
+
+  if (im) {
+    state.stock = { w: W, d: D, h: TOP };
+    state.tool = { x: mill.x, y: mill.y, z: mill.z };
+    state.spindleRpm = mill.spindleRpm;
+    state.feed = mill.feed;
+    state.coolantMode = mill.coolantMode || "off";
+    state.mode = mill.mode;
+  } else {
+    state.stock = { len: STOCK_LEN, r: STOCK_R };
+    state.tool = { x: lathe.s.x, z: lathe.s.z };
+    state.spindleRpm = lathe.s.spindleRpm;
+    state.feed = lathe.s.feed;
+    state.coolantMode = lathe.s.coolantMode || "off";
+    state.mode = lathe.s.mode;
+  }
+
+  return state;
+}
+
+/* ------------------------------------------------------------------ */
+/*  G-CODE HANDLER (from LLM response <gcode> blocks)                  */
+/* ------------------------------------------------------------------ */
+function handleGcodeBlocks(blocks, opIndices) {
+  const im = (active === "mill");
+  blocks.forEach(function(block, i) {
+    masterGcode.push({
+      index: opIndices[i] !== undefined ? opIndices[i] : opCounter++,
+      gcode: block,
+      timestamp: new Date().toISOString(),
+    });
+
+    const parsed = parseGcode(block, im ? "mill" : "lathe");
+    if (parsed.q.length > 0) {
+      if (im) {
+        runMillGcode(parsed);
+      } else {
+        runLatheGcode(parsed);
+      }
+      taiMsg('<span class="tai-msg-action">▶ G-code çalıştırıldı:</span> ' +
+             parsed.q.length + " hareket komutu.", "bot");
+    }
+  });
+}
+
+/* ------------------------------------------------------------------ */
+/*  TYPING INDICATOR                                                   */
+/* ------------------------------------------------------------------ */
+let typingEl = null;
+
+function showTypingIndicator() {
+  if (typingEl) return;
+  typingEl = document.createElement("div");
+  typingEl.className = "tai-msg tai-msg-bot";
+  typingEl.innerHTML = '<span class="animate-spin-slow">⚙</span> Düşünüyorum...';
+  taiMessages.appendChild(typingEl);
+  taiMessages.scrollTop = taiMessages.scrollHeight;
+}
+
+function hideTypingIndicator() {
+  if (typingEl) {
+    typingEl.remove();
+    typingEl = null;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/*  .NC FILE DOWNLOAD                                                  */
+/* ------------------------------------------------------------------ */
+function downloadNcFile(gcodeText, sessionKey) {
+  const blob = new Blob([gcodeText], { type: "text/plain" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "rover_" + (sessionKey || "export") + ".nc";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  taiMsg('<span class="tai-msg-action">✓ NC dosyası indirildi:</span> ' + a.download, "bot");
+}
+
+function exportMasterGcode() {
+  if (wsConnected && wsSessionKey) {
+    socket.emit("get_master_gcode", { sessionKey: wsSessionKey });
+    return;
+  }
+  if (masterGcode.length === 0) {
+    taiMsg("Henüz kaydedilmiş G-code operasyonu yok.", "bot");
+    return;
+  }
+  const lines = [
+    "(Rover CNC · Local Export)",
+    "(Date: " + new Date().toISOString().slice(0, 16) + ")",
+    "(Operations: " + masterGcode.length + ")",
+    "",
+  ];
+  masterGcode.forEach(function(op) {
+    lines.push("(--- Op " + op.index + " ---)");
+    lines.push(op.gcode);
+    lines.push("");
+  });
+  lines.push("M30");
+  downloadNcFile(lines.join("\n"), "local");
+}
+
+/* ------------------------------------------------------------------ */
+/*  OVERRIDE taiUserInput — route through WS when connected            */
+/* ------------------------------------------------------------------ */
+const _origTaiUserInput = taiUserInput;
+
+window.taiUserInput = function(text) {
+  const tNorm = taiNorm(text);
+
+  if (/^(nc|export|indir|download|kaydet)\s*(dosya|file|nc)?$/i.test(tNorm) ||
+      /(nc\s*(indir|export|dosya))|(master\s*gcode)|(dosya\s*indir)/i.test(tNorm)) {
+    taiMsg(text, "user");
+    exportMasterGcode();
+    return;
+  }
+
+  if (/(master|toplam|tum)\s*(gcode|g-code|operasyon|islem)/i.test(tNorm) &&
+      /(listele|goster|kac)/i.test(tNorm)) {
+    taiMsg(text, "user");
+    taiMsg('<span class="tai-msg-action">Master G-Code:</span> ' +
+           masterGcode.length + " operasyon kayıtlı." +
+           (masterGcode.length > 0 ? '<br>"<b>nc indir</b>" yazarak .nc dosyası indirebilirsin.' : ""),
+           "bot");
+    return;
+  }
+
+  if (wsConnected && ENABLE_LLM) {
+    taiMsg(text, "user");
+
+    const localResult = taiExec(text);
+    if (localResult) {
+      taiMsg(localResult, "bot");
+      taiRenderChips();
+      return;
+    }
+
+    const machineState = collectMachineState();
+    socket.emit("chat_message", {
+      sessionKey: wsSessionKey,
+      message: text,
+      machineState: machineState,
+    });
+    return;
+  }
+
+  _origTaiUserInput(text);
+};
+
+/* ------------------------------------------------------------------ */
+/*  EXTRA CHAT CHIPS for LLM mode                                     */
+/* ------------------------------------------------------------------ */
+const _origTaiGetChips = taiGetChips;
+
+window.taiGetChips = function() {
+  const chips = _origTaiGetChips();
+  if (masterGcode.length > 0) {
+    chips.push({ l: "📥 NC İndir", c: "nc indir" });
+    chips.push({ l: "📋 Operasyonlar", c: "master gcode listele" });
+  }
+  return chips;
+};
+
+/* ------------------------------------------------------------------ */
+/*  INIT                                                               */
+/* ------------------------------------------------------------------ */
+wsConnect();
+
+})();
+</script>
 </body>
 </html>
