@@ -1023,7 +1023,7 @@ class SafetyInterceptor {
     const hLen=Math.hypot(nx-px,nz-pz);
     if(hLen<0.1){
       const surfH=this._maxHeightInRadius(nx,nz,toolR);
-      if(ny<=surfH+0.3&&ny<py) return {hit:true,surfH,toolY:ny};
+      if(ny<surfH-0.3&&ny<py) return {hit:true,surfH,toolY:ny};
       return {hit:false};
     }
     const steps=Math.max(3,Math.ceil(hLen/3));
@@ -1031,7 +1031,7 @@ class SafetyInterceptor {
       const t=s/steps;
       const sx=px+(nx-px)*t, sy=py+(ny-py)*t, sz=pz+(nz-pz)*t;
       const surfH=this._maxHeightInRadius(sx,sz,toolR);
-      if(sy<=surfH+0.3) return {hit:true,surfH,toolY:sy};
+      if(sy<surfH-0.3) return {hit:true,surfH,toolY:sy};
     }
     return {hit:false};
   }
