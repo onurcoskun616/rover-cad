@@ -1850,7 +1850,9 @@ function taiExec(raw){
     }
 
     /* --- dikdörtgen cep --- */
-    if(/(dikdortgen|rect)\s*(cep|pocket)/i.test(t)||/(cep|pocket)\s*(ac)?/i.test(t)&&!/(daire|circ|yuvarlak|altigen|hex)/i.test(t)){
+    // "çapında" (diameter) describing a pocket means round, not rectangular —
+    // route it to the daire cep branch below even without the word "daire".
+    if(/(dikdortgen|rect)\s*(cep|pocket)/i.test(t)||/(cep|pocket)\s*(ac)?/i.test(t)&&!/(daire|circ|yuvarlak|altigen|hex|\bcap|\bdia\b|ø)/i.test(t)){
       const dims=t.match(/(\d+\.?\d*)\s*x\s*(\d+\.?\d*)/i);
       let pw=dims?parseFloat(dims[1]):60, pl=dims?parseFloat(dims[2]):40;
       let dep=taiNum(t,["derin","derinlik","derinlig","depth","deep"])||10;
@@ -1866,7 +1868,7 @@ function taiExec(raw){
     }
 
     /* --- daire cep --- */
-    if(/(daire|circ|yuvarlak)\s*(cep|pocket)/i.test(t)){
+    if(/(daire|circ|yuvarlak)\s*(cep|pocket)/i.test(t)||/(cep|pocket)/i.test(t)&&/(\bcap|\bdia\b|ø)/i.test(t)){
       let dia=taiNum(t,["cap","capi","capinda","dia","\\bø"])||40;
       let dep=taiNum(t,["derin","derinlik","derinlig","depth"])||10;
       taiLastOp="pocket";
