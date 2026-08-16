@@ -1758,7 +1758,7 @@ function taiExec(raw){
   if(fd){const v=parseInt(fd[1]);if(im){mill.feed=clamp(v,1,2000);$("mrng-feed").value=mill.feed;$("mlbl-feed").textContent=mill.feed+" mm/m";}else{lathe.setFeed(v);$("rng-feed").value=lathe.s.feed;$("lbl-feed").textContent=lathe.s.feed+" mm/m";}return A("✓ İlerleme "+(im?mill.feed:lathe.s.feed)+" mm/m.");}
   let ovr=t.match(/(?:override|ovr)\s*(\d+)/i)||t.match(/(\d+)\s*%?\s*(?:override|ovr)/i);
   if(ovr){const v=parseInt(ovr[1])/100;if(im){mill.feedOverride=clamp(v,0,1.2);$("mrng-ovr").value=mill.feedOverride;$("mlbl-ovr").textContent=Math.round(mill.feedOverride*100)+"%";}else{lathe.setFeedOverride(v);$("rng-ovr").value=lathe.s.feedOverride;$("lbl-ovr").textContent=Math.round(lathe.s.feedOverride*100)+"%";}return A("✓ Override %"+Math.round(v*100));}
-  let tc=t.match(/(?:takim|tool)\s*(\d+)/i)||t.match(/(\d+)\s*(?:no.?lu\s*takim)/i);
+  let tc=t.match(/(?:takim|tool)\s*(\d+)/i)||t.match(/(\d+)\s*(?:no.?lu\s*takim)/i)||t.match(/\bt0*(\d{1,2})\b/i);
   if(tc){const v=parseInt(tc[1]);if(im){const slot=clamp(v,1,40)-1;const tl=magazine.getToolInSlot(slot);if(!tl)return A("⛔ T"+String(v).padStart(2,"0")+" slotunda takım yok.");magazine.requestChange(slot);buildTool();return A("✓ Takım T"+String(v).padStart(2,"0")+" seçildi: "+tl.name+" (Ø"+tl.dia+"mm, boy:"+tl.fluteLen+"mm)");}else{lathe.setToolNo(v);return A("✓ Takım T"+String(v).padStart(2,"0")+" seçildi.");}}
   if(im&&(/(magazin|magazine|takim\s*list|tool\s*list)/i.test(t)||(/(takim|tool)/i.test(t)&&/(goster|listele|liste)/i.test(t)))){
     const lines=magazine.listTools();
@@ -2218,6 +2218,7 @@ function hookChatInput() {
         /(stok|stock)\s*(boyut|olcu|ebat|size|cap|capi|dia|\d)/i.test(tNorm) ||
         /(boyut|olcu|ebat|size)\s*(ayarla|degistir)/i.test(tNorm) ||
         /(takim|tool)\s*\d/i.test(tNorm) ||
+        /\bt0*\d{1,2}\b/i.test(tNorm) ||
         /(magazin|magazine|takim\s*list|tool\s*list)/i.test(tNorm) ||
         (/(takim|tool)/i.test(tNorm) && /(goster|listele|liste)/i.test(tNorm)) ||
         /(ornek|sample).*(goster|listele)/i.test(tNorm) ||
