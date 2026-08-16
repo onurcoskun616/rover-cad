@@ -8,10 +8,13 @@ Topkapı Okulları tarafından geliştirilen, doğal dil komutlarıyla 3D model 
 
 ## Genel Bakış
 
-Rover CAD iki ana modülden oluşur:
+Rover CAD beş ana modülden oluşur:
 
-1. **CAD Modülü** — Doğal dilde veya teknik resim yükleyerek 3D model oluşturma, parametrik düzenleme, PDF teknik çizim çıktısı
-2. **CNC Simülatör** — Tarayıcıda çalışan 3 eksenli freze ve 2 eksenli torna simülasyonu, LLM destekli chatbot ile G-code üretimi
+1. **CAD Asistanı** — Doğal dille, teknik resimle veya STEP/IGES/DXF dosya yükleyerek 3D model oluşturma, parametrik düzenleme, iteratif tasarım revizyonu, PDF teknik çizim
+2. **CAM Asistanı** — Sihirbaz tabanlı adım adım işleme planı oluşturma, LLM ile G-code üretimi, maliyet/teklif hesaplama
+3. **CNC Simülatör** — Tarayıcıda çalışan 3 eksenli freze ve 2 eksenli torna simülasyonu, LLM destekli chatbot ile G-code üretimi
+4. **Montaj / Kinematik Simülasyon** — Python scripti veya doğal dille mekanizma oluşturma, Three.js tabanlı kinematik animasyon, çarpışma algılama
+5. **Envanter, Dashboard, Admin** — Makine/takım profilleri, post-processor yönetimi, kullanıcı paneli, yönetim paneli, auth sistemi, kota takibi
 
 ---
 
@@ -22,18 +25,29 @@ Rover CAD iki ana modülden oluşur:
 │                       FRONTEND (GitHub Pages)                    │
 │  web/                                                            │
 │  ├── index.html ─── CAD ana sayfa (Three.js 3D viewer)          │
+│  │   ├── Metin ile 3D model (text-to-3D)                        │
+│  │   ├── Teknik resim ile 3D model (image-to-3D)                │
+│  │   ├── STEP/IGES/DXF dosya yükleme                            │
+│  │   ├── Montaj / Kinematik simülasyon                           │
+│  │   ├── Parametrik düzenleme + iteratif revizyon                │
+│  │   └── Envanter (makine profilleri + takım kütüphanesi)        │
 │  ├── cnc-sim.html ─ CNC Simülatör (~2300 satır, monolitik)     │
-│  ├── cam.html ───── CAM sayfası (toolpath üretimi)              │
-│  ├── dashboard.html, login.html, admin.html                     │
+│  ├── cam.html ───── CAM Asistanı (sihirbaz → plan → G-code)    │
+│  ├── dashboard.html ─ Kullanıcı paneli (kota, projeler)         │
+│  ├── admin.html ──── Yönetim paneli (kullanıcılar, LLM takip)  │
+│  ├── login.html ──── Giriş / Kayıt (Supabase Auth)             │
 │  └── *.js ───────── Modül betikleri                              │
 ├─────────────────────────────────────────────────────────────────┤
 │                    BACKEND 1: Node.js/Express                    │
 │  src/server.js                                                   │
-│  ├── FreeCAD MCP entegrasyonu (3D model üretimi)                │
+│  ├── FreeCAD MCP entegrasyonu (MCP SDK + stdio transport)       │
 │  ├── LLM ile CAD/CAM asistan akışları                           │
 │  ├── Supabase Auth + PostgreSQL                                  │
-│  ├── PDF teknik çizim, DXF/STEP yükleme                        │
-│  └── Kota yönetimi, proje arşivi                                │
+│  ├── PDF teknik çizim, DXF/STEP/IGES yükleme                   │
+│  ├── Parametrik düzenleme + iteratif revizyon                    │
+│  ├── Post-processor dönüştürücüler (Sinumerik, Heidenhain...)   │
+│  ├── Kota yönetimi, prompt önbellek, proje arşivi               │
+│  └── Envanter servisi (makine + takım profilleri)               │
 ├─────────────────────────────────────────────────────────────────┤
 │                    BACKEND 2: Flask (Python)                     │
 │  server/app.py                                                   │
@@ -46,24 +60,208 @@ Rover CAD iki ana modülden oluşur:
 
 ---
 
-## CNC Simülatör Özellikleri
+## CAD Asistanı
+
+CAD modülü (`web/index.html`) 4 sekme halinde çalışır:
+
+### 1. Metin ile 3D Model (Text-to-3D)
+
+Kullanıcı doğal dille parça tanımlar, LLM FreeCAD Python scripti üretir, FreeCAD MCP Server modeli oluşturur.
+
+```
+Kullanıcı: "Çapı 30mm, yüksekliği 50mm olan bir silindir oluştur"
+     ↓
+LLM → FreeCAD Python scripti
+     ↓
+FreeCAD MCP → STEP + STL çıktısı
+     ↓
+Three.js 3D önizleme
+```
+
+- Sonuç: STEP, STL indirme + PDF teknik çizim oluşturma
+- İteratif revizyon: "Yüksekliği 100mm yap", "Ortasına 12mm delik ekle", "Kenarları yuvarla"
+
+### 2. Teknik Resim ile 3D Model (Image-to-3D)
+
+PNG/JPG teknik resim yüklenir, LLM görüntüyü analiz eder ve FreeCAD scripti üretir.
+
+- Opsiyonel ek talimat: "Delik çapı 8mm olsun"
+- Aynı STEP/STL/PDF çıktı akışı
+
+### 3. STEP/IGES/DXF Dosya Yükleme
+
+Mevcut CAD dosyalarını yükleyerek önizleme ve CAM akışına geçiş:
+
+- **STEP/IGES** (`.step`, `.stp`, `.iges`, `.igs`) — 3D model önizleme
+- **DXF** (`.dxf`) — 2D profil yükleme, opsiyonel levha kalınlığı ile 3D'ye dönüştürme (kalınlık boşsa lazer/plazma 2D kesim olarak işlenir)
+
+### 4. Parametrik Düzenleme
+
+STEP dosyasından ölçü çıkarma ve interaktif düzenleme:
+
+```
+STEP yükleme → Ölçü çıkarma (dimensionService) → 3D etiketler
+     ↓
+Parametre değiştirme → FreeCAD'de yeniden oluşturma (LLM gerekmez)
+```
+
+- `ROVER_PARAMS` bloğu ile deterministik parametre ikamesi
+- Her değişiklikte yeni STEP/STL üretilir
+
+### 5. İteratif Tasarım Revizyonu
+
+Mevcut tasarım üzerinde doğal dille değişiklik isteme:
+
+- `/revise` endpoint'i ile önceki FreeCAD scriptini LLM'e gönderme
+- LLM güncellenmiş script üretir, FreeCAD çalıştırır
+- Zincirleme revizyon desteği: her adımda bir önceki script üzerine inşa edilir
+
+### 6. PDF Teknik Çizim
+
+FreeCAD TechDraw modülü ile otomatik teknik çizim:
+
+- Standart mühendislik görünümleri (ön, üst, yan, izometrik)
+- Ölçülendirme
+- PDF olarak indirme
+
+---
+
+## CAM Asistanı
+
+CAM modülü (`web/cam.html`) sihirbaz tabanlı adım adım akış sunar:
+
+### Sihirbaz Akışı
+
+```
+1. Adım Sihirbazı (cam-wizard)
+   ├── Makine seçimi, malzeme, stok boyutu
+   ├── İşleme parametreleri (tolerans, yüzey kalitesi)
+   └── Takım seçimi, operasyon sırası
+         ↓
+2. Plan Oluşturma (cam-plan)
+   ├── LLM işleme planı önerisi
+   ├── Plan revizyonu ("Dış konturu son adıma al")
+   └── Plan onayı
+         ↓
+3. G-code Üretimi (cam-confirm)
+   ├── LLM G-code üretimi
+   ├── G-code indirme (.nc dosya)
+   └── "CNC Simülatörde Aç" butonu → cnc-sim.html
+```
+
+### Teklif / Maliyet Hesaplama
+
+İki mod:
+
+**Basit Mod:**
+- Saatlik makine ücreti (TL/saat)
+- Malzeme birim fiyatı (TL/cm³ veya TL/kg)
+- Kâr marjı (%)
+
+**Detaylı Mod:**
+- Malzeme maliyeti
+- Makine amortisman payı (TL/saat)
+- Enerji maliyeti (TL/kWh × güç tüketimi kW)
+- Takım maliyeti (TL/takım ÷ ömür/parça)
+- Sarf malzeme (TL/saat + TL/parça)
+- Genel gider payı (%)
+- Fire/hata payı (%)
+- Kâr marjı (%)
+
+Sonuç: PDF teklif formu olarak indirme
+
+---
+
+## Montaj / Kinematik Simülasyon
+
+Montaj sekmesi (`index.html` → Montaj tab'ı) ile mekanizma oluşturma ve simülasyon:
+
+### Giriş Modları
+
+1. **Doğal dille mekanizma oluşturma:**
+   - "Merkezde Z ekseninde dönen 50mm çapında bir disk oluştur"
+   - "Bu diske X ekseninde hareket eden bir biyel kolu bağla"
+   - Adım adım mekanizma inşa etme, geri alma desteği
+
+2. **Python scripti yazma (gelişmiş mod):**
+   - TopkapiAI Python scripti ile FreeCAD'de parça oluşturma
+   - `_rover_sim_out` ve `_rover_sim_ts` değişkenleri otomatik enjekte
+   - Her parça için ayrı STL + `kinematics.json` dosyası
+
+3. **Demo: Krank-piston simülasyonu** (`examples/crank_piston_sim.py`)
+
+### Simülasyon Görünümü
+
+- Three.js tabanlı kinematik animasyon oynatıcı (`kinematicPlayer.js`)
+- Oynat/Duraklat kontrolleri
+- Hız ayarı: 1x, 2x, 5x
+- İlerleme çubuğu ile zaman kontrolü
+- Çarpışma algılama ve otomatik durdurma
+- Her parçayı ayrı STL olarak indirme
+- Montajlı STEP indirme
+
+---
+
+## FreeCAD MCP Entegrasyonu
+
+3D model üretimi FreeCAD'in MCP (Model Context Protocol) sunucusu üzerinden yapılır:
+
+### Bağlantı Mimarisi
+
+```
+Express Backend (src/server.js)
+     ↓
+freecadMcpClient.js
+     ├── @modelcontextprotocol/sdk Client
+     ├── StdioClientTransport (stdio subprocess)
+     ├── Otomatik yeniden bağlanma (hata sonrası)
+     └── Yapılandırılabilir timeout
+           ↓
+FreeCAD MCP Server (subprocess)
+     ├── Python script çalıştırma
+     ├── STEP/STL/PDF dışa aktarma
+     └── Parametrik model güncelleme
+```
+
+### Özellikler
+
+- **Pre-warm:** Sunucu başlangıcında FreeCAD bağlantısı açılır (soğuk başlatma maliyetini ortadan kaldırır)
+- **Tool calling:** `callFreecadTool(toolName, args)` ile MCP tool çağırma
+- **Asenkron iş kuyruğu:** Uzun süren FreeCAD operasyonları için `jobStore.js` ile kuyruk yönetimi, `/jobs/:id` endpoint'i ile durum sorgulama
+
+### Kullanılan LLM Promptları
+
+| Dosya | Amaç |
+|---|---|
+| `freecad-system-prompt.txt` | Metin → FreeCAD Python scripti üretimi |
+| `freecad-image-system-prompt.txt` | Görüntü → FreeCAD Python scripti üretimi |
+| `cam-plan-system-prompt.txt` | CAM işleme planı oluşturma |
+| `cam-code-system-prompt.txt` | Plan → G-code üretimi |
+| `sim-system-prompt.txt` | Kinematik simülasyon scripti üretimi |
+
+---
+
+## CNC Simülatör
 
 ### Freze (Mill) — Three.js 3D
+
 - 3 eksenli (X/Y/Z) gerçek zamanlı tezgah simülasyonu
-- Heightmap tabanlı malzeme kaldırma (150x105 grid, `Float32Array`)
+- Heightmap tabanlı malzeme kaldırma (150×105 grid, `Float32Array`)
 - Soğutma sıvısı ve talaş parçacık simülasyonu
-- 7 malzeme desteği: çelik, alüminyum, pirinç, bakır, dökme demir, titanyum, ahşap, plastik, akrilik
+- 9 malzeme desteği: çelik, alüminyum, pirinç, bakır, dökme demir, titanyum, ahşap, plastik, akrilik
 - Stok boyutu ve malzeme dinamik değiştirme
 - G0/G1/G2/G3 + T-code desteği
 - NC dosya yükleme (.nc, .gcode, .ngc, .txt, .tap)
 - Kamera görünümleri: üstten, önden, yandan, izometrik, tel kafes
 
 ### Torna (Lathe) — Canvas 2D
+
 - 2 eksenli (X/Z) torna simülasyonu
 - Yarıçap profili tabanlı malzeme kaldırma
 - Ayrı stok boyutu ve devir kontrolü
 
 ### Takım Magazin Sistemi (40 Slot)
+
 - 12 önceden tanımlı takım (parmak freze, matkap, top freze, pah freze, kaba freze)
 - Poka-Yoke otomatik takım seçimi (operasyon tipine göre)
 - 3D magazin diski animasyonu: çekilme → disk dönüşü → iniş
@@ -71,6 +269,7 @@ Rover CAD iki ana modülden oluşur:
 - HUD'da aktif takım bilgisi gösterimi
 
 ### SafetyInterceptor (Güvenlik Katmanı)
+
 - Heightmap-farkında çarpışma tespiti
 - Rapid hareket çarpma kontrolü
 - Stok sınırı taşma kontrolü
@@ -78,6 +277,7 @@ Rover CAD iki ana modülden oluşur:
 - E-STOP otomatik devreye alma
 
 ### LLM Chatbot (4 Katmanlı Mimari)
+
 ```
 Katman 1: Module Script ─── Simülasyon motoru, parseGcode, toolpath üreticileri
 Katman 2: Non-module Script ── WebSocket, isControl yönlendirme, collectMachineState
@@ -91,23 +291,166 @@ Katman 4: LLM ──────────── G-code üretimi (sistem promp
 
 ---
 
+## Envanter Sistemi
+
+`index.html` → "Makine ve Takımlarım" sekmesi ile makine ve takım profili yönetimi:
+
+### Makine Profilleri
+
+Her makine profili şunları içerir:
+- İsim
+- Eksen sayısı (3/4/5 eksen)
+- Post-processor / kontrolcü seçimi
+- Maksimum spindle hızı (rpm)
+- Çalışma alanı (X×Y×Z mm)
+- Saatlik makine ücreti (TL/saat)
+
+### Post-Processor Desteği
+
+| Kategori | Kontrolcüler |
+|---|---|
+| **Hobi / Atölye** | GRBL, Mach3, Mach4, LinuxCNC |
+| **Endüstriyel CNC** | Fanuc, Siemens (Sinumerik), Heidenhain (TNC 640), Heidenhain (iTNC 530), Heidenhain (TNC 426/430), Haas, Mitsubishi (Meldas), Mazak, Okuma (OSP), Doosan |
+
+### Endüstriyel Post-Processor Dönüştürücüler
+
+Backend'de her kontrolcü için özel G-code dönüştürücü:
+
+| Servis | Açıklama |
+|---|---|
+| `sinumerikTransformer.js` | Siemens Sinumerik formatına dönüştürme |
+| `heidenhainTransformer.js` | Heidenhain conversational/Klartext formatına dönüştürme |
+| `industrialTransformers.js` | Fanuc, Haas, Mazak, Okuma ve diğer formatlar |
+
+### Takım Kütüphanesi
+
+Kullanıcı tanımlı takımlar:
+- İsim/kod, tip (düz uçlu freze, top uçlu, matkap, kılavuz, diş frezesi)
+- Çap (mm), kesici kenar sayısı
+- Malzeme (karbür, HSS)
+- Önerilen kesme hızı aralığı (m/min)
+- Stok adedi
+
+### CNC Simülatör Dahili Takım Kütüphanesi (12 Slot)
+
+| ID | Takım | Tip | Çap | Boy | Maks RPM |
+|---|---|---|---|---|---|
+| T01 | Ø6 Parmak Freze | endmill | 6mm | 20mm | 12000 |
+| T02 | Ø10 Parmak Freze | endmill | 10mm | 25mm | 10000 |
+| T03 | Ø16 Parmak Freze | endmill | 16mm | 30mm | 9000 |
+| T04 | Ø20 Parmak Freze | endmill | 20mm | 35mm | 8000 |
+| T05 | Ø26 Parmak Freze | endmill | 26mm | 26mm | 7000 |
+| T06 | Ø32 Kaba Freze | roughing | 32mm | 35mm | 6000 |
+| T07 | Ø8 Matkap | drill | 8mm | 40mm | 6000 |
+| T08 | Ø12 Matkap | drill | 12mm | 50mm | 5000 |
+| T09 | Ø5 Top Freze | ballmill | 5mm | 15mm | 15000 |
+| T10 | Ø10 Top Freze | ballmill | 10mm | 20mm | 12000 |
+| T11 | Ø3 Pah Freze | chamfer | 3mm | 10mm | 18000 |
+| T12 | Ø6 Pah Freze | chamfer | 6mm | 12mm | 15000 |
+
+---
+
+## Auth Sistemi (Kimlik Doğrulama)
+
+Supabase Auth ile kullanıcı yönetimi (`web/login.html`):
+
+### Giriş Yöntemleri
+
+- **Google OAuth:** Tek tıkla Google hesabıyla giriş
+- **E-posta / Şifre:** Giriş yap veya yeni hesap oluştur
+
+### Özellikler
+
+- Yeni hesaplara aylık 50.000 ücretsiz token
+- JWT tabanlı oturum yönetimi
+- Otomatik yönlendirme (giriş yapmamış → login.html)
+- Şifremi unuttum akışı
+
+---
+
+## Dashboard (Kullanıcı Paneli)
+
+`web/dashboard.html` ile kullanıcı çalışma alanı:
+
+### Bölümler
+
+- **Token ve Kullanım:** Kullanılan / kalan / aylık kota, ilerleme çubuğu, kullanım oranı
+- **Hesap Özeti:** E-posta, plan, üyelik tarihi, yenilenme tarihi
+- **Son Projelerim:** Proje listesi, "Yeni proje oluştur" kısayolu
+- **Dosyalarım ve Çıktılarım:** Oluşturulan STEP/STL/PDF/G-code dosyaları tablosu
+
+### Hızlı İşlemler
+
+- Yeni proje oluştur → CAD çalışma alanına git
+- Dosya yükle
+- Son işleme git (kaldığın yerden devam et)
+
+---
+
+## Admin Paneli (Yönetim)
+
+`web/admin.html` ile sistem yönetimi:
+
+### Bölümler
+
+- **Sistem Özeti:** API servisi, GitHub Pages, veri görünümü durumu
+- **LLM Tüketimi:** CAD/CAM/simülasyon bazında model, çağrı sayısı, giriş/çıkış token, önbellek, maliyet takibi
+- **Kullanıcı Yönetimi:** Tüm kullanıcılar tablosu, arama, durum/plan filtresi, token kota ayarlama, engelleme, bonus token tanımlama
+- **Son Hareketler:** Sistem etkinlik logu
+
+### Yönetici İşlemleri
+
+- Yeni kullanıcı ekleme ve davet
+- Kullanıcı token kotası güncelleme
+- Kullanım raporu dışa aktarma
+
+---
+
+## Backend Servisleri
+
+### Kota Yönetimi
+
+| Servis | Açıklama |
+|---|---|
+| `quotaStore.js` | LLM token kota takibi (kullanılan/kalan/limit) |
+| `quotaCron.js` | Aylık otomatik kota sıfırlama (cron job) |
+
+### Prompt Önbellek
+
+`promptCacheService.js` — Aynı veya benzer istekler için LLM yanıtlarını önbelleğe alma, token tasarrufu
+
+### Proje Arşivi
+
+`projectArchiveService.js` — Kullanıcı projelerini PostgreSQL'de saklama, sürüm yönetimi, geçmiş projelere erişim
+
+### Asenkron İş Kuyruğu
+
+`jobStore.js` + `jobs.js` — Uzun süren FreeCAD operasyonları için:
+
+```
+POST /generate → { jobId: "abc123" }
+GET /jobs/abc123 → { status: "running" | "done" | "error", result: {...} }
+```
+
+---
+
 ## Proje Yapısı
 
 ```
 rover-cad/
 ├── web/                          # Frontend (GitHub Pages deploy)
-│   ├── index.html                # CAD ana sayfa
+│   ├── index.html                # CAD ana sayfa (4 sekme: metin/resim/dosya/montaj)
 │   ├── cnc-sim.html              # CNC Simülatör (Three.js + Canvas 2D)
 │   ├── cnc-sim.css               # Simülatör stilleri
-│   ├── cam.html                  # CAM sayfası
+│   ├── cam.html                  # CAM Asistanı (sihirbaz → plan → G-code → teklif)
 │   ├── cam-app.js                # CAM uygulama mantığı
 │   ├── app.js                    # CAD viewer JS
 │   ├── viewer.js                 # 3D model görüntüleyici
-│   ├── dashboard.html/js         # Kullanıcı paneli
-│   ├── admin.html/js             # Yönetim paneli
-│   ├── login.html/js             # Giriş sayfası
-│   ├── session-nav.js            # Oturum navigasyonu
 │   ├── kinematicPlayer.js        # Kinematik animasyon oynatıcı
+│   ├── dashboard.html/js         # Kullanıcı paneli (kota, projeler, dosyalar)
+│   ├── admin.html/js             # Yönetim paneli (kullanıcılar, LLM takip)
+│   ├── login.html/js             # Giriş / Kayıt sayfası (Supabase Auth)
+│   ├── session-nav.js            # Oturum navigasyonu
 │   ├── style.css                 # Ana stiller
 │   ├── logo.png                  # Logo
 │   ├── CNAME                     # GitHub Pages alan adı (topkapikoleji.org)
@@ -121,59 +464,59 @@ rover-cad/
 │   ├── runtime.txt               # Python sürümü
 │   └── .env.example              # Ortam değişkenleri şablonu
 │
-├── src/                          # CAD Backend (Node.js/Express)
-│   ├── server.js                 # Express sunucu
+├── src/                          # CAD/CAM Backend (Node.js/Express)
+│   ├── server.js                 # Express sunucu (tüm rotaları bağlar)
 │   ├── config.js                 # Yapılandırma
 │   ├── routes/                   # API rotaları
-│   │   ├── generate.js           # LLM ile 3D model üretimi
-│   │   ├── generateFromImage.js  # Görüntüden model üretimi
-│   │   ├── camAssistant.js       # CAM asistan akışları
-│   │   ├── dimensions.js         # Parametrik ölçü yönetimi
-│   │   ├── paramEdit.js          # Parametre düzenleme
-│   │   ├── revise.js             # İteratif tasarım düzenleme
-│   │   ├── simulate.js           # Simülasyon
-│   │   ├── uploadStep.js         # STEP dosya yükleme
+│   │   ├── generate.js           # Metin → 3D model üretimi
+│   │   ├── generateFromImage.js  # Görüntü → 3D model üretimi
+│   │   ├── uploadStep.js         # STEP/IGES dosya yükleme
 │   │   ├── uploadDxf.js          # DXF dosya yükleme
+│   │   ├── revise.js             # İteratif tasarım revizyonu
+│   │   ├── dimensions.js         # Parametrik ölçü çıkarma
+│   │   ├── paramEdit.js          # Parametre düzenleme (LLM'siz)
+│   │   ├── camAssistant.js       # CAM sihirbaz + plan + G-code
+│   │   ├── simulate.js           # Kinematik simülasyon
 │   │   ├── generatePdf.js        # PDF teknik çizim
-│   │   ├── jobs.js               # Asenkron iş kuyruğu
-│   │   ├── inventory.js          # Envanter yönetimi
-│   │   ├── auth.js               # Kimlik doğrulama
+│   │   ├── jobs.js               # Asenkron iş kuyruğu durumu
+│   │   ├── inventory.js          # Envanter (makine + takım) CRUD
+│   │   ├── auth.js               # Kimlik doğrulama rotaları
 │   │   ├── admin.js              # Yönetim rotaları
 │   │   └── health.js             # Sağlık kontrolü
 │   ├── services/                 # İş mantığı servisleri
-│   │   ├── freecadMcpClient.js   # FreeCAD MCP bağlantısı
+│   │   ├── freecadMcpClient.js   # FreeCAD MCP bağlantısı (MCP SDK)
 │   │   ├── openaiClient.js       # OpenAI API istemcisi
 │   │   ├── camService.js         # CAM toolpath servisi
-│   │   ├── camAssistantService.js# CAM asistan servisi
-│   │   ├── dimensionService.js   # Ölçü çıkarma servisi
+│   │   ├── camAssistantService.js# CAM asistan iş mantığı
+│   │   ├── dimensionService.js   # STEP ölçü çıkarma servisi
 │   │   ├── paramEditService.js   # Parametre düzenleme servisi
 │   │   ├── exportService.js      # Dışa aktarma servisi
-│   │   ├── database.js           # PostgreSQL bağlantısı
+│   │   ├── database.js           # PostgreSQL bağlantısı (Supabase)
 │   │   ├── supabaseAuth.js       # Supabase kimlik doğrulama
-│   │   ├── quotaStore.js         # LLM kota yönetimi
-│   │   ├── quotaCron.js          # Aylık kota sıfırlama
+│   │   ├── quotaStore.js         # LLM token kota yönetimi
+│   │   ├── quotaCron.js          # Aylık kota sıfırlama cron
 │   │   ├── jobStore.js           # Asenkron iş deposu
-│   │   ├── projectArchiveService.js # Proje arşivi
-│   │   ├── promptCacheService.js # Prompt önbelleği
-│   │   ├── inventoryService.js   # Envanter servisi
-│   │   ├── sinumerikTransformer.js # Sinumerik dönüştürücü
-│   │   ├── heidenhainTransformer.js # Heidenhain dönüştürücü
-│   │   └── industrialTransformers.js # Endüstriyel format dönüşüm
+│   │   ├── projectArchiveService.js # Proje arşivi + sürüm yönetimi
+│   │   ├── promptCacheService.js # Prompt önbelleği (token tasarrufu)
+│   │   ├── inventoryService.js   # Envanter CRUD servisi
+│   │   ├── sinumerikTransformer.js # Siemens Sinumerik G-code dönüştürücü
+│   │   ├── heidenhainTransformer.js # Heidenhain Klartext dönüştürücü
+│   │   └── industrialTransformers.js # Fanuc, Haas, Mazak, Okuma dönüştürücüler
 │   └── prompts/                  # LLM sistem promptları
-│       ├── freecad-system-prompt.txt
-│       ├── freecad-image-system-prompt.txt
-│       ├── cam-plan-system-prompt.txt
-│       ├── cam-code-system-prompt.txt
-│       └── sim-system-prompt.txt
+│       ├── freecad-system-prompt.txt      # Metin → FreeCAD script
+│       ├── freecad-image-system-prompt.txt # Görüntü → FreeCAD script
+│       ├── cam-plan-system-prompt.txt     # CAM plan oluşturma
+│       ├── cam-code-system-prompt.txt     # Plan → G-code
+│       └── sim-system-prompt.txt          # Kinematik simülasyon script
 │
 ├── test/                         # Test dosyaları
-│   ├── project-archive.test.js
-│   ├── llm-metering.test.js
-│   └── prompt-cache.test.js
+│   ├── project-archive.test.js   # Proje arşivi testleri
+│   ├── llm-metering.test.js      # LLM ölçümleme testleri
+│   └── prompt-cache.test.js      # Prompt önbellek testleri
 │
-├── supabase/migrations/          # Veritabanı migration dosyaları
+├── supabase/migrations/          # PostgreSQL migration dosyaları
 ├── examples/                     # Örnek dosyalar
-│   └── crank_piston_sim.py       # Krank-piston simülasyonu
+│   └── crank_piston_sim.py       # Krank-piston kinematik simülasyonu
 │
 ├── .github/workflows/
 │   └── deploy-pages.yml          # GitHub Pages CI/CD
@@ -207,52 +550,40 @@ git clone https://github.com/onurcoskun616/rover-cad.git
 cd rover-cad
 ```
 
-### 2. Node.js Backend (CAD)
+### 2. Node.js Backend (CAD/CAM)
 
 ```bash
-# Bağımlılıkları yükle
 npm install
 
-# .env dosyasını oluştur
 cp .env.example .env
-# .env dosyasını düzenle: LLM_PROVIDER, API anahtarları, Supabase bilgileri
+# .env dosyasını düzenle: LLM_PROVIDER, API anahtarları, Supabase, FreeCAD MCP
 
-# Geliştirme modunda başlat
-npm run dev
-
-# Üretim modunda başlat
-npm start
+npm run dev    # Geliştirme
+npm start      # Üretim
 ```
 
 ### 3. Python Backend (CNC Chatbot)
 
 ```bash
 cd server
-
-# Sanal ortam oluştur
 python -m venv venv
 source venv/bin/activate   # Linux/Mac
 # venv\Scripts\activate    # Windows
 
-# Bağımlılıkları yükle
 pip install -r requirements.txt
 
-# .env dosyasını oluştur
 cp .env.example .env
 # LLM_API_KEY değerini gir
 
-# Sunucuyu başlat
 python app.py
 ```
 
 ### 4. Frontend (Yerel Geliştirme)
 
 ```bash
-# web/ klasörünü herhangi bir HTTP sunucusuyla servis et
 cd web
 python -m http.server 8080
-# veya
-npx serve .
+# veya: npx serve .
 ```
 
 Tarayıcıda `http://localhost:8080` adresine git.
@@ -269,25 +600,12 @@ Tarayıcıda `http://localhost:8080` adresine git.
 
 **Alan Adı:** `topkapikoleji.org` (`web/CNAME`)
 
-### Backend — Render.com
-
-CNC chatbot backend'i Render.com üzerinde barındırılır.
+### CNC Chatbot Backend — Render.com
 
 **URL:** `https://rover-cnc-backend.onrender.com`
 
-**Yapılandırma:** `render.yaml` dosyasında tanımlı.
+**Yapılandırma:** `render.yaml`
 
-```yaml
-services:
-  - type: web
-    name: rover-cnc-backend
-    runtime: python
-    rootDir: server
-    buildCommand: pip install -r requirements.txt
-    startCommand: python app.py
-```
-
-**Gerekli ortam değişkenleri (Render Dashboard):**
 | Değişken | Açıklama |
 |---|---|
 | `LLM_PROVIDER` | `openai` |
@@ -295,6 +613,19 @@ services:
 | `LLM_BASE_URL` | `https://api.openai.com/v1` |
 | `LLM_API_KEY` | OpenAI API anahtarı |
 | `SECRET_KEY` | Flask gizli anahtar (otomatik üretilir) |
+
+### CAD/CAM Backend
+
+**URL:** `https://api.topkapikoleji.org`
+
+| Değişken | Açıklama |
+|---|---|
+| `LLM_PROVIDER` | `claude` veya `openai` |
+| `OPENAI_API_KEY` | LLM API anahtarı |
+| `SUPABASE_URL` | Supabase proje URL |
+| `SUPABASE_SERVICE_KEY` | Supabase servis anahtarı |
+| `DATABASE_URL` | PostgreSQL bağlantı dizesi |
+| `FREECAD_MCP_COMMAND` | FreeCAD MCP başlatma komutu |
 
 ---
 
@@ -318,7 +649,7 @@ LLM_API_KEY=sk-or-v1-...
 LLM_BASE_URL=https://openrouter.ai/api/v1
 ```
 
-### CAD Backend (.env)
+### CAD/CAM Backend (.env)
 
 ```env
 LLM_PROVIDER=claude          # "openai" veya "claude"
@@ -334,33 +665,15 @@ OPENAI_MODEL=gpt-4o
 
 Üç tablo:
 - **sessions** — Makine tipi, malzeme, stok boyutları
-- **conversations** — Kullanıcı/asistan mesaj geçmişi
+- **conversations** — Kullanıcı/asistan mesaj geçmişi (özet + G-code ayrımı)
 - **operations** — G-code operasyon arşivi
 
-### CAD Backend — PostgreSQL (Supabase)
+### CAD/CAM Backend — PostgreSQL (Supabase)
 
 - Kullanıcı hesapları ve kimlik doğrulama
 - Proje arşivi ve sürüm yönetimi
-- LLM kota takibi
-
----
-
-## Teknoloji Yığını
-
-| Katman | Teknoloji |
-|---|---|
-| **3D Render** | Three.js r160 |
-| **2D Render** | HTML5 Canvas |
-| **Frontend** | Vanilla JS, Tailwind CSS |
-| **CNC Backend** | Python 3.12, Flask, Flask-SocketIO, eventlet |
-| **CAD Backend** | Node.js 18+, Express |
-| **WebSocket** | Socket.IO |
-| **3D Motor** | FreeCAD (MCP Server üzerinden) |
-| **Auth** | Supabase Auth |
-| **Veritabanı** | SQLite (CNC), PostgreSQL (CAD) |
-| **LLM** | OpenAI API, OpenRouter, Claude |
-| **CI/CD** | GitHub Actions |
-| **Hosting** | GitHub Pages (frontend), Render.com (backend) |
+- LLM token kota takibi (aylık otomatik sıfırlama)
+- Makine ve takım envanter profilleri
 
 ---
 
@@ -371,28 +684,42 @@ OPENAI_MODEL=gpt-4o
 | Olay | Yön | Açıklama |
 |---|---|---|
 | `connect` | Client → Server | Bağlantı kurulumu |
+| `init_session` | Client → Server | Oturum başlatma (machineType, sessionKey) |
 | `chat_message` | Client → Server | Kullanıcı mesajı + makine durumu JSON |
-| `chat_response` | Server → Client | LLM yanıtı (metin + `<gcode>` blokları) |
-| `chat_error` | Server → Client | Hata bildirimi |
+| `chat_response` | Server → Client | LLM yanıtı (metin + G-code blokları) |
+| `chat_typing` | Server → Client | LLM düşünüyor bildirimi |
+| `get_master_gcode` | Client → Server | Tüm operasyonların birleştirilmiş G-code'u |
+| `master_gcode` | Server → Client | Birleştirilmiş G-code yanıtı |
 
-### CAD Backend (REST — Express)
+### CAD/CAM Backend (REST — Express)
 
 | Yol | Metot | Açıklama |
 |---|---|---|
-| `/api/generate` | POST | Doğal dilden 3D model üretimi |
-| `/api/generate-from-image` | POST | Görüntüden model üretimi |
-| `/api/upload-step` | POST | STEP dosya yükleme |
-| `/api/upload-dxf` | POST | DXF dosya yükleme |
-| `/api/dimensions` | GET/POST | Parametrik ölçü okuma/güncelleme |
-| `/api/param-edit` | POST | Parametre düzenleme |
-| `/api/revise` | POST | İteratif tasarım düzenleme |
-| `/api/cam-questions` | POST | CAM asistan soruları |
-| `/api/cam-plan` | POST | CAM işleme planı |
-| `/api/cam-confirm` | POST | CAM plan onayı + G-code üretimi |
-| `/api/simulate` | POST | Simülasyon |
-| `/api/generate-pdf` | POST | PDF teknik çizim |
-| `/api/jobs/:id` | GET | Asenkron iş durumu |
-| `/api/health` | GET | Sağlık kontrolü |
+| **CAD** | | |
+| `/generate` | POST | Metin → 3D model (FreeCAD MCP) |
+| `/generate-from-image` | POST | Görüntü → 3D model |
+| `/upload-step` | POST | STEP/IGES dosya yükleme + önizleme |
+| `/upload-dxf` | POST | DXF dosya yükleme (opsiyonel kalınlık) |
+| `/revise` | POST | İteratif tasarım revizyonu |
+| `/extract-dimensions` | GET/POST | STEP'ten parametrik ölçü çıkarma |
+| `/param-edit` | POST | Parametre düzenleme (LLM'siz) |
+| `/generate-pdf` | POST | PDF teknik çizim oluşturma |
+| **CAM** | | |
+| `/cam-step` | POST | CAM sihirbaz adımı (soru-cevap) |
+| `/cam-plan` | POST | İşleme planı oluşturma |
+| `/cam-confirm` | POST | Plan onayı + G-code üretimi |
+| **Simülasyon** | | |
+| `/simulate` | POST | Kinematik simülasyon (Python script → STL + kinematics.json) |
+| **Envanter** | | |
+| `/machines` | GET/POST/PUT/DELETE | Makine profili CRUD |
+| `/tools` | GET/POST/PUT/DELETE | Takım profili CRUD |
+| **Auth & Admin** | | |
+| `/auth/*` | POST | Giriş, kayıt, oturum doğrulama |
+| `/admin/*` | GET/POST | Kullanıcı yönetimi, LLM kullanım raporu |
+| **Genel** | | |
+| `/jobs/:id` | GET | Asenkron iş durumu sorgulama |
+| `/files/*` | GET | Üretilen dosyalar (STEP/STL/PDF/NC) |
+| `/health` | GET | Sağlık kontrolü |
 
 ---
 
@@ -427,29 +754,31 @@ OPENAI_MODEL=gpt-4o
 
 ### LLM Komutları (Karmaşık İşlemler)
 
-Yukarıdaki yerel komutlara uymayan her şey LLM'e yönlendirilir:
+Yerel komutlara uymayan her şey LLM'e yönlendirilir:
 - *"Stok ortasına yıldız şekli oyma"*
 - *"Köşelere 4 delik aç, kenardan 15mm içeride"*
 - *"Çapı 30mm'ye tornala"*
 
 ---
 
-## Takım Kütüphanesi
+## Teknoloji Yığını
 
-| ID | Takım | Tip | Çap | Boy | Maks RPM |
-|---|---|---|---|---|---|
-| T01 | Ø6 Parmak Freze | endmill | 6mm | 20mm | 12000 |
-| T02 | Ø10 Parmak Freze | endmill | 10mm | 25mm | 10000 |
-| T03 | Ø16 Parmak Freze | endmill | 16mm | 30mm | 9000 |
-| T04 | Ø20 Parmak Freze | endmill | 20mm | 35mm | 8000 |
-| T05 | Ø26 Parmak Freze | endmill | 26mm | 26mm | 7000 |
-| T06 | Ø32 Kaba Freze | roughing | 32mm | 35mm | 6000 |
-| T07 | Ø8 Matkap | drill | 8mm | 40mm | 6000 |
-| T08 | Ø12 Matkap | drill | 12mm | 50mm | 5000 |
-| T09 | Ø5 Top Freze | ballmill | 5mm | 15mm | 15000 |
-| T10 | Ø10 Top Freze | ballmill | 10mm | 20mm | 12000 |
-| T11 | Ø3 Pah Freze | chamfer | 3mm | 10mm | 18000 |
-| T12 | Ø6 Pah Freze | chamfer | 6mm | 12mm | 15000 |
+| Katman | Teknoloji |
+|---|---|
+| **3D Render** | Three.js r160 |
+| **2D Render** | HTML5 Canvas |
+| **Frontend** | Vanilla JS, Tailwind CSS |
+| **CNC Backend** | Python 3.12, Flask, Flask-SocketIO, eventlet |
+| **CAD/CAM Backend** | Node.js 18+, Express |
+| **WebSocket** | Socket.IO |
+| **3D Motor** | FreeCAD (MCP Server üzerinden) |
+| **MCP SDK** | `@modelcontextprotocol/sdk` (stdio transport) |
+| **Auth** | Supabase Auth (Google OAuth + e-posta/şifre) |
+| **Veritabanı** | SQLite (CNC), PostgreSQL/Supabase (CAD) |
+| **LLM** | OpenAI API, OpenRouter, Claude |
+| **Post-Processor** | Sinumerik, Heidenhain, Fanuc, GRBL, Mach3/4 |
+| **CI/CD** | GitHub Actions |
+| **Hosting** | GitHub Pages (frontend), Render.com (CNC backend) |
 
 ---
 
@@ -458,11 +787,12 @@ Yukarıdaki yerel komutlara uymayan her şey LLM'e yönlendirilir:
 ### Test
 
 ```bash
-# Node.js testleri
 npm test
 
 # Tek dosya
 node --test test/llm-metering.test.js
+node --test test/prompt-cache.test.js
+node --test test/project-archive.test.js
 ```
 
 ### Windows Başlatma
