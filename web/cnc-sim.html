@@ -2395,7 +2395,7 @@ function hookChatInput() {
     var tNorm = R.taiNorm(text);
 
     if (/^(nc|export|indir|download|kaydet)\s*(dosya|file|nc)?$/i.test(tNorm) ||
-        /(nc\s*(indir|export|dosya))|(master\s*gcode)|(dosya\s*indir)/i.test(tNorm)) {
+        /(nc\s*(indir|export|dosya|kaydet))|(master\s*gcode)|(dosya\s*indir)|(\bnc\b.*(indir|export|kaydet|dosya))|((indir|export|kaydet|dosya).*\bnc\b)/i.test(tNorm)) {
       R.taiMsg(text, "user");
       exportMasterGcode();
       return;
