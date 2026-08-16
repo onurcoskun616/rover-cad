@@ -961,7 +961,7 @@ function syncMill(dt){
 function parseGcode(text, type){
   const lines=text.split(/\r?\n/);
   const q=[];
-  let cur={x:0,y:type==="mill"?90:0,z:0}, feed=200, lastG=0;
+  let cur={x:0,y:type==="mill"?90:0,z:0}, feed=200, lastG=0, prevWasRapid=false, approachZ=Infinity;
   const bounds={xMin:Infinity,xMax:-Infinity,yMin:Infinity,yMax:-Infinity,zMin:Infinity,zMax:-Infinity};
   for(let raw of lines){
     raw=raw.replace(/;.*$/,"").replace(/\(.*?\)/g,"").trim().toUpperCase();
@@ -988,10 +988,16 @@ function parseGcode(text, type){
     }
     if(lastG===0||lastG===1||lastG===2||lastG===3){
       if(type==="mill"){
+        const isRapid=lastG===0;
         const nx="X" in p?p.X:cur.x, ny="Y" in p?p.Y:cur.y, nz="Z" in p?p.Z:cur.z;
-        if(lastG!==0){bounds.xMin=Math.min(bounds.xMin,nx);bounds.xMax=Math.max(bounds.xMax,nx);bounds.yMin=Math.min(bounds.yMin,ny);bounds.yMax=Math.max(bounds.yMax,ny);bounds.zMin=Math.min(bounds.zMin,nz);bounds.zMax=Math.max(bounds.zMax,nz);}
-        q.push({type:lastG===0?"rapid":"feed",x:nx,y:ny,z:nz});
+        // A feed move that starts right where a rapid left off is a real-world
+        // "rapid down to just above the material, then feed in" approach —
+        // its Z is a much better surface estimate than deepest-cut+10mm.
+        if(!isRapid&&prevWasRapid) approachZ=Math.min(approachZ,cur.z);
+        if(!isRapid){bounds.xMin=Math.min(bounds.xMin,nx);bounds.xMax=Math.max(bounds.xMax,nx);bounds.yMin=Math.min(bounds.yMin,ny);bounds.yMax=Math.max(bounds.yMax,ny);bounds.zMin=Math.min(bounds.zMin,nz);bounds.zMax=Math.max(bounds.zMax,nz);}
+        q.push({type:isRapid?"rapid":"feed",x:nx,y:ny,z:nz});
         cur={x:nx,y:ny,z:nz};
+        prevWasRapid=isRapid;
       } else {
         const nx="X" in p?p.X/2:cur.x, nz="Z" in p?p.Z:cur.z;
         if(lastG!==0){bounds.xMin=Math.min(bounds.xMin,nx);bounds.xMax=Math.max(bounds.xMax,nx);bounds.zMin=Math.min(bounds.zMin,nz);bounds.zMax=Math.max(bounds.zMax,nz);}
@@ -1000,7 +1006,7 @@ function parseGcode(text, type){
       }
     }
   }
-  return {q, bounds};
+  return {q, bounds, approachZ};
 }
 
 /* ==================================================================== */
@@ -1115,7 +1121,7 @@ class SafetyInterceptor {
 const safetyInterceptor=new SafetyInterceptor();
 
 function runMillGcode(parsed, stockDims){
-  const {q, bounds}=parsed;
+  const {q, bounds, approachZ}=parsed;
   if(!q.length) return;
   for(const m of q){if(m.type==="tc")continue;const gy=m.y,gz=m.z;m.y=gz;m.z=gy;}
   const bYmin=bounds.yMin,bYmax=bounds.yMax,bZmin=bounds.zMin,bZmax=bounds.zMax;
@@ -1131,7 +1137,11 @@ function runMillGcode(parsed, stockDims){
     const margin=20;
     const newW=Math.max(80,(bounds.xMax-bounds.xMin)+margin*2);
     const newD=Math.max(60,(bounds.zMax-bounds.zMin)+margin*2);
-    const newTop=Math.max(20,Math.round(bounds.yMax+10));
+    // Prefer the program's own rapid-to-feed approach height (a real
+    // "just above the material" reference) over the deepest-cut+10mm guess
+    // whenever it's lower — that guess otherwise overstates clearance and
+    // makes a perfectly normal approach rapid look like it dives into stock.
+    const newTop=Math.max(20,Math.round(Number.isFinite(approachZ)?Math.min(approachZ,bounds.yMax+10):bounds.yMax+10));
     resizeMillStock(Math.round(newW),Math.round(newD),newTop);
     const cx=(bounds.xMax+bounds.xMin)/2, cz=(bounds.zMax+bounds.zMin)/2;
     for(const m of q){
