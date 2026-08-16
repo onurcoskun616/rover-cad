@@ -1114,7 +1114,7 @@ function runMillGcode(parsed, stockDims){
       if(m.y!==undefined) m.y=clamp(m.y, 0, TOP+40);
     }
   }
-  const sfErrs=safetyInterceptor.validateMill(q,W,D,TOP,mill.spindleOn,mill.x,mill.y,mill.z);
+  const sfErrs=safetyInterceptor.validateMill(q,W,D,TOP,true,mill.x,mill.y,mill.z);
   if(sfErrs.length){safetyInterceptor._eStop(mill,taiMsg,sfErrs);return;}
   mill.mode="AUTO"; mill.spindleOn=true; mill.paused=false; if(mill.coolantMode==="off")mill.coolantMode="flood";
   mill.queue=q; mill.moveActive=mill.queue.shift(); mill.running=true;
@@ -1135,7 +1135,7 @@ function runLatheGcode(parsed, stockDims){
       m.z=clamp(m.z+zOff, -20, STOCK_LEN);
     }
   } else if(stockDims){resizeLatheStock(stockDims.len,stockDims.r);}
-  const sfErrsL=safetyInterceptor.validateLathe(q,STOCK_LEN,STOCK_R,lathe.s.spindleOn,lathe.s.x,lathe.s.z);
+  const sfErrsL=safetyInterceptor.validateLathe(q,STOCK_LEN,STOCK_R,true,lathe.s.x,lathe.s.z);
   if(sfErrsL.length){safetyInterceptor._eStop(lathe,taiMsg,sfErrsL);return;}
   lathe.setMode("AUTO"); lathe.s.spindleOn=true; if(lathe.s.coolantMode==="off")lathe.s.coolantMode="flood";
   lathe.queue=q; lathe.moveActive=lathe.queue.shift()||null; lathe.s.running=true;
@@ -2182,6 +2182,12 @@ function hookChatInput() {
         /(magazin|magazine|takim\s*list|tool\s*list)/i.test(tNorm) ||
         (/(takim|tool)/i.test(tNorm) && /(goster|listele|liste)/i.test(tNorm)) ||
         /(ornek|sample).*(goster|listele)/i.test(tNorm) ||
+        /(delik|drill|bore)/i.test(tNorm) ||
+        /(cep|pocket)\s*(ac)?/i.test(tNorm) ||
+        /(kanal|slot)\s*(ac)?/i.test(tNorm) ||
+        /(yuzey|surface|surfacing|face|facing)/i.test(tNorm) ||
+        /(kontur|contour)/i.test(tNorm) ||
+        /(pah|chamfer)/i.test(tNorm) ||
         /^(g\d|m\d|[gnomxyzfs\d\s.;]+)$/i.test(tNorm.trim());
 
       if (isControl) {
