@@ -478,7 +478,9 @@ class LatheEngine{
   setMode(m){if(!this.s.running)this.s.mode=m;}
   setJog(dx,dz){this.jogX=dx;this.jogZ=dz;}
   gotoTarget(x,z){if(this.s.emergency||this.s.mode!=="MANUAL")return;this.s.targetX=clamp(x,0,STOCK_R+12);this.s.targetZ=clamp(z,-20,STOCK_LEN);this.moveActive={type:"rapid",x:this.s.targetX,z:this.s.targetZ};}
-  startCycle(){if(this.s.emergency||this.s.mode!=="AUTO")return;if(!this.s.spindleOn)this.s.spindleOn=true;if(this.s.coolantMode==="off")this.s.coolantMode="flood";const clearZ=-12,targetR=30,q=[];let r=STOCK_R;
+  startCycle(){if(this.s.emergency||this.s.mode!=="AUTO")return;
+    if(latheProgramText){runLatheGcode(parseGcode(latheProgramText,"lathe"));return;}
+    if(!this.s.spindleOn)this.s.spindleOn=true;if(this.s.coolantMode==="off")this.s.coolantMode="flood";const clearZ=-12,targetR=30,q=[];let r=STOCK_R;
     while(r>targetR){r=Math.max(targetR,r-6);q.push({type:"rapid",x:r,z:clearZ});q.push({type:"feed",x:r,z:STOCK_LEN-20});q.push({type:"rapid",x:r+6,z:STOCK_LEN-20});q.push({type:"rapid",x:r+6,z:clearZ});}
     q.push({type:"rapid",x:targetR,z:clearZ});q.push({type:"feed",x:targetR+12,z:0});q.push({type:"rapid",x:STOCK_R+8,z:-12});
     this.queue=q;this.moveActive=this.queue.shift()||null;this.s.running=true;}
@@ -828,8 +830,11 @@ function carve(tx,tz,ty){
 }
 function computeRemoved(){let s=0,n=0;for(let iy=MARGIN;iy<ROWS-MARGIN;iy++)for(let ix=MARGIN;ix<COLS-MARGIN;ix++){s+=TOP-heights[iy*COLS+ix];n++;}return clamp((s/n)/TOP,0,1);}
 
+let millProgramText=null,latheProgramText=null;
 function millStartCycle(){
-  if(mill.emergency||mill.mode!=="AUTO")return;mill.spindleOn=true;mill.paused=false;if(mill.coolantMode==="off")mill.coolantMode="flood";
+  if(mill.emergency||mill.mode!=="AUTO")return;
+  if(millProgramText){runMillGcode(parseGcode(millProgramText,"mill"));return;}
+  mill.spindleOn=true;mill.paused=false;if(mill.coolantMode==="off")mill.coolantMode="flood";
   const q=[],safeY=TOP+8,step=CUTTER_R*1.25,x0=-W*0.29,x1=W*0.29,z0=-D*0.27,z1=D*0.27;
   for(const depth of [TOP-14,TOP-26]){
     q.push({type:"rapid",x:x0,y:safeY,z:z0});
@@ -899,7 +904,7 @@ $("mbtn-spindle").onclick=()=>{if(!mill.emergency)mill.spindleOn=!mill.spindleOn
 $("mbtn-cycle").onclick=()=>millStartCycle(); $("mbtn-hold").onclick=()=>mill.paused=!mill.paused;
 $("mbtn-emg").onclick=()=>{mill.emergency=true;mill.running=false;mill.spindleOn=false;mill.coolantMode="off";mill.queue=[];mill.moveActive=null;mill.alarm="EMG";toolYOff=0;if(magGroup)magGroup.visible=false;toolGroup.visible=true;};
 $("mbtn-reset").onclick=()=>{mill.alarm=null;mill.emergency=false;};
-$("mbtn-newp").onclick=()=>{heights=new Float32Array(COLS*ROWS).fill(TOP);const pos=planeGeo.attributes.position;for(let i=0;i<pos.count;i++)pos.setY(i,TOP);pos.needsUpdate=true;planeGeo.computeVertexNormals();mill.removed=0;mill.running=false;mill.queue=[];mill.moveActive=null;mill.x=0;mill.y=TOP+30;mill.z=0;toolYOff=0;if(magGroup)magGroup.visible=false;toolGroup.visible=true;};
+$("mbtn-newp").onclick=()=>{heights=new Float32Array(COLS*ROWS).fill(TOP);const pos=planeGeo.attributes.position;for(let i=0;i<pos.count;i++)pos.setY(i,TOP);pos.needsUpdate=true;planeGeo.computeVertexNormals();mill.removed=0;mill.running=false;mill.queue=[];mill.moveActive=null;mill.x=0;mill.y=TOP+30;mill.z=0;toolYOff=0;if(magGroup)magGroup.visible=false;toolGroup.visible=true;millProgramText=null;$("m-file-info").classList.add("hidden");};
 $("m-play").onclick=()=>{mill.mode="AUTO";millStartCycle();};
 $("m-pause").onclick=()=>mill.paused=!mill.paused;
 $("m-stop").onclick=()=>millStop();
@@ -1165,13 +1170,13 @@ function runLatheGcode(parsed, stockDims){
 $("m-file").onchange=e=>{
   const f=e.target.files[0]; if(!f) return;
   $("m-file-info").textContent=f.name; $("m-file-info").classList.remove("hidden");
-  f.text().then(txt=>runMillGcode(parseGcode(txt,"mill")));
+  f.text().then(txt=>{millProgramText=txt;runMillGcode(parseGcode(txt,"mill"));});
   e.target.value="";
 };
 $("l-file").onchange=e=>{
   const f=e.target.files[0]; if(!f) return;
   $("l-file-info").textContent=f.name; $("l-file-info").classList.remove("hidden");
-  f.text().then(txt=>runLatheGcode(parseGcode(txt,"lathe")));
+  f.text().then(txt=>{latheProgramText=txt;runLatheGcode(parseGcode(txt,"lathe"));});
   e.target.value="";
 };
 
@@ -1191,8 +1196,8 @@ if(raw){try{const d=JSON.parse(raw);if(d.gcode){
     else if(slen)camStock={len:Math.round(slen),r:STOCK_R};
   }
   setTimeout(()=>{
-    if(isMill){setTab("mill");$("m-file-info").textContent="CAM çıktısı";$("m-file-info").classList.remove("hidden");runMillGcode(parseGcode(d.gcode,"mill"),camStock);}
-    else{setTab("lathe");$("l-file-info").textContent="CAM çıktısı";$("l-file-info").classList.remove("hidden");runLatheGcode(parseGcode(d.gcode,"lathe"),camStock);}
+    if(isMill){setTab("mill");$("m-file-info").textContent="CAM çıktısı";$("m-file-info").classList.remove("hidden");millProgramText=d.gcode;runMillGcode(parseGcode(d.gcode,"mill"),camStock);}
+    else{setTab("lathe");$("l-file-info").textContent="CAM çıktısı";$("l-file-info").classList.remove("hidden");latheProgramText=d.gcode;runLatheGcode(parseGcode(d.gcode,"lathe"),camStock);}
   },300);
   sessionStorage.removeItem("rover_cnc_gcode");
 }}catch(e){console.error("CAM gcode yüklenemedi:",e);}}}
@@ -1703,7 +1708,7 @@ function taiExec(raw){
   if(/^(devam|devam\s*et|resume)$/i.test(t.trim())){if(im)mill.paused=false;return A("✓ Devam ediyor.");}
   if(/^(reset|sifirla)$/i.test(t.trim())){if(im){mill.alarm=null;mill.emergency=false;}else lathe.clearAlarm();return A("✓ Alarm temizlendi, sistem sıfırlandı.");}
   if(/(acil|emergency|emg)/i.test(t)){if(im){mill.emergency=true;mill.running=false;mill.spindleOn=false;mill.coolantMode="off";mill.queue=[];mill.moveActive=null;mill.alarm="EMG";}else lathe.emergencyStop();return A("⚠ ACİL DURDURMA aktif!")+" RESET yazarak devam edebilirsiniz.";}
-  if(/(yeni\s*parca|new\s*work|yeni\s*is)/i.test(t)){if(im)$("mbtn-newp").click();else lathe.reset();taiLastOp=null;return A("✓ Yeni iş parçası yüklendi.");}
+  if(/(yeni\s*parca|new\s*work|yeni\s*is)/i.test(t)){if(im)$("mbtn-newp").click();else{lathe.reset();latheProgramText=null;$("l-file-info").classList.add("hidden");}taiLastOp=null;return A("✓ Yeni iş parçası yüklendi.");}
 
   /* --- stok boyutu ayarla --- */
   if(/(stok|stock)\s*(boyut|olcu|ebat|size)/i.test(t)||/(boyut|olcu|ebat|size)\s*(ayarla|degistir|belirle|set)/i.test(t)){
@@ -2083,8 +2088,10 @@ function handleGcodeBlocks(blocks, opIndices) {
     const parsed = R.parseGcode(block, im ? "mill" : "lathe");
     if (parsed.q.length > 0) {
       if (im) {
+        millProgramText=block;
         R.runMillGcode(parsed, stockDims);
       } else {
+        latheProgramText=block;
         R.runLatheGcode(parsed, stockDims);
       }
       R.taiMsg('<span class="tai-msg-action">▶ G-code çalıştırıldı:</span> ' +
