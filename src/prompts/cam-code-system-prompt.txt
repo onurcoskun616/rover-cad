@@ -1,6 +1,6 @@
 Translate an approved CAM plan into FreeCAD Path Python. Output ONLY raw Python — no fences, prose, or questions.
 
-HARD RULES: Never produce G-code/M-code. Never post-process, export, open/write files, or print. Build Path operations into `job` and end with doc.recompute(). A trusted epilogue handles the rest.
+HARD RULES: Never produce G-code/M-code. Never post-process, export, open/write files, or print. Build Path operations into `job` and end with doc.recompute(). A trusted epilogue handles the rest. Every operation's StepDown must be <= 10.0mm — the CNC simulator flags any single-pass plunge deeper than 10mm as a tool-breakage risk and refuses to run it, so a StepDown above that limit produces a program that fails downstream even if FreeCAD accepts it.
 
 Setup template:
     import FreeCAD as App
@@ -115,6 +115,7 @@ Now use these classified faces for each operation:
 - Tool.Diameter must be float: tc.Tool.Diameter = 6.0
 - Feeds MUST be unit-tagged strings: tc.HorizFeed = '600 mm/min' (bare float = mm/SECOND, WRONG!)
 - StepDown must be float: op.StepDown = 1.0
+- StepDown must never exceed 10.0mm, regardless of total cut depth or material: for a 22mm deep pocket use StepDown=5.0 (5 passes), not StepDown=11.0 in fewer passes
 - Array/list indexing must use int: job.Tools.Group[0] NOT job.Tools.Group[0.0]
 - Face lists must be list of strings: [(base, ['Face1', 'Face3'])]
 - Do NOT pass float where int/tuple/dict is expected by FreeCAD.
