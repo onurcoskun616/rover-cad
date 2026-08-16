@@ -1005,11 +1005,46 @@ function syncMill(dt){
 /* ==================================================================== */
 /* =========================  G-CODE PARSER  ========================== */
 /* ==================================================================== */
+// G2/G3 in the G17 (XY) plane: center = start + (I,J), Z is interpolated
+// linearly across the swept angle (the standard helical-plunge idiom — a
+// full circle with start==end and a lower end Z, as FreeCAD/CAM posts and
+// this app's own G-code generator both emit for round pockets/bosses).
+// clockwise=true for G2, false for G3.
+function millArcPoints(sx,sy,sz,ex,ey,ez,i,j,clockwise){
+  const cx=sx+i, cy=sy+j;
+  const r=Math.hypot(sx-cx,sy-cy)||0.001;
+  const startAngle=Math.atan2(sy-cy,sx-cx);
+  const endAngle=Math.atan2(ey-cy,ex-cx);
+  const isFullCircle=Math.abs(sx-ex)<1e-6&&Math.abs(sy-ey)<1e-6;
+  let sweep=endAngle-startAngle;
+  if(isFullCircle){
+    sweep=clockwise?-2*Math.PI:2*Math.PI;
+  }else if(clockwise){
+    while(sweep>=0) sweep-=2*Math.PI;
+  }else{
+    while(sweep<=0) sweep+=2*Math.PI;
+  }
+  const segs=Math.max(4,Math.round(Math.abs(sweep)/(Math.PI/16)));
+  const pts=[];
+  for(let k=1;k<=segs;k++){
+    const t=k/segs, a=startAngle+sweep*t;
+    pts.push({x:cx+Math.cos(a)*r,y:cy+Math.sin(a)*r,z:sz+(ez-sz)*t});
+  }
+  return pts;
+}
+
 function parseGcode(text, type){
   const lines=text.split(/\r?\n/);
   const q=[];
   let cur={x:0,y:type==="mill"?90:0,z:0}, feed=200, lastG=0, prevWasRapid=false, approachZ=Infinity;
   const bounds={xMin:Infinity,xMax:-Infinity,yMin:Infinity,yMax:-Infinity,zMin:Infinity,zMax:-Infinity};
+  function pushMillPoint(isRapid,nx,ny,nz){
+    if(!isRapid&&prevWasRapid) approachZ=Math.min(approachZ,cur.z);
+    if(!isRapid){bounds.xMin=Math.min(bounds.xMin,nx);bounds.xMax=Math.max(bounds.xMax,nx);bounds.yMin=Math.min(bounds.yMin,ny);bounds.yMax=Math.max(bounds.yMax,ny);bounds.zMin=Math.min(bounds.zMin,nz);bounds.zMax=Math.max(bounds.zMax,nz);}
+    q.push({type:isRapid?"rapid":"feed",x:nx,y:ny,z:nz});
+    cur={x:nx,y:ny,z:nz};
+    prevWasRapid=isRapid;
+  }
   for(let raw of lines){
     raw=raw.replace(/;.*$/,"").replace(/\(.*?\)/g,"").trim().toUpperCase();
     if(!raw) continue;
@@ -1035,16 +1070,19 @@ function parseGcode(text, type){
     }
     if(lastG===0||lastG===1||lastG===2||lastG===3){
       if(type==="mill"){
-        const isRapid=lastG===0;
         const nx="X" in p?p.X:cur.x, ny="Y" in p?p.Y:cur.y, nz="Z" in p?p.Z:cur.z;
-        // A feed move that starts right where a rapid left off is a real-world
-        // "rapid down to just above the material, then feed in" approach —
-        // its Z is a much better surface estimate than deepest-cut+10mm.
-        if(!isRapid&&prevWasRapid) approachZ=Math.min(approachZ,cur.z);
-        if(!isRapid){bounds.xMin=Math.min(bounds.xMin,nx);bounds.xMax=Math.max(bounds.xMax,nx);bounds.yMin=Math.min(bounds.yMin,ny);bounds.yMax=Math.max(bounds.yMax,ny);bounds.zMin=Math.min(bounds.zMin,nz);bounds.zMax=Math.max(bounds.zMax,nz);}
-        q.push({type:isRapid?"rapid":"feed",x:nx,y:ny,z:nz});
-        cur={x:nx,y:ny,z:nz};
-        prevWasRapid=isRapid;
+        if(lastG===2||lastG===3){
+          if("I" in p||"J" in p){
+            const pts=millArcPoints(cur.x,cur.y,cur.z,nx,ny,nz,p.I||0,p.J||0,lastG===2);
+            for(const pt of pts) pushMillPoint(false,pt.x,pt.y,pt.z);
+          }else{
+            // No I/J center given (R-format or malformed) — fall back to a
+            // straight line rather than dropping the move entirely.
+            pushMillPoint(false,nx,ny,nz);
+          }
+        }else{
+          pushMillPoint(lastG===0,nx,ny,nz);
+        }
       } else {
         const nx="X" in p?p.X/2:cur.x, nz="Z" in p?p.Z:cur.z;
         if(lastG!==0){bounds.xMin=Math.min(bounds.xMin,nx);bounds.xMax=Math.max(bounds.xMax,nx);bounds.zMin=Math.min(bounds.zMin,nz);bounds.zMax=Math.max(bounds.zMax,nz);}
