@@ -66,6 +66,13 @@ let lastGeneratedCode = null;
 let lastBbox = null;
 let lastPrompt = "";
 let lastProjectId = null;
+let camAnswers = {};
+let camStepIndex = 0;
+let camStepFieldNames = [];
+let camPreviewToken = null;
+let camEstimatedMinutes = null;
+let camSim = null; // active simulation controller
+let camPlan = null;
 let lastStlUrl = null;
 let lastContourUrl = null;
 let lastDimData = null;
@@ -362,6 +369,11 @@ async function handleGenerate() {
 
 function showResult(data) {
   resultSection.hidden = false;
+  if (data.prompt) {
+    lastPrompt = data.prompt;
+    promptInput.value = data.prompt;
+    setMode("text");
+  }
 
   if (data.warning) {
     warningText.hidden = false;
@@ -405,6 +417,38 @@ function showResult(data) {
 
   if (data.anchors && data.anchors.length) {
     showAnchors(data.anchors, data.center);
+  }
+}
+
+async function loadProjectFromUrl() {
+  const params = new URLSearchParams(location.search);
+  const projectId = params.get("projectId");
+  const versionId = params.get("versionId");
+  if (!projectId) return;
+  clearError();
+  resetResult();
+  setLoading(true, versionId ? "Geçmiş sürüm yükleniyor…" : "Proje yükleniyor…");
+  try {
+    const query = versionId ? `?versionId=${encodeURIComponent(versionId)}` : "";
+    const response = await fetch(`${API_BASE}/auth/projects/${encodeURIComponent(projectId)}${query}`, {
+      headers: authHeaders(),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || "Proje yüklenemedi");
+    if (!payload.project) throw new Error("Proje bulunamadı");
+    showResult({
+      ...payload.project,
+      projectId: payload.project.id,
+    });
+    if (payload.project.selectedVersionId && payload.project.selectedVersionId !== payload.project.latestVersion) {
+      warningText.hidden = false;
+      warningText.textContent = `Geçmiş sürüm açıldı: ${payload.project.selectedVersionId}. Yeni revizyon yaparsanız bu projenin yeni sürümü olarak kaydedilir.`;
+    }
+    statusText.textContent = "";
+  } catch (err) {
+    showError(`Proje açılamadı: ${err.message}`);
+  } finally {
+    setLoading(false);
   }
 }
 
@@ -503,13 +547,21 @@ async function loadStlPreview(stlUrl) {
     if (!viewer) {
       viewer = initViewer(viewerContainer);
     }
-    loadStl(viewer, stlUrl);
+    loadStl(viewer, await privateAssetUrl(stlUrl));
     if (lastStepPath && !lastDimData) {
       fetchAndShowDimensions();
     }
   } catch (err) {
     console.error("3D önizleme yüklenemedi:", err);
   }
+}
+
+async function privateAssetUrl(url) {
+  const value = String(url || "");
+  if (!value.includes("/auth/projects/")) return value;
+  const response = await fetch(value, { headers: authHeaders() });
+  if (!response.ok) throw new Error("Dosya önizleme için alınamadı");
+  return URL.createObjectURL(await response.blob());
 }
 
 async function showAnchors(anchors, center) {
@@ -706,7 +758,7 @@ function buildSyntheticCode() {
 // 2D contour preview (DXF without thickness): draw the contour as lines.
 async function loadContourPreview(contourUrl) {
   try {
-    const response = await fetch(contourUrl);
+    const response = await fetch(contourUrl, contourUrl.includes("/auth/projects/") ? { headers: authHeaders() } : undefined);
     const data = await readJson(response);
     const { initViewer, loadToolpath } = await import("./viewer.js");
     if (!viewer) viewer = initViewer(viewerContainer);
@@ -1403,3 +1455,10 @@ promptInput.addEventListener("keydown", (event) => {
     handleGenerate();
   }
 });
+
+const initialMode = new URLSearchParams(location.search).get("mode");
+if (["text", "image", "step", "sim"].includes(initialMode)) {
+  setMode(initialMode);
+}
+
+loadProjectFromUrl();

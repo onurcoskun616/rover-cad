@@ -27,8 +27,8 @@
 
     <main class="account-main">
       <div id="preview-banner" class="preview-banner" hidden>
-        <span>ÖNİZLEME</span>
-        API kapalı olduğu için örnek veriler gösteriliyor.
+        <span>UYARI</span>
+        Veriler şu anda alınamadı.
       </div>
 
       <header class="account-topbar" id="overview">
@@ -73,13 +73,18 @@
         </article>
       </section>
 
+      <section class="account-panel activity-panel" id="activity">
+        <div class="panel-heading"><div><p class="account-kicker">SON İŞLEMLER</p><h2>Yakın kullanım geçmişi</h2></div></div>
+        <div id="activity-list" class="activity-list"></div>
+      </section>
+
       <section class="account-panel projects-panel" id="projects">
-        <div class="panel-heading"><div><p class="account-kicker">SON PROJELERİM</p><h2>Çalışmalarınız</h2></div><a href="index.html">Tümünü görüntüle →</a></div>
+        <div class="panel-heading"><div><p class="account-kicker">PROJE SAYFASI</p><h2>Kaldığınız yerden devam edin</h2></div><a href="index.html">Yeni proje oluştur →</a></div>
         <div id="project-list" class="project-list"></div>
       </section>
 
       <section class="account-panel files-panel" id="files">
-        <div class="panel-heading"><div><p class="account-kicker">DOSYALARIM VE ÇIKTILARIM</p><h2>Son oluşturulan dosyalar</h2></div><button class="filter-button" type="button">Tüm dosyalar⌄</button></div>
+        <div class="panel-heading"><div><p class="account-kicker">DOSYALARIM</p><h2>Başarılı tasarımların kayıtlı çıktıları</h2></div><button class="filter-button" type="button">Tüm dosyalar⌄</button></div>
         <div class="files-table-wrap">
           <table class="files-table">
             <thead><tr><th>Dosya</th><th>Proje</th><th>Tür</th><th>Tarih</th><th></th></tr></thead>

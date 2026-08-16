@@ -59,6 +59,73 @@ function titleFromPrompt(prompt) {
   return cleaned ? cleaned.slice(0, 80) : "Adsız proje";
 }
 
+function operationLabel(operation) {
+  return {
+    "cad-generate": "Metinden CAD",
+    "cad-image": "Teknik resimden CAD",
+    "cad-revise": "Revizyon",
+    "cad-param-edit": "Parametrik düzenleme",
+  }[operation] || "CAD çalışması";
+}
+
+function userDirFor(userId) {
+  return path.join(storageRoot(), "users", userScope(userId));
+}
+
+function projectDirFor(userId, projectId) {
+  const normalized = normalizeProjectId(projectId);
+  if (normalized !== String(projectId)) throw Object.assign(new Error("Geçersiz proje kimliği"), { status: 400 });
+  return path.join(userDirFor(userId), "projects", normalized);
+}
+
+function publicFile(projectId, version, file) {
+  const filePath = String(file?.path ?? "");
+  return {
+    name: file?.name || path.basename(filePath) || "dosya",
+    path: filePath,
+    type: file?.type || "file",
+    size: Number(file?.size) || 0,
+    versionId: version.id,
+    versionNumber: Number(version.number) || 0,
+    operation: version.operation,
+    url: `/auth/projects/${encodeURIComponent(projectId)}/files/${encodeURIComponent(filePath)}`,
+    createdAt: version.createdAt,
+  };
+}
+
+function publicProject(manifest) {
+  if (!manifest?.id) return null;
+  const versions = Array.isArray(manifest?.versions) ? manifest.versions : [];
+  const latest = versions.find((item) => item.id === manifest.latestVersion) || versions.at(-1) || null;
+  const files = latest ? (latest.files ?? []).map((file) => publicFile(manifest.id, latest, file)) : [];
+  const prompt = latest?.prompt || manifest.name || "";
+  const publicVersions = versions.map((version) => ({
+    id: version.id,
+    number: Number(version.number) || 0,
+    operation: version.operation || "",
+    operationLabel: operationLabel(version.operation),
+    prompt: version.prompt || "",
+    createdAt: version.createdAt,
+    bbox: version.bbox ?? null,
+    files: (version.files ?? []).map((file) => publicFile(manifest.id, version, file)),
+  }));
+  return {
+    id: manifest.id,
+    name: manifest.name || titleFromPrompt(prompt),
+    prompt,
+    actionTitle: titleFromPrompt(prompt),
+    operation: latest?.operation || "",
+    operationLabel: operationLabel(latest?.operation),
+    createdAt: manifest.createdAt,
+    updatedAt: manifest.updatedAt,
+    latestVersion: manifest.latestVersion,
+    versionCount: versions.length,
+    bbox: latest?.bbox ?? null,
+    files,
+    versions: publicVersions,
+  };
+}
+
 function nextVersionNumber(manifest) {
   const versions = Array.isArray(manifest?.versions) ? manifest.versions : [];
   return versions.reduce((max, item) => Math.max(max, Number(item.number) || 0), 0) + 1;
@@ -173,4 +240,91 @@ export function archiveProjectBuildFailOpen(options) {
     console.warn("[project-archive] proje kaydedilemedi:", error.message);
     return null;
   }
+}
+
+export function listUserProjects(userId, limit = 30) {
+  if (!userId) throw Object.assign(new Error("Oturum açmanız gerekiyor"), { status: 401 });
+  const indexPath = path.join(userDirFor(userId), "projects.json");
+  const index = readJson(indexPath, { projects: [] });
+  const projects = Array.isArray(index.projects) ? index.projects : [];
+  return projects.slice(0, Math.min(100, Math.max(1, Number(limit) || 30))).map((summary) => {
+    const manifestPath = path.join(projectDirFor(userId, summary.id), "project.json");
+    return publicProject(readJson(manifestPath, summary));
+  }).filter(Boolean);
+}
+
+export function getUserProject(userId, projectId, proto = "https", host = "", requestedVersionId = "") {
+  const projectDir = projectDirFor(userId, projectId);
+  const manifest = publicProject(readJson(path.join(projectDir, "project.json"), null));
+  if (!manifest?.id) throw Object.assign(new Error("Proje bulunamadı"), { status: 404 });
+  const requestedVersion = requestedVersionId
+    ? manifest.versions.find((version) => version.id === requestedVersionId)
+    : null;
+  if (requestedVersionId && !requestedVersion) {
+    throw Object.assign(new Error("Proje sürümü bulunamadı"), { status: 404 });
+  }
+  const selectedVersion = requestedVersion
+    || manifest.versions.find((version) => version.id === manifest.latestVersion)
+    || manifest.versions.at(-1)
+    || null;
+  const absolute = (file) => path.join(projectDir, file.path);
+  const withFullUrls = {
+    ...manifest,
+    files: (selectedVersion?.files ?? manifest.files).map((file) => ({
+      ...file,
+      url: `${proto}://${host}${file.url}`,
+    })),
+    selectedVersionId: selectedVersion?.id ?? manifest.latestVersion,
+    selectedVersionNumber: selectedVersion?.number ?? manifest.versionCount,
+    prompt: selectedVersion?.prompt || manifest.prompt,
+    operation: selectedVersion?.operation || manifest.operation,
+    operationLabel: selectedVersion?.operationLabel || manifest.operationLabel,
+    bbox: selectedVersion?.bbox ?? manifest.bbox,
+    versions: manifest.versions.map((version) => ({
+      ...version,
+      files: version.files.map((file) => ({
+        ...file,
+        url: `${proto}://${host}${file.url}`,
+      })),
+    })),
+  };
+  const step = withFullUrls.files.find((file) => file.type === "step");
+  const stl = withFullUrls.files.find((file) => file.type === "stl");
+  const source = withFullUrls.files.find((file) => file.type === "source");
+  return {
+    ...withFullUrls,
+    stepPath: step ? absolute(step) : null,
+    stlPath: stl ? absolute(stl) : null,
+    stepUrl: step?.url ?? null,
+    stlUrl: stl?.url ?? null,
+    generatedCode: source ? fs.readFileSync(absolute(source), "utf8") : "",
+  };
+}
+
+export function listUserFiles(userId, limit = 60) {
+  return listUserProjects(userId, 100).flatMap((project) =>
+    project.versions.flatMap((version) => version.files.map((file) => ({
+      ...file,
+      projectId: project.id,
+      projectName: project.name,
+      projectPrompt: project.prompt,
+      projectUpdatedAt: project.updatedAt,
+      versionId: version.id,
+      versionNumber: version.number,
+      operationLabel: version.operationLabel,
+      prompt: version.prompt,
+    }))),
+  ).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))
+    .slice(0, Math.min(200, Math.max(1, Number(limit) || 60)));
+}
+
+export function getUserProjectFilePath(userId, projectId, relativePath) {
+  const projectDir = projectDirFor(userId, projectId);
+  const decoded = String(relativePath ?? "");
+  const absolute = path.resolve(projectDir, decoded);
+  if (!absolute.startsWith(`${projectDir}${path.sep}`)) {
+    throw Object.assign(new Error("Geçersiz dosya yolu"), { status: 400 });
+  }
+  if (!fs.existsSync(absolute)) throw Object.assign(new Error("Dosya bulunamadı"), { status: 404 });
+  return absolute;
 }

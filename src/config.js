@@ -28,6 +28,13 @@ export const config = {
   databaseUrl: process.env.DATABASE_URL ?? "",
   databaseSsl: process.env.DATABASE_SSL !== "false",
   databasePoolSize: Number(process.env.DATABASE_POOL_SIZE ?? 10),
+  database: {
+    host: process.env.DB_HOST ?? "",
+    port: Number(process.env.DB_PORT ?? 5432),
+    name: process.env.DB_NAME ?? "postgres",
+    user: process.env.DB_USER ?? "",
+    password: process.env.DB_PASSWORD ?? "",
+  },
   supabase: {
     url: process.env.SUPABASE_URL ?? "",
     anonKey: process.env.SUPABASE_ANON_KEY ?? "",
