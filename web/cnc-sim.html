@@ -1698,8 +1698,14 @@ function taiUserInput(text){
   taiRenderChips();
 }
 
-function taiRunMill(q){mill.queue=q;mill.moveActive=q.shift();mill.running=true;}
-function taiRunLathe(q){lathe.queue=q;lathe.moveActive=lathe.queue.shift()||null;lathe.s.running=true;}
+// Locally-executed operations (delik/cep/örnek parça/vb.) never produce G-code
+// text — they build the move queue directly. Remember the last queue so the
+// WS/chat layer can synthesize G-code for it and record it into masterGcode
+// (nc kaydet), the same as LLM-generated operations already are.
+let lastRunQueue=null, lastRunType=null;
+function taiRunMill(q){lastRunQueue=q.slice();lastRunType="mill";mill.queue=q;mill.moveActive=q.shift();mill.running=true;}
+function taiRunLathe(q){lastRunQueue=q.slice();lastRunType="lathe";lathe.queue=q;lathe.moveActive=lathe.queue.shift()||null;lathe.s.running=true;}
+function takeLastRunQueue(){const q=lastRunQueue,t=lastRunType;lastRunQueue=null;lastRunType=null;return q&&q.length?{queue:q,type:t}:null;}
 function taiRunMillWithTool(opType,reqDia,reqDepth,genQ){
   const slot=magazine.findSlotForOp(opType,reqDia,reqDepth);
   if(slot===-1)return null;
@@ -2183,7 +2189,7 @@ $("mag-edit-save").onclick=async()=>{
 window._rover = {
   taiUserInput, taiExec, taiGetChips, taiNorm, taiMsg, taiRenderChips,
   taiMessages, parseGcode, runMillGcode, runLatheGcode, safetyInterceptor,
-  magazine, TOOL_LIBRARY, buildTool, buildMagazineDisk,
+  magazine, TOOL_LIBRARY, buildTool, buildMagazineDisk, takeLastRunQueue,
   get CUTTER_R(){ return CUTTER_R; }, get CUTTER_H(){ return CUTTER_H; },
   get active(){ return active; },
   get W(){ return W; }, get D(){ return D; }, get TOP(){ return TOP; },
@@ -2220,6 +2226,42 @@ let wsConnected = false;
 let wsSessionKey = localStorage.getItem("rover_cnc_session") || "";
 let masterGcode = [];
 let opCounter = 0;
+
+// Local (non-LLM) operations build the move queue directly with no G-code
+// text ever existing — synthesize a readable equivalent so "nc kaydet"
+// captures them the same way it captures LLM-generated operations.
+function millQueueToGcode(queue) {
+  var lines = [], lastX = null, lastY = null, lastZ = null;
+  queue.forEach(function(m) {
+    if (m.type === "tc") { lines.push("T" + String(m.targetSlot + 1).padStart(2, "0")); return; }
+    var gx = m.x, gy = m.z, gz = m.y; // reverse of runMillGcode's y/z swap
+    var line = m.type === "rapid" ? "G0" : "G1";
+    if (lastX === null || Math.abs(gx - lastX) > 1e-6) { line += " X" + gx.toFixed(3); lastX = gx; }
+    if (lastY === null || Math.abs(gy - lastY) > 1e-6) { line += " Y" + gy.toFixed(3); lastY = gy; }
+    if (lastZ === null || Math.abs(gz - lastZ) > 1e-6) { line += " Z" + gz.toFixed(3); lastZ = gz; }
+    lines.push(line);
+  });
+  return lines.join("\n");
+}
+function latheQueueToGcode(queue) {
+  var lines = [], lastX = null, lastZ = null;
+  queue.forEach(function(m) {
+    var gx = m.x * 2, gz = m.z; // internal x is radius; G-code X is diameter
+    var line = m.type === "rapid" ? "G0" : "G1";
+    if (lastX === null || Math.abs(gx - lastX) > 1e-6) { line += " X" + gx.toFixed(3); lastX = gx; }
+    if (lastZ === null || Math.abs(gz - lastZ) > 1e-6) { line += " Z" + gz.toFixed(3); lastZ = gz; }
+    lines.push(line);
+  });
+  return lines.join("\n");
+}
+function recordLastLocalOp() {
+  var R = r();
+  var taken = R.takeLastRunQueue && R.takeLastRunQueue();
+  if (!taken) return;
+  var gcode = taken.type === "lathe" ? latheQueueToGcode(taken.queue) : millQueueToGcode(taken.queue);
+  if (!gcode) return;
+  masterGcode.push({ index: opCounter++, gcode: gcode, timestamp: new Date().toISOString() });
+}
 
 /* ------------------------------------------------------------------ */
 /*  WEBSOCKET CONNECTION                                               */
@@ -2284,11 +2326,25 @@ function wsConnect() {
   });
 
   socket.on("master_gcode", function(data) {
-    if (data.gcode) {
-      downloadNcFile(data.gcode, wsSessionKey);
-    } else {
-      r().taiMsg("Henüz kaydedilmiş G-code operasyonu yok.", "bot");
+    var serverGcode = data.gcode || "";
+    if (masterGcode.length === 0) {
+      // No locally-run (non-LLM) operations to add — server's export is complete as-is.
+      if (serverGcode) { downloadNcFile(serverGcode, wsSessionKey); }
+      else { r().taiMsg("Henüz kaydedilmiş G-code operasyonu yok.", "bot"); }
+      return;
     }
+    // Local commands (delik/cep/örnek parça/vb.) never reach the server, so
+    // its export is missing them — append them here before downloading.
+    var lines = [];
+    if (serverGcode) lines.push(serverGcode.replace(/\bM30\s*$/i, "").trimEnd());
+    else lines.push("(Rover CNC · Local Export)", "(Date: " + new Date().toISOString().slice(0, 16) + ")", "");
+    masterGcode.forEach(function(op) {
+      lines.push("(--- Local Op " + op.index + " ---)");
+      lines.push(op.gcode);
+      lines.push("");
+    });
+    lines.push("M30");
+    downloadNcFile(lines.join("\n"), wsSessionKey);
   });
 
   hookChatInput();
@@ -2488,6 +2544,7 @@ function hookChatInput() {
         if (localResult) {
           R.taiMsg(localResult, "bot");
           R.taiRenderChips();
+          recordLastLocalOp();
           return;
         }
       }
