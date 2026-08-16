@@ -691,6 +691,7 @@ function initMill(){
 
   buildWorkpiece();
   buildTool();
+  buildMagazineDisk();
   buildChipPool();
   buildCoolantPool();
 
@@ -736,6 +737,19 @@ function buildTool(){
   const holder=new THREE.Mesh(new THREE.CylinderGeometry(CUTTER_R*1.5,CUTTER_R*.9,46,24),steel);holder.position.y=CUTTER_H+40+23;holder.castShadow=true;toolGroup.add(holder);
   const taper=new THREE.Mesh(new THREE.CylinderGeometry(CUTTER_R*2.2,CUTTER_R*1.5,40,24),steel);taper.position.y=CUTTER_H+40+46+20;toolGroup.add(taper);
   scene.add(toolGroup);
+}
+
+let magGroup=null,toolYOff=0;
+function buildMagazineDisk(){
+  if(magGroup){while(magGroup.children.length){const c=magGroup.children[0];if(c.geometry)c.geometry.dispose();if(c.material)c.material.dispose();magGroup.remove(c);}scene.remove(magGroup);}
+  magGroup=new THREE.Group();
+  const dkMat=new THREE.MeshStandardMaterial({color:0x4a4a4a,metalness:.85,roughness:.2});
+  const disk=new THREE.Mesh(new THREE.CylinderGeometry(55,55,4,48),dkMat);disk.castShadow=true;magGroup.add(disk);
+  const hub=new THREE.Mesh(new THREE.CylinderGeometry(10,10,8,24),new THREE.MeshStandardMaterial({color:0x666,metalness:.9,roughness:.15}));hub.position.y=2;magGroup.add(hub);
+  const sltMat=new THREE.MeshStandardMaterial({color:0x2c2c2c,metalness:.7,roughness:.4});
+  for(let i=0;i<12;i++){const a=(i/12)*Math.PI*2;const s=new THREE.Mesh(new THREE.CylinderGeometry(5,5,7,8),sltMat);s.position.set(Math.cos(a)*42,-5.5,Math.sin(a)*42);s.castShadow=true;magGroup.add(s);}
+  magGroup.visible=false;
+  scene.add(magGroup);
 }
 
 let chipMat=null;
@@ -828,7 +842,7 @@ function millStartCycle(){
   q.push({type:"rapid",x:0,y:TOP+30,z:0});
   mill.queue=q;mill.moveActive=q.shift();mill.running=true;
 }
-function millStop(){mill.queue=[];mill.moveActive={type:"rapid",x:mill.x,y:TOP+30,z:mill.z};mill.running=false;mill.paused=false;}
+function millStop(){mill.queue=[];mill.moveActive={type:"rapid",x:mill.x,y:TOP+30,z:mill.z};mill.running=false;mill.paused=false;toolYOff=0;if(magGroup)magGroup.visible=false;toolGroup.visible=true;}
 function millGoto(x,y,z){if(mill.emergency||mill.mode!=="MANUAL")return;mill.moveActive={type:"rapid",x:clamp(x,-W/2+MARGIN*dx,W/2-MARGIN*dx),y:clamp(y,0,120),z:clamp(z,-D/2+MARGIN*dz,D/2-MARGIN*dz)};}
 
 function updateMill(dt){
@@ -844,9 +858,16 @@ function updateMill(dt){
     }
     if(mill.moveActive){const m=mill.moveActive;
       if(m.type==="tc"){
-        if(!m._t){m._t=0;mill.spindleOn=false;mill.coolantMode="off";}
+        if(!m._t){m._t=0;m._ph=0;mill.spindleOn=false;mill.coolantMode="off";
+          const cur=magazine.activeSlot,tgt=m.targetSlot,diff=((tgt-cur)%12+12)%12;
+          m._rotStart=magGroup.rotation.y;m._rotEnd=magGroup.rotation.y-diff*(Math.PI*2/12);
+          magGroup.position.set(mill.x,mill.y+CUTTER_H+140,mill.z);
+        }
         m._t+=dt;
-        if(m._t>=0.5){magazine.requestChange(m.targetSlot);buildTool();mill.spindleOn=true;mill.coolantMode="flood";mill.moveActive=mill.queue.shift()||null;if(!mill.moveActive&&mill.running)mill.running=false;}
+        if(m._ph===0){const p=Math.min(m._t/0.3,1);toolYOff=p*80;toolGroup.visible=p<0.9;if(m._t>=0.3){m._ph=1;magGroup.visible=true;}}
+        else if(m._ph===1){const p=Math.min((m._t-0.3)/0.6,1);const e=p<.5?2*p*p:-1+(4-2*p)*p;magGroup.rotation.y=m._rotStart+(m._rotEnd-m._rotStart)*e;if(m._t>=0.9){m._ph=2;magazine.requestChange(m.targetSlot);buildTool();toolGroup.visible=false;}}
+        else if(m._ph===2){toolGroup.visible=true;const p=Math.min((m._t-0.9)/0.3,1);toolYOff=80*(1-p);if(m._t>=1.2){m._ph=3;}}
+        else{toolYOff=0;magGroup.visible=false;mill.spindleOn=true;mill.coolantMode="flood";mill.moveActive=mill.queue.shift()||null;if(!mill.moveActive&&mill.running)mill.running=false;}
       }else{const rate=m.type==="feed"?feedRate:rapid;
       const ex=m.x-mill.x,ey=m.y-mill.y,ez=m.z-mill.z,dist=Math.hypot(ex,ey,ez),stepv=rate*dt;
       if(dist<=stepv||dist<1e-4){mill.x=m.x;mill.y=m.y;mill.z=m.z;mill.moveActive=mill.queue.shift()||null;if(!mill.moveActive&&mill.running)mill.running=false;}
@@ -860,7 +881,7 @@ function updateMill(dt){
   updateChips(dt);
   spawnCoolant();updateCoolant(dt);
   // takım konumu
-  toolGroup.position.set(mill.x,mill.y,mill.z);
+  toolGroup.position.set(mill.x,mill.y+toolYOff,mill.z);
   toolGroup.rotation.y=mill.spinAngle;
 }
 
@@ -876,9 +897,9 @@ $("mtool-plus").onclick=()=>{const s=clamp(mill.toolNo,0,39);if(magazine.getTool
 document.querySelectorAll(".mjog").forEach(b=>{const a=b.dataset.a,d=+b.dataset.d;const dn=e=>{e.preventDefault();mill.jog[a]=d;},up=()=>mill.jog[a]=0;b.addEventListener("pointerdown",dn);b.addEventListener("pointerup",up);b.addEventListener("pointerleave",up);b.addEventListener("pointercancel",up);});
 $("mbtn-spindle").onclick=()=>{if(!mill.emergency)mill.spindleOn=!mill.spindleOn;};
 $("mbtn-cycle").onclick=()=>millStartCycle(); $("mbtn-hold").onclick=()=>mill.paused=!mill.paused;
-$("mbtn-emg").onclick=()=>{mill.emergency=true;mill.running=false;mill.spindleOn=false;mill.coolantMode="off";mill.queue=[];mill.moveActive=null;mill.alarm="EMG";};
+$("mbtn-emg").onclick=()=>{mill.emergency=true;mill.running=false;mill.spindleOn=false;mill.coolantMode="off";mill.queue=[];mill.moveActive=null;mill.alarm="EMG";toolYOff=0;if(magGroup)magGroup.visible=false;toolGroup.visible=true;};
 $("mbtn-reset").onclick=()=>{mill.alarm=null;mill.emergency=false;};
-$("mbtn-newp").onclick=()=>{heights=new Float32Array(COLS*ROWS).fill(TOP);const pos=planeGeo.attributes.position;for(let i=0;i<pos.count;i++)pos.setY(i,TOP);pos.needsUpdate=true;planeGeo.computeVertexNormals();mill.removed=0;mill.running=false;mill.queue=[];mill.moveActive=null;mill.x=0;mill.y=TOP+30;mill.z=0;};
+$("mbtn-newp").onclick=()=>{heights=new Float32Array(COLS*ROWS).fill(TOP);const pos=planeGeo.attributes.position;for(let i=0;i<pos.count;i++)pos.setY(i,TOP);pos.needsUpdate=true;planeGeo.computeVertexNormals();mill.removed=0;mill.running=false;mill.queue=[];mill.moveActive=null;mill.x=0;mill.y=TOP+30;mill.z=0;toolYOff=0;if(magGroup)magGroup.visible=false;toolGroup.visible=true;};
 $("m-play").onclick=()=>{mill.mode="AUTO";millStartCycle();};
 $("m-pause").onclick=()=>mill.paused=!mill.paused;
 $("m-stop").onclick=()=>millStop();
@@ -1754,7 +1775,8 @@ function taiExec(raw){
     /* --- delik delme --- */
     if(/(delik|drill|del|bore)/i.test(t)){
       let dia=taiNum(t,["cap","capinda","capi","dia","diameter","\\bø"])||taiNum(t,["delik"])||10;
-      let dep=taiNum(t,["derin","derinlik","derinlig","depth","deep"])||dia*1.5;
+      let dep=taiNum(t,["derin","derinlik","derinlig","depth","deep"]);
+      if(dep===null){const nums=taiAllNums(t);const di=nums.indexOf(dia);if(di!==-1)nums.splice(di,1);dep=nums.length?nums[0]:dia*1.5;}
       let cx=0,cz=0;
       const posM=t.match(/x\s*([+-]?\d+\.?\d*)/i);if(posM)cx=parseFloat(posM[1]);
       const posZ=t.match(/z\s*([+-]?\d+\.?\d*)/i);if(posZ)cz=parseFloat(posZ[1]);
@@ -1894,7 +1916,7 @@ taiRenderChips();
 window._rover = {
   taiUserInput, taiExec, taiGetChips, taiNorm, taiMsg, taiRenderChips,
   taiMessages, parseGcode, runMillGcode, runLatheGcode, safetyInterceptor,
-  magazine, TOOL_LIBRARY, buildTool,
+  magazine, TOOL_LIBRARY, buildTool, buildMagazineDisk,
   get CUTTER_R(){ return CUTTER_R; }, get CUTTER_H(){ return CUTTER_H; },
   get active(){ return active; },
   get W(){ return W; }, get D(){ return D; }, get TOP(){ return TOP; },
