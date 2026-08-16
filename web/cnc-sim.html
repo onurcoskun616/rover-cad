@@ -1,0 +1,2261 @@
+<!DOCTYPE html>
+<html lang="tr" class="bg-zinc-900">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>CNC Simülatör · Torna & Freze</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script type="importmap">
+{ "imports": {
+  "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+}}
+</script>
+<style>
+  @keyframes spin-slow { to { transform: rotate(360deg); } }
+  .animate-spin-slow { animation: spin-slow 2s linear infinite; display:inline-block; }
+  .mdi-key{display:flex;align-items:center;justify-content:center;border-radius:3px;border:1px solid rgba(9,9,11,.6);
+    background-image:linear-gradient(to bottom,#e4e4e7,#a1a1aa);color:#27272a;font-weight:700;
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.6),0 1px 2px rgba(0,0,0,.5);transition:transform .05s;}
+  .mdi-key:active{transform:translateY(1px);background-image:linear-gradient(to bottom,#d4d4d8,#71717a);}
+  input[type="range"]{accent-color:#06b6d4;}
+  .tb-btn{display:flex;align-items:center;justify-content:center;border:1px solid #2b6f9c;border-radius:6px;
+    background:linear-gradient(to bottom,#1f6fa0,#124b70);color:#e6f4ff;box-shadow:inset 0 1px 0 rgba(255,255,255,.25);}
+  .tb-btn:hover{filter:brightness(1.15);} .tb-btn:active{transform:translateY(1px);}
+  .tb-icn{display:flex;align-items:center;justify-content:center;border:1px solid #3f5a2f;border-radius:6px;
+    background:linear-gradient(to bottom,#4a7a2c,#2f5017);color:#eaffd6;}
+  .tb-icn:hover{filter:brightness(1.15);}
+
+  /* Topkapı AI Chat Bot */
+  #tai-toggle{display:none;}
+  .tai-open-btn{display:flex;align-items:center;gap:10px;width:100%;padding:10px 12px;border-radius:8px;border:1px solid rgba(6,182,212,.3);
+    background:linear-gradient(135deg,#0c1a24 0%,#18181b 100%);cursor:pointer;transition:border-color .2s,box-shadow .2s;}
+  .tai-open-btn:hover{border-color:#06b6d4;box-shadow:0 0 12px rgba(6,182,212,.2);}
+  .tai-open-btn .tai-robot{width:36px;height:36px;border-radius:8px;background:#083344;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+  .tai-open-btn .tai-info{flex:1;text-align:left;}
+  .tai-open-btn .tai-label{font-size:12px;font-weight:700;color:#67e8f9;letter-spacing:.02em;}
+  .tai-open-btn .tai-sub{font-size:9px;color:#a1a1aa;margin-top:1px;}
+  .tai-open-btn .tai-sub .tai-mode-tag{display:inline-block;background:#06b6d4;color:#fff;font-size:8px;font-weight:800;
+    padding:1px 6px;border-radius:8px;margin-left:4px;letter-spacing:.04em;vertical-align:middle;}
+  #tai-panel{position:fixed;right:20px;bottom:20px;z-index:10001;width:360px;max-height:520px;
+    border-radius:14px;background:#18181b;border:1px solid #3f3f46;box-shadow:0 12px 40px rgba(0,0,0,.6);
+    display:none;flex-direction:column;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;}
+  #tai-panel.open{display:flex;}
+  .tai-header{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;background:#27272a;border-bottom:1px solid #3f3f46;}
+  .tai-header-left{display:flex;align-items:center;gap:8px;}
+  .tai-header-logo{width:28px;height:28px;border-radius:6px;background:#18181b;display:flex;align-items:center;justify-content:center;font-size:16px;border:1px solid #3f3f46;}
+  .tai-header-title{font-size:14px;font-weight:700;color:#e4e4e7;}
+  .tai-header-badge{font-size:9px;font-weight:700;background:#3f3f46;color:#a1a1aa;padding:2px 6px;border-radius:4px;text-transform:uppercase;letter-spacing:.05em;}
+  .tai-close{width:28px;height:28px;border:none;background:transparent;color:#71717a;font-size:18px;cursor:pointer;border-radius:4px;display:flex;align-items:center;justify-content:center;}
+  .tai-close:hover{background:#3f3f46;color:#fff;}
+  .tai-messages{flex:1;overflow-y:auto;padding:12px 16px;display:flex;flex-direction:column;gap:10px;min-height:200px;max-height:340px;}
+  .tai-msg{max-width:88%;padding:10px 14px;border-radius:12px;font-size:13px;line-height:1.5;word-break:break-word;}
+  .tai-msg-bot{align-self:flex-start;background:#27272a;color:#d4d4d8;border-bottom-left-radius:4px;}
+  .tai-msg-user{align-self:flex-end;background:#0e7490;color:#ecfeff;border-bottom-right-radius:4px;}
+  .tai-msg-bot .tai-msg-action{color:#22d3ee;font-weight:600;}
+  .tai-chips{display:flex;flex-wrap:wrap;gap:6px;padding:6px 16px 10px;}
+  .tai-chip{font-size:11px;font-weight:600;padding:6px 12px;border-radius:8px;border:1px solid #3f3f46;background:#27272a;color:#a1a1aa;cursor:pointer;transition:all .15s;white-space:nowrap;}
+  .tai-chip:hover{background:#3f3f46;color:#e4e4e7;border-color:#52525b;}
+  .tai-input-row{display:flex;align-items:center;gap:8px;padding:10px 12px;border-top:1px solid #3f3f46;background:#1c1c1e;}
+  .tai-input{flex:1;border:none;background:transparent;color:#e4e4e7;font-size:13px;outline:none;padding:6px 4px;}
+  .tai-input::placeholder{color:#52525b;}
+  .tai-send{width:32px;height:32px;border-radius:50%;border:none;background:#3f3f46;color:#71717a;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .15s;}
+  .tai-send:hover{background:#06b6d4;color:#fff;}
+  .tai-messages::-webkit-scrollbar{width:4px;}
+  .tai-messages::-webkit-scrollbar-track{background:transparent;}
+  .tai-messages::-webkit-scrollbar-thumb{background:#3f3f46;border-radius:2px;}
+  @media(max-width:480px){#tai-panel{right:8px;left:8px;bottom:80px;width:auto;max-height:70vh;}}
+</style>
+</head>
+<body class="text-zinc-100 h-screen overflow-hidden">
+<main class="flex h-screen flex-col bg-zinc-900 p-2 overflow-hidden">
+
+  <!-- ÜST BAR + SEÇİCİ -->
+  <header class="mb-2 flex items-center justify-between rounded-md bg-zinc-800 px-3 py-2">
+    <div class="flex items-center gap-2">
+      <button onclick="history.back()" title="Geri" class="flex h-8 w-8 items-center justify-center rounded-md bg-zinc-700 text-zinc-300 hover:bg-zinc-600 hover:text-white transition-colors">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/></svg>
+      </button>
+      <h1 class="text-sm font-bold tracking-wide">CNC Simülatör</h1>
+    </div>
+    <div class="flex overflow-hidden rounded-md border border-zinc-600">
+      <button id="tab-mill"  class="px-4 py-1.5 text-[12px] font-bold">Freze (3B)</button>
+      <button id="tab-lathe" class="px-4 py-1.5 text-[12px] font-bold">Torna (2B)</button>
+    </div>
+    <div class="flex items-center gap-2">
+      <p class="hidden text-[11px] text-zinc-400 md:block">AUTO + CYCLE START otomatik işler · MANUAL jog/MDI ile elle talaş kaldır</p>
+      <a href="index.html" title="Ana Sayfa" class="flex h-8 w-8 items-center justify-center rounded-md bg-zinc-700 text-zinc-300 hover:bg-red-600 hover:text-white transition-colors">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+      </a>
+    </div>
+  </header>
+
+  <div class="min-h-0 flex-1">
+
+    <!-- ==================================================================== -->
+    <!-- ============================  FREZE (3B)  ========================== -->
+    <!-- ==================================================================== -->
+    <div id="view-mill" class="flex h-full w-full flex-col gap-2 lg:flex-row">
+      <section class="relative flex-1 overflow-hidden rounded-md border border-zinc-700 bg-black">
+        <div id="mill-canvas-wrap" class="absolute inset-0"></div>
+
+        <!-- sol üst durum -->
+        <div class="pointer-events-none absolute left-2 top-2 z-10 rounded bg-black/50 px-2 py-1 font-mono text-[10px] text-emerald-300 leading-tight">
+          <div id="m-stat-pos">X 0.000 Y 0.000 Z 0.000</div>
+          <div id="m-stat-tool">tool_selected = 1</div>
+          <div id="m-stat-cut">cutting_status = 0</div>
+          <div id="m-stat-fps" class="text-cyan-300">FPS: 0</div>
+        </div>
+
+        <!-- sağ üst oynatma kontrolleri -->
+        <div class="absolute right-2 top-2 z-10 flex gap-2">
+          <label id="m-load" title="G-Code Dosyası Yükle" class="tb-btn h-10 w-10 text-base cursor-pointer">
+            <input type="file" id="m-file" accept=".nc,.gcode,.ngc,.txt,.tap" class="hidden"/>📂
+          </label>
+          <button id="m-play"  title="Cycle Start"  class="tb-btn h-10 w-10 text-lg">▶</button>
+          <button id="m-pause" title="Feed Hold"    class="tb-btn h-10 w-10 text-lg">⏸</button>
+          <button id="m-stop"  title="Stop"         class="tb-btn h-10 w-10 text-lg">⏹</button>
+          <button id="m-new"   title="Yeni Parça"   class="tb-btn h-10 w-10 text-base">⤓</button>
+          <button id="m-mute"  title="Ses"          class="tb-btn h-10 w-10 text-base">🔊</button>
+        </div>
+        <!-- yüklenen dosya adı -->
+        <div id="m-file-info" class="hidden absolute right-2 top-14 z-10 rounded bg-black/70 px-2 py-1 font-mono text-[10px] text-cyan-300"></div>
+
+        <!-- sol dikey kamera araç çubuğu -->
+        <div class="absolute left-2 top-24 z-10 flex flex-col gap-2">
+          <button data-view="iso"   title="İzometrik" class="tb-icn h-9 w-9 text-sm">⬛</button>
+          <button data-view="top"   title="Üstten"    class="tb-icn h-9 w-9 text-sm">▦</button>
+          <button data-view="front" title="Önden"     class="tb-icn h-9 w-9 text-sm">▭</button>
+          <button data-view="right" title="Yandan"    class="tb-icn h-9 w-9 text-sm">◨</button>
+          <button id="m-wire"       title="Tel kafes" class="tb-icn h-9 w-9 text-sm">◇</button>
+        </div>
+      </section>
+
+      <!-- FREZE PANELİ -->
+      <aside class="w-full shrink-0 overflow-y-auto lg:w-[380px]">
+        <div class="flex h-full flex-col gap-1.5 rounded-md bg-zinc-800 p-2 text-zinc-200">
+          <!-- LCD -->
+          <div class="rounded-sm border-4 border-zinc-500 bg-zinc-900 p-1.5">
+            <div class="rounded-sm bg-[#0f261b] p-2 font-mono text-[11px] text-[#5be08a]">
+              <div class="flex items-center justify-between bg-[#0d4a6b] px-1 text-[#cfe8ff]">
+                <span>ACTUAL POSITION</span><span>O0002</span><span>N0010</span>
+              </div>
+              <div class="my-2 space-y-1 px-1">
+                <div class="flex items-baseline justify-between"><span class="text-base text-[#7effb0]">X</span><span id="ml-x" class="text-xl tabular-nums text-[#eaffef]">0.000</span></div>
+                <div class="flex items-baseline justify-between"><span class="text-base text-[#7effb0]">Y</span><span id="ml-y" class="text-xl tabular-nums text-[#eaffef]">0.000</span></div>
+                <div class="flex items-baseline justify-between"><span class="text-base text-[#7effb0]">Z</span><span id="ml-z" class="text-xl tabular-nums text-[#eaffef]">0.000</span></div>
+              </div>
+              <div class="grid grid-cols-2 gap-x-3 gap-y-0.5 border-t border-[#1f5c42] px-1 pt-1 text-[10px] text-[#59c98e]">
+                <span id="ml-actf">ACT.F 0</span><span id="ml-rpm" class="text-right">S 0</span>
+                <span id="ml-tool">T01</span><span id="ml-ovr" class="text-right">OVR 100%</span>
+                <span id="ml-removed">REMOVED 0%</span><span id="ml-coolant" class="text-right text-[#59c98e]">COOLANT OFF</span>
+                <span id="ml-stock" class="col-span-2 text-[#59c98e]">STOCK 200x140x60</span>
+              </div>
+              <div class="mt-1 flex items-center justify-between border-t border-[#1f5c42] px-1 pt-1 text-[10px]">
+                <span id="ml-mode" class="text-[#59c98e]">MANUAL</span>
+                <span id="ml-alarm" class="text-[#59c98e]">READY</span>
+                <span id="ml-run" class="text-[#59c98e]">STOP</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- MDI + spindle/feed -->
+          <div class="grid grid-cols-2 gap-2">
+            <fieldset class="rounded border border-zinc-600 bg-zinc-900/60 p-2">
+              <legend class="px-1 text-[9px] font-bold uppercase text-cyan-300">MDI Position</legend>
+              <label class="mb-1 flex items-center gap-1 text-[10px]"><span class="w-3 text-[#7effb0]">X</span><input id="me-x" inputmode="decimal" placeholder="0" class="w-full rounded bg-zinc-950 px-1.5 py-0.5 font-mono text-[11px] text-[#eaffef] outline-none ring-1 ring-zinc-700 focus:ring-cyan-400"/></label>
+              <label class="mb-1 flex items-center gap-1 text-[10px]"><span class="w-3 text-[#7effb0]">Y</span><input id="me-y" inputmode="decimal" placeholder="0" class="w-full rounded bg-zinc-950 px-1.5 py-0.5 font-mono text-[11px] text-[#eaffef] outline-none ring-1 ring-zinc-700 focus:ring-cyan-400"/></label>
+              <label class="mb-2 flex items-center gap-1 text-[10px]"><span class="w-3 text-[#7effb0]">Z</span><input id="me-z" inputmode="decimal" placeholder="0" class="w-full rounded bg-zinc-950 px-1.5 py-0.5 font-mono text-[11px] text-[#eaffef] outline-none ring-1 ring-zinc-700 focus:ring-cyan-400"/></label>
+              <button id="me-go" class="w-full rounded bg-cyan-600 py-1 text-[10px] font-bold text-white hover:bg-cyan-500 disabled:opacity-40">INPUT → MOVE</button>
+            </fieldset>
+            <fieldset class="rounded border border-zinc-600 bg-zinc-900/60 p-2">
+              <legend class="px-1 text-[9px] font-bold uppercase text-cyan-300">Spindle / Feed</legend>
+              <div class="mb-1 flex justify-between text-[10px]"><span>Spindle</span><span id="mlbl-rpm" class="font-mono text-[#7effb0]">6000 rpm</span></div>
+              <input id="mrng-rpm" type="range" min="0" max="12000" step="100" value="6000" class="mb-2 w-full"/>
+              <div class="mb-1 flex justify-between text-[10px]"><span>Feed</span><span id="mlbl-feed" class="font-mono text-[#7effb0]">400 mm/m</span></div>
+              <input id="mrng-feed" type="range" min="1" max="2000" step="1" value="400" class="mb-2 w-full"/>
+              <div class="mb-1 flex justify-between text-[10px]"><span>Override</span><span id="mlbl-ovr" class="font-mono text-[#7effb0]">100%</span></div>
+              <input id="mrng-ovr" type="range" min="0" max="1.2" step="0.05" value="1" class="w-full"/>
+            </fieldset>
+          </div>
+
+          <!-- mode + jog -->
+          <div class="grid grid-cols-2 gap-2">
+            <div class="rounded border border-zinc-600 bg-zinc-900/60 p-2">
+              <div class="mb-1 text-[9px] font-bold uppercase text-cyan-300">Mode</div>
+              <div class="grid grid-cols-2 gap-1">
+                <button id="mmode-manual" class="rounded py-2 text-[10px] font-bold">JOG / MDI</button>
+                <button id="mmode-auto" class="rounded py-2 text-[10px] font-bold">AUTO</button>
+              </div>
+              <div class="mt-2 flex items-center justify-between">
+                <span class="text-[9px] uppercase text-zinc-400">Tool</span>
+                <div class="flex items-center gap-1">
+                  <button id="mtool-minus" class="mdi-key h-6 w-6 text-[10px]">−</button>
+                  <span id="mlbl-tool" class="w-8 text-center font-mono text-[12px] text-[#7effb0]">T01</span>
+                  <button id="mtool-plus" class="mdi-key h-6 w-6 text-[10px]">+</button>
+                </div>
+              </div>
+            </div>
+            <div class="rounded border border-zinc-600 bg-zinc-900/60 p-2">
+              <div class="mb-1 text-[9px] font-bold uppercase text-cyan-300">Jog Axis</div>
+              <div class="grid grid-cols-3 gap-1">
+                <span></span>
+                <button class="mjog rounded bg-zinc-700 py-1.5 text-[10px] font-bold hover:bg-zinc-600 active:bg-emerald-600" data-a="z" data-d="-1">+Y</button>
+                <button class="mjog rounded bg-zinc-700 py-1.5 text-[10px] font-bold hover:bg-zinc-600 active:bg-emerald-600" data-a="y" data-d="1">+Z</button>
+                <button class="mjog rounded bg-zinc-700 py-1.5 text-[10px] font-bold hover:bg-zinc-600 active:bg-emerald-600" data-a="x" data-d="-1">−X</button>
+                <span class="flex items-center justify-center text-zinc-500">✛</span>
+                <button class="mjog rounded bg-zinc-700 py-1.5 text-[10px] font-bold hover:bg-zinc-600 active:bg-emerald-600" data-a="x" data-d="1">+X</button>
+                <span></span>
+                <button class="mjog rounded bg-zinc-700 py-1.5 text-[10px] font-bold hover:bg-zinc-600 active:bg-emerald-600" data-a="z" data-d="1">−Y</button>
+                <button class="mjog rounded bg-zinc-700 py-1.5 text-[10px] font-bold hover:bg-zinc-600 active:bg-emerald-600" data-a="y" data-d="-1">−Z</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- op buttons -->
+          <div class="grid grid-cols-3 items-center gap-2 rounded border border-zinc-600 bg-zinc-900/60 p-2">
+            <button id="mbtn-spindle" class="flex flex-col items-center gap-1 rounded bg-zinc-700 py-2 text-[10px] font-bold hover:bg-zinc-600">
+              <span id="mspindle-icon" class="text-base">✳</span><span id="mspindle-label">SPINDLE OFF</span>
+            </button>
+            <button id="mbtn-cycle" class="flex flex-col items-center gap-1 rounded bg-green-600 py-2 text-[10px] font-bold text-white hover:bg-green-500 disabled:opacity-40">
+              <span class="h-4 w-4 rounded-full bg-green-300 shadow-[0_0_6px_rgba(120,255,160,.9)]"></span>CYCLE START
+            </button>
+            <button id="mbtn-hold" class="flex flex-col items-center gap-1 rounded bg-amber-500 py-2 text-[10px] font-bold text-zinc-900 hover:bg-amber-400">
+              <span class="h-4 w-4 rounded-full bg-amber-200"></span>FEED HOLD
+            </button>
+          </div>
+
+          <!-- coolant / soğutma sıvısı -->
+          <div class="flex items-center gap-2 rounded border border-zinc-600 bg-zinc-900/60 p-2">
+            <button id="mbtn-coolant" class="flex flex-1 flex-col items-center gap-1 rounded bg-zinc-700 py-2 text-[10px] font-bold hover:bg-zinc-600">
+              <span id="mcoolant-icon" class="text-base">💧</span><span id="mcoolant-label">COOLANT OFF</span>
+            </button>
+            <div class="text-[9px] text-zinc-400 leading-tight text-center">M8 Flood<br>M7 Mist<br>M9 Off</div>
+          </div>
+
+          <!-- MDI keypad (dekoratif) -->
+          <div class="rounded border border-zinc-600 bg-zinc-700/40 p-2">
+            <div id="mmdi" class="grid grid-cols-6 gap-1"></div>
+          </div>
+
+          <!-- Topkapı AI chatbot -->
+          <button class="tai-open-btn" id="mtai-btn" type="button">
+            <div class="tai-robot"><svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#67e8f9" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="9" width="18" height="12" rx="3"/><circle cx="9" cy="15" r="1.5" fill="#67e8f9"/><circle cx="15" cy="15" r="1.5" fill="#67e8f9"/><line x1="9" y1="18" x2="15" y2="18"/><line x1="12" y1="3" x2="12" y2="9"/><circle cx="12" cy="3" r="2"/><line x1="1" y1="13" x2="3" y2="13"/><line x1="21" y1="13" x2="23" y2="13"/></svg></div>
+            <div class="tai-info"><div class="tai-label">Topkapi AI</div><div class="tai-sub">CNC Asistan <span class="tai-mode-tag" id="mtai-mode">FREZE</span></div></div>
+          </button>
+
+          <!-- malzeme seçimi -->
+          <div class="rounded border border-zinc-600 bg-zinc-900/60 p-2">
+            <div class="mb-1 text-[9px] font-bold uppercase text-cyan-300">Malzeme / Material</div>
+            <select id="mmat-sel" class="w-full rounded bg-zinc-950 px-2 py-1.5 text-[11px] text-zinc-200 outline-none ring-1 ring-zinc-700 focus:ring-cyan-400">
+              <option value="steel">Çelik (Steel)</option>
+              <option value="aluminum">Alüminyum</option>
+              <option value="brass">Pirinç (Brass)</option>
+              <option value="copper">Bakır (Copper)</option>
+              <option value="cast-iron">Dökme Demir</option>
+              <option value="titanium">Titanyum</option>
+              <option value="wood">Ahşap (Wood)</option>
+              <option value="plastic">Plastik (POM/Nylon)</option>
+              <option value="acrylic">Akrilik (PMMA)</option>
+            </select>
+          </div>
+
+          <!-- emergency -->
+          <div class="flex items-center gap-3 rounded border border-zinc-600 bg-zinc-900/60 p-2">
+            <button id="mbtn-emg" aria-label="Emergency stop" class="flex h-14 w-14 shrink-0 items-center justify-center rounded-full border-4 border-yellow-400 bg-red-600 shadow-[0_4px_10px_rgba(0,0,0,.6)] active:translate-y-0.5">
+              <span class="h-8 w-8 rounded-full bg-red-500 shadow-inner"></span>
+            </button>
+            <div class="flex flex-1 flex-col gap-1">
+              <span class="text-[9px] font-bold uppercase text-red-400">Emergency Stop</span>
+              <button id="mbtn-reset" class="rounded bg-yellow-300 py-1 text-[10px] font-bold text-zinc-900 hover:bg-yellow-200">RESET / CLEAR ALARM</button>
+              <button id="mbtn-newp" class="rounded bg-zinc-600 py-1 text-[10px] font-bold hover:bg-zinc-500">NEW WORKPIECE</button>
+            </div>
+          </div>
+        </div>
+      </aside>
+    </div>
+
+    <!-- ==================================================================== -->
+    <!-- ============================  TORNA (2B)  ========================== -->
+    <!-- ==================================================================== -->
+    <div id="view-lathe" class="hidden h-full w-full flex-col gap-2 lg:flex-row">
+      <section class="relative flex-1 overflow-hidden rounded-md border border-zinc-700 bg-black">
+        <div class="pointer-events-none absolute left-2 top-2 z-10 rounded bg-black/40 px-2 py-1 font-mono text-[11px] text-cyan-300">Topkapı AI · FANUC 0i-T · Turning</div>
+        <div class="absolute right-2 top-2 z-10 flex gap-2">
+          <label title="G-Code Dosyası Yükle" class="tb-btn h-10 w-10 text-base cursor-pointer">
+            <input type="file" id="l-file" accept=".nc,.gcode,.ngc,.txt,.tap" class="hidden"/>📂
+          </label>
+        </div>
+        <div id="l-file-info" class="hidden absolute right-2 top-14 z-10 rounded bg-black/70 px-2 py-1 font-mono text-[10px] text-cyan-300"></div>
+        <canvas id="lathe-canvas" class="block h-full w-full"></canvas>
+        <div id="hud" class="pointer-events-none absolute bottom-2 left-2 z-10 rounded bg-black/50 px-2 py-1 font-mono text-[11px] text-emerald-300"></div>
+      </section>
+      <aside class="w-full shrink-0 overflow-y-auto lg:w-[380px]">
+        <div class="flex h-full flex-col gap-1.5 rounded-md bg-zinc-800 p-2 text-zinc-200">
+          <div class="rounded-sm border-4 border-zinc-500 bg-zinc-900 p-1.5">
+            <div class="rounded-sm bg-[#0f261b] p-2 font-mono text-[11px] text-[#5be08a]">
+              <div class="flex items-center justify-between bg-[#0d4a6b] px-1 text-[#cfe8ff]"><span>ACTUAL POSITION (ABS)</span><span>O0001</span><span>N0010</span></div>
+              <div class="my-2 space-y-1 px-1">
+                <div class="flex items-baseline justify-between"><span class="text-lg text-[#7effb0]">X</span><span id="lcd-x" class="text-2xl tabular-nums tracking-wider text-[#eaffef]">0.000</span></div>
+                <div class="flex items-baseline justify-between"><span class="text-lg text-[#7effb0]">Z</span><span id="lcd-z" class="text-2xl tabular-nums tracking-wider text-[#eaffef]">0.000</span></div>
+              </div>
+              <div class="grid grid-cols-2 gap-x-3 gap-y-0.5 border-t border-[#1f5c42] px-1 pt-1 text-[10px] text-[#59c98e]">
+                <span id="lcd-actf">ACT.F 0 MM/M</span><span id="lcd-rpm" class="text-right">S 0 RPM</span>
+                <span>PART COUNT 1</span><span id="lcd-tool" class="text-right">T0100</span>
+                <span id="lcd-ovr">OVR 100%</span><span id="lcd-removed" class="text-right">REMOVED 0%</span>
+                <span id="lcd-coolant" class="col-span-2 text-[#59c98e]">COOLANT OFF</span>
+                <span id="lcd-stock" class="col-span-2 text-[#59c98e]">STOCK Ø120x200</span>
+              </div>
+              <div class="mt-1 flex items-center justify-between border-t border-[#1f5c42] px-1 pt-1 text-[10px]">
+                <span id="lcd-mode" class="text-[#59c98e]">MANUAL</span><span id="lcd-alarm" class="text-[#59c98e]">READY</span><span id="lcd-run" class="text-[#59c98e]">STOP</span>
+              </div>
+            </div>
+            <div class="mt-1 grid grid-cols-5 gap-1">
+              <div class="rounded-[2px] bg-zinc-300 text-center text-[9px] font-bold text-zinc-800">ABS</div>
+              <div class="rounded-[2px] bg-zinc-300 text-center text-[9px] font-bold text-zinc-800">REL</div>
+              <div class="rounded-[2px] bg-zinc-300 text-center text-[9px] font-bold text-zinc-800">ALL</div>
+              <div class="rounded-[2px] bg-zinc-300 text-center text-[9px] font-bold text-zinc-800">HNDL</div>
+              <div class="rounded-[2px] bg-zinc-300 text-center text-[9px] font-bold text-zinc-800">(OPRT)</div>
+            </div>
+          </div>
+          <div class="grid grid-cols-2 gap-2">
+            <fieldset class="rounded border border-zinc-600 bg-zinc-900/60 p-2">
+              <legend class="px-1 text-[9px] font-bold uppercase text-cyan-300">MDI Position</legend>
+              <label class="mb-1 flex items-center gap-1 text-[10px]"><span class="w-4 text-[#7effb0]">X</span><input id="edit-x" inputmode="decimal" placeholder="0.000" class="w-full rounded bg-zinc-950 px-1.5 py-1 font-mono text-[11px] text-[#eaffef] outline-none ring-1 ring-zinc-700 focus:ring-cyan-400"/></label>
+              <label class="mb-2 flex items-center gap-1 text-[10px]"><span class="w-4 text-[#7effb0]">Z</span><input id="edit-z" inputmode="decimal" placeholder="0.000" class="w-full rounded bg-zinc-950 px-1.5 py-1 font-mono text-[11px] text-[#eaffef] outline-none ring-1 ring-zinc-700 focus:ring-cyan-400"/></label>
+              <button id="btn-goto" class="w-full rounded bg-cyan-600 py-1 text-[10px] font-bold text-white hover:bg-cyan-500 disabled:opacity-40">INPUT → MOVE</button>
+            </fieldset>
+            <fieldset class="rounded border border-zinc-600 bg-zinc-900/60 p-2">
+              <legend class="px-1 text-[9px] font-bold uppercase text-cyan-300">Spindle / Feed</legend>
+              <div class="mb-1 flex justify-between text-[10px]"><span>Spindle</span><span id="lbl-rpm" class="font-mono text-[#7effb0]">1200 rpm</span></div>
+              <input id="rng-rpm" type="range" min="0" max="4000" step="50" value="1200" class="mb-2 w-full"/>
+              <div class="mb-1 flex justify-between text-[10px]"><span>Feed</span><span id="lbl-feed" class="font-mono text-[#7effb0]">200 mm/m</span></div>
+              <input id="rng-feed" type="range" min="1" max="1000" step="1" value="200" class="mb-2 w-full"/>
+              <div class="mb-1 flex justify-between text-[10px]"><span>Override</span><span id="lbl-ovr" class="font-mono text-[#7effb0]">100%</span></div>
+              <input id="rng-ovr" type="range" min="0" max="1.2" step="0.05" value="1" class="w-full"/>
+            </fieldset>
+          </div>
+          <div class="grid grid-cols-2 gap-2">
+            <div class="rounded border border-zinc-600 bg-zinc-900/60 p-2">
+              <div class="mb-1 text-[9px] font-bold uppercase text-cyan-300">Mode</div>
+              <div class="grid grid-cols-2 gap-1">
+                <button id="mode-manual" class="rounded py-2 text-[10px] font-bold">JOG / MDI</button>
+                <button id="mode-auto" class="rounded py-2 text-[10px] font-bold">AUTO</button>
+              </div>
+              <div class="mt-2 flex items-center justify-between"><span class="text-[9px] uppercase text-zinc-400">Tool</span>
+                <div class="flex items-center gap-1">
+                  <button id="tool-minus" class="mdi-key h-6 w-6 text-[10px]">−</button>
+                  <span id="lbl-tool" class="w-8 text-center font-mono text-[12px] text-[#7effb0]">T01</span>
+                  <button id="tool-plus" class="mdi-key h-6 w-6 text-[10px]">+</button>
+                </div>
+              </div>
+            </div>
+            <div class="rounded border border-zinc-600 bg-zinc-900/60 p-2">
+              <div class="mb-1 text-[9px] font-bold uppercase text-cyan-300">Jog Axis</div>
+              <div class="grid grid-cols-3 grid-rows-3 gap-1">
+                <span></span><button class="jog rounded bg-zinc-700 py-2 text-[10px] font-bold hover:bg-zinc-600 active:bg-emerald-600" data-dx="1" data-dz="0">+X</button><span></span>
+                <button class="jog rounded bg-zinc-700 py-2 text-[10px] font-bold hover:bg-zinc-600 active:bg-emerald-600" data-dx="0" data-dz="1">−Z</button>
+                <span class="flex items-center justify-center text-zinc-500">✛</span>
+                <button class="jog rounded bg-zinc-700 py-2 text-[10px] font-bold hover:bg-zinc-600 active:bg-emerald-600" data-dx="0" data-dz="-1">+Z</button>
+                <span></span><button class="jog rounded bg-zinc-700 py-2 text-[10px] font-bold hover:bg-zinc-600 active:bg-emerald-600" data-dx="-1" data-dz="0">−X</button><span></span>
+              </div>
+            </div>
+          </div>
+          <div class="grid grid-cols-3 items-center gap-2 rounded border border-zinc-600 bg-zinc-900/60 p-2">
+            <button id="btn-spindle" class="flex flex-col items-center gap-1 rounded bg-zinc-700 py-2 text-[10px] font-bold hover:bg-zinc-600"><span id="spindle-icon" class="text-base">◎</span><span id="spindle-label">SPINDLE OFF</span></button>
+            <button id="btn-cycle" class="flex flex-col items-center gap-1 rounded bg-green-600 py-2 text-[10px] font-bold text-white hover:bg-green-500 disabled:opacity-40"><span class="h-4 w-4 rounded-full bg-green-300 shadow-[0_0_6px_rgba(120,255,160,.9)]"></span>CYCLE START</button>
+            <button id="btn-hold" class="flex flex-col items-center gap-1 rounded bg-amber-500 py-2 text-[10px] font-bold text-zinc-900 hover:bg-amber-400"><span class="h-4 w-4 rounded-full bg-amber-200"></span>FEED HOLD</button>
+          </div>
+          <!-- coolant / soğutma sıvısı -->
+          <div class="flex items-center gap-2 rounded border border-zinc-600 bg-zinc-900/60 p-2">
+            <button id="lbtn-coolant" class="flex flex-1 flex-col items-center gap-1 rounded bg-zinc-700 py-2 text-[10px] font-bold hover:bg-zinc-600">
+              <span id="lcoolant-icon" class="text-base">💧</span><span id="lcoolant-label">COOLANT OFF</span>
+            </button>
+            <div class="text-[9px] text-zinc-400 leading-tight text-center">M8 Flood<br>M7 Mist<br>M9 Off</div>
+          </div>
+          <div class="rounded border border-zinc-600 bg-zinc-700/40 p-2"><div id="mdi-rows" class="grid grid-cols-6 gap-1"></div><div id="mdi-fn" class="mt-1 grid grid-cols-6 gap-1"></div></div>
+
+          <!-- Topkapı AI chatbot -->
+          <button class="tai-open-btn" id="ltai-btn" type="button">
+            <div class="tai-robot"><svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#67e8f9" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="9" width="18" height="12" rx="3"/><circle cx="9" cy="15" r="1.5" fill="#67e8f9"/><circle cx="15" cy="15" r="1.5" fill="#67e8f9"/><line x1="9" y1="18" x2="15" y2="18"/><line x1="12" y1="3" x2="12" y2="9"/><circle cx="12" cy="3" r="2"/><line x1="1" y1="13" x2="3" y2="13"/><line x1="21" y1="13" x2="23" y2="13"/></svg></div>
+            <div class="tai-info"><div class="tai-label">Topkapi AI</div><div class="tai-sub">CNC Asistan <span class="tai-mode-tag" id="ltai-mode">TORNA</span></div></div>
+          </button>
+
+          <!-- malzeme seçimi -->
+          <div class="rounded border border-zinc-600 bg-zinc-900/60 p-2">
+            <div class="mb-1 text-[9px] font-bold uppercase text-cyan-300">Malzeme / Material</div>
+            <select id="lmat-sel" class="w-full rounded bg-zinc-950 px-2 py-1.5 text-[11px] text-zinc-200 outline-none ring-1 ring-zinc-700 focus:ring-cyan-400">
+              <option value="steel">Çelik (Steel)</option>
+              <option value="aluminum">Alüminyum</option>
+              <option value="brass">Pirinç (Brass)</option>
+              <option value="copper">Bakır (Copper)</option>
+              <option value="cast-iron">Dökme Demir</option>
+              <option value="titanium">Titanyum</option>
+              <option value="wood">Ahşap (Wood)</option>
+              <option value="plastic">Plastik (POM/Nylon)</option>
+              <option value="acrylic">Akrilik (PMMA)</option>
+            </select>
+          </div>
+
+          <div class="flex items-center gap-3 rounded border border-zinc-600 bg-zinc-900/60 p-2">
+            <button id="btn-emg" aria-label="Emergency stop" class="flex h-14 w-14 shrink-0 items-center justify-center rounded-full border-4 border-yellow-400 bg-red-600 shadow-[0_4px_10px_rgba(0,0,0,.6)] active:translate-y-0.5"><span class="h-8 w-8 rounded-full bg-red-500 shadow-inner"></span></button>
+            <div class="flex flex-1 flex-col gap-1">
+              <span class="text-[9px] font-bold uppercase text-red-400">Emergency Stop</span>
+              <button id="btn-reset" class="rounded bg-yellow-300 py-1 text-[10px] font-bold text-zinc-900 hover:bg-yellow-200">RESET / CLEAR ALARM</button>
+              <button id="btn-new" class="rounded bg-zinc-600 py-1 text-[10px] font-bold hover:bg-zinc-500">NEW WORKPIECE</button>
+            </div>
+          </div>
+        </div>
+      </aside>
+    </div>
+
+  </div>
+</main>
+
+<!-- Topkapı AI Chat Bot -->
+<button id="tai-toggle" title="Topkapı AI"></button>
+
+<div id="tai-panel">
+  <div class="tai-header">
+    <div class="tai-header-left">
+      <div class="tai-header-logo"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#a1a1aa" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="9" width="18" height="12" rx="3"/><circle cx="9" cy="15" r="1.5" fill="#a1a1aa"/><circle cx="15" cy="15" r="1.5" fill="#a1a1aa"/><line x1="9" y1="18" x2="15" y2="18"/><line x1="12" y1="3" x2="12" y2="9"/><circle cx="12" cy="3" r="2"/></svg></div>
+      <span class="tai-header-title">Topkapı AI</span>
+      <span class="tai-header-badge" id="tai-mode-badge">FREZE</span>
+    </div>
+    <button class="tai-close" id="tai-close">×</button>
+  </div>
+  <div class="tai-messages" id="tai-messages"></div>
+  <div class="tai-chips" id="tai-chips"></div>
+  <div class="tai-input-row">
+    <input class="tai-input" id="tai-input" placeholder="Komutu yaz…" autocomplete="off"/>
+    <button class="tai-send" id="tai-send" title="Gönder">
+      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+    </button>
+  </div>
+</div>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+const $ = id => document.getElementById(id);
+const clamp = (v,lo,hi) => Math.max(lo, Math.min(hi, v));
+const fmt = n => n.toFixed(3);
+let active = 'mill';
+
+const MAT_DB={
+  steel:      {label:"Çelik",       color:0x7a8a9a, bottom:0x5a6a7a, metalness:.65, roughness:.40, chip:0xa8b8c8, lathe:["#b0bec5","#78909c","#90a4ae","#607d8b","#455a64"], latheEnd:["#607d8b","#90a4ae","#78909c"], latheChip:"#b0bec5", stripe:"rgba(200,220,240,.08)"},
+  aluminum:   {label:"Alüminyum",   color:0xc8d0d8, bottom:0xa8b0b8, metalness:.80, roughness:.25, chip:0xd8e0e8, lathe:["#e0e5ea","#b8c4cc","#d0d8de","#a0aeb8","#8898a4"], latheEnd:["#a0aeb8","#d0d8de","#b8c4cc"], latheChip:"#dce4ea", stripe:"rgba(255,255,255,.12)"},
+  brass:      {label:"Pirinç",      color:0xc8a832, bottom:0xa08828, metalness:.75, roughness:.30, chip:0xe0c848, lathe:["#e8d060","#c8a832","#dcc040","#a89028","#8a7820"], latheEnd:["#a89028","#dcc040","#c8a832"], latheChip:"#e8d060", stripe:"rgba(255,240,180,.10)"},
+  copper:     {label:"Bakır",       color:0xc06838, bottom:0x985028, metalness:.80, roughness:.30, chip:0xd87848, lathe:["#e08858","#c06838","#d07848","#a05828","#884820"], latheEnd:["#a05828","#d07848","#c06838"], latheChip:"#e08858", stripe:"rgba(255,200,160,.10)"},
+  "cast-iron":{label:"Dökme Demir", color:0x505558, bottom:0x383c40, metalness:.50, roughness:.60, chip:0x606568, lathe:["#686e72","#505558","#585e62","#404548","#303538"], latheEnd:["#404548","#585e62","#505558"], latheChip:"#606568", stripe:"rgba(180,190,200,.06)"},
+  titanium:   {label:"Titanyum",    color:0x888898, bottom:0x686878, metalness:.70, roughness:.35, chip:0xa0a0b0, lathe:["#a0a0b0","#888898","#9898a8","#707080","#585868"], latheEnd:["#707080","#9898a8","#888898"], latheChip:"#a8a8b8", stripe:"rgba(200,200,240,.08)"},
+  wood:       {label:"Ahşap",       color:0xb08040, bottom:0x886030, metalness:.0,  roughness:.90, chip:0xd0a060, lathe:["#e7a86a","#c9843f","#f0c290","#b9752f","#8a531f"], latheEnd:["#a9691f","#f0c290","#c9843f"], latheChip:"#ffd9a0", stripe:"rgba(255,255,255,.10)"},
+  plastic:    {label:"Plastik",     color:0xe8e8e0, bottom:0xc8c8c0, metalness:.0,  roughness:.55, chip:0xf0f0e8, lathe:["#f0f0e8","#d8d8d0","#e8e8e0","#c0c0b8","#a8a8a0"], latheEnd:["#c0c0b8","#e8e8e0","#d8d8d0"], latheChip:"#f0f0e8", stripe:"rgba(255,255,255,.06)"},
+  acrylic:    {label:"Akrilik",     color:0xd0e8f8, bottom:0xb0c8d8, metalness:.05, roughness:.15, chip:0xe0f0ff, lathe:["#e0f0ff","#b8d8f0","#d0e8f8","#90b8d8","#70a0c0"], latheEnd:["#90b8d8","#d0e8f8","#b8d8f0"], latheChip:"#e0f0ff", stripe:"rgba(200,230,255,.12)"},
+};
+let curMat="steel";
+
+/* ==================================================================== */
+/* ============================  TORNA MOTORU  ======================== */
+/* ==================================================================== */
+const N=260, TOOL_HALF_W=3.2;
+let STOCK_LEN=200, STOCK_R=60;
+function roundRect(ctx,x,y,w,h,r){const rr=Math.min(r,Math.abs(w)/2,Math.abs(h)/2);ctx.beginPath();ctx.moveTo(x+rr,y);ctx.arcTo(x+w,y,x+w,y+h,rr);ctx.arcTo(x+w,y+h,x,y+h,rr);ctx.arcTo(x,y+h,x,y,rr);ctx.arcTo(x,y,x+w,y,rr);ctx.closePath();}
+class LatheEngine{
+  constructor(){this.radii=new Float32Array(N).fill(STOCK_R);this.chips=[];this.angle=0;this.jogX=0;this.jogZ=0;this.queue=[];this.moveActive=null;
+    this.s={x:STOCK_R+8,z:-12,targetX:STOCK_R+8,targetZ:-12,spindleOn:false,spindleRpm:1200,actualRpm:0,feed:200,feedOverride:1,mode:"MANUAL",running:false,alarm:null,emergency:false,removed:0,toolNo:1,coolantMode:"off"};
+    this.coolantParticles=[];this.initialVolume=this.volume();}
+  volume(){let v=0;for(let i=0;i<N;i++)v+=this.radii[i]*this.radii[i];return v;}
+  reset(){this.radii=new Float32Array(N).fill(STOCK_R);this.chips=[];this.coolantParticles=[];this.queue=[];this.moveActive=null;this.s.running=false;this.s.removed=0;this.s.alarm=null;this.s.coolantMode="off";this.s.x=STOCK_R+8;this.s.z=-12;this.s.targetX=this.s.x;this.s.targetZ=this.s.z;}
+  clearAlarm(){this.s.alarm=null;if(this.s.emergency)this.s.emergency=false;}
+  emergencyStop(){this.s.emergency=true;this.s.running=false;this.s.spindleOn=false;this.s.coolantMode="off";this.queue=[];this.moveActive=null;this.s.alarm="EMG";}
+  toggleSpindle(){if(!this.s.emergency)this.s.spindleOn=!this.s.spindleOn;}
+  setSpindleRpm(v){this.s.spindleRpm=clamp(Math.round(v),0,4000);}
+  setFeed(v){this.s.feed=clamp(Math.round(v),1,2000);}
+  setFeedOverride(v){this.s.feedOverride=clamp(v,0,1.2);}
+  setToolNo(n){this.s.toolNo=clamp(Math.round(n),1,12);}
+  setMode(m){if(!this.s.running)this.s.mode=m;}
+  setJog(dx,dz){this.jogX=dx;this.jogZ=dz;}
+  gotoTarget(x,z){if(this.s.emergency||this.s.mode!=="MANUAL")return;this.s.targetX=clamp(x,0,STOCK_R+12);this.s.targetZ=clamp(z,-20,STOCK_LEN);this.moveActive={type:"rapid",x:this.s.targetX,z:this.s.targetZ};}
+  startCycle(){if(this.s.emergency||this.s.mode!=="AUTO")return;
+    if(latheProgramText){runLatheGcode(parseGcode(latheProgramText,"lathe"));return;}
+    if(!this.s.spindleOn)this.s.spindleOn=true;if(this.s.coolantMode==="off")this.s.coolantMode="flood";const clearZ=-12,targetR=30,q=[];let r=STOCK_R;
+    while(r>targetR){r=Math.max(targetR,r-6);q.push({type:"rapid",x:r,z:clearZ});q.push({type:"feed",x:r,z:STOCK_LEN-20});q.push({type:"rapid",x:r+6,z:STOCK_LEN-20});q.push({type:"rapid",x:r+6,z:clearZ});}
+    q.push({type:"rapid",x:targetR,z:clearZ});q.push({type:"feed",x:targetR+12,z:0});q.push({type:"rapid",x:STOCK_R+8,z:-12});
+    this.queue=q;this.moveActive=this.queue.shift()||null;this.s.running=true;}
+  stopCycle(){this.queue=[];this.moveActive=null;this.s.running=false;}
+  zToIndex(z){return Math.round((z/STOCK_LEN)*(N-1));}
+  cutAt(z,toolR,agg){const half=Math.ceil((TOOL_HALF_W/STOCK_LEN)*N),c=this.zToIndex(z);let d=false;for(let i=c-half;i<=c+half;i++){if(i<0||i>=N)continue;if(this.radii[i]>toolR+.01){this.radii[i]=Math.max(toolR,this.radii[i]-agg);d=true;}}return d;}
+  spawnChips(px,py,it){const n=Math.min(3,Math.floor(it));for(let i=0;i<n;i++)this.chips.push({px,py,vx:-(1+Math.random()*2.5),vy:-(.5+Math.random()*2),life:1,size:1+Math.random()*2});if(this.chips.length>220)this.chips.splice(0,this.chips.length-220);}
+  update(dt){const tr=this.s.spindleOn?this.s.spindleRpm:0;this.s.actualRpm+=(tr-this.s.actualRpm)*Math.min(1,dt*3);if(this.s.actualRpm<1)this.s.actualRpm=tr===0?0:this.s.actualRpm;this.angle+=(this.s.actualRpm/60)*dt*Math.PI*2;
+    if(this.s.emergency)return;const feedRate=(this.s.feed/60)*this.s.feedOverride,rapid=220;
+    if(this.s.mode==="MANUAL"&&!this.moveActive&&(this.jogX||this.jogZ)){const rate=this.s.spindleOn?feedRate:rapid*.35;this.s.x=clamp(this.s.x+this.jogX*rate*dt,0,STOCK_R+12);this.s.z=clamp(this.s.z+this.jogZ*rate*dt,-20,STOCK_LEN);this.s.targetX=this.s.x;this.s.targetZ=this.s.z;}
+    if(this.moveActive){const m=this.moveActive,rate=m.type==="feed"?feedRate:rapid,dx=m.x-this.s.x,dz=m.z-this.s.z,dist=Math.hypot(dx,dz),step=rate*dt;
+      if(dist<=step||dist<1e-4){this.s.x=m.x;this.s.z=m.z;this.moveActive=this.queue.shift()||null;if(!this.moveActive&&this.s.running)this.s.running=false;}else{this.s.x+=(dx/dist)*step;this.s.z+=(dz/dist)*step;}}
+    const cutting=this.s.actualRpm>30&&this.s.z>=-1&&this.s.z<=STOCK_LEN&&this.s.x<STOCK_R+.5;
+    if(cutting){const agg=Math.max(.4,(this.s.actualRpm/1200)*1.2);if(this.cutAt(this.s.z,this.s.x,agg))this.spawnChips(this.s.z,this.s.x,3);}
+    for(const c of this.chips){c.px+=c.vx*dt*20;c.py+=c.vy*dt*20;c.vy+=40*dt;c.life-=dt*1.4;}this.chips=this.chips.filter(c=>c.life>0);
+    if(this.s.coolantMode!=="off"&&this.s.actualRpm>30){const cn=this.s.coolantMode==="flood"?3:1;for(let i=0;i<cn;i++)this.coolantParticles.push({ox:(Math.random()-.5)*10,oy:-15-Math.random()*12,vx:(Math.random()-.5)*40,vy:50+Math.random()*50,life:1,size:this.s.coolantMode==="flood"?2+Math.random()*1.5:1+Math.random()});}
+    for(const c of this.coolantParticles){c.ox+=c.vx*dt;c.oy+=c.vy*dt;c.life-=dt*2;}this.coolantParticles=this.coolantParticles.filter(c=>c.life>0);if(this.coolantParticles.length>120)this.coolantParticles.splice(0,this.coolantParticles.length-120);
+    this.s.removed=clamp(1-this.volume()/this.initialVolume,0,1);if(!this.moveActive&&this.s.mode==="AUTO"&&this.queue.length===0)this.s.running=false;}
+  draw(ctx,w,h){ctx.clearRect(0,0,w,h);const bg=ctx.createLinearGradient(0,0,0,h);bg.addColorStop(0,"#0b1f2e");bg.addColorStop(1,"#061019");ctx.fillStyle=bg;ctx.fillRect(0,0,w,h);
+    const mL=w*.06,uW=w*.9,cy=h*.5,sZ=uW/(STOCK_LEN+60),sX=Math.min((h*.36)/STOCK_R,sZ);
+    ctx.strokeStyle="rgba(120,180,210,.25)";ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(0,cy);ctx.lineTo(w,cy);ctx.stroke();
+    const zX=z=>mL+(STOCK_LEN-z)*sZ,rT=r=>cy-r*sX,rB=r=>cy+r*sX;
+    const chX=zX(STOCK_LEN),chW=46,chR=STOCK_R+30,chg=ctx.createLinearGradient(0,cy-chR*sX,0,cy+chR*sX);chg.addColorStop(0,"#cfd6dc");chg.addColorStop(.5,"#8b949c");chg.addColorStop(1,"#565d63");ctx.fillStyle=chg;roundRect(ctx,chX-chW,cy-chR*sX,chW+6,chR*2*sX,6);ctx.fill();
+    ctx.save();ctx.translate(chX,cy);for(let j=0;j<3;j++){const a=this.angle*.25+(j*Math.PI*2)/3,jr=chR*sX*.72;ctx.fillStyle="#3f464b";ctx.save();ctx.rotate(a);roundRect(ctx,-8,-jr,16,jr*.42,3);ctx.fill();ctx.restore();}ctx.restore();
+    ctx.beginPath();ctx.moveTo(zX(STOCK_LEN),rT(this.radii[N-1]));for(let i=N-1;i>=0;i--){const z=(i/(N-1))*STOCK_LEN;ctx.lineTo(zX(z),rT(this.radii[i]));}for(let i=0;i<N;i++){const z=(i/(N-1))*STOCK_LEN;ctx.lineTo(zX(z),rB(this.radii[i]));}ctx.closePath();
+    const md=MAT_DB[curMat]||MAT_DB.wood,lc=md.lathe;
+    const wg=ctx.createLinearGradient(0,cy-STOCK_R*sX,0,cy+STOCK_R*sX);wg.addColorStop(0,lc[0]);wg.addColorStop(.35,lc[1]);wg.addColorStop(.5,lc[2]);wg.addColorStop(.65,lc[3]);wg.addColorStop(1,lc[4]);ctx.fillStyle=wg;ctx.fill();
+    ctx.save();ctx.clip();ctx.strokeStyle=md.stripe;const ph=(this.angle*12)%22;for(let sx=mL-22+ph;sx<mL+uW;sx+=22){ctx.beginPath();ctx.moveTo(sx,cy-STOCK_R*sX);ctx.lineTo(sx,cy+STOCK_R*sX);ctx.stroke();}ctx.restore();
+    ctx.strokeStyle="rgba(0,0,0,.35)";ctx.lineWidth=1.2;ctx.stroke();
+    const le=md.latheEnd,endR=this.radii[0],ex=zX(0),eY=endR*sX;ctx.beginPath();ctx.ellipse(ex,cy,8,eY,0,0,Math.PI*2);const eg=ctx.createLinearGradient(ex-8,0,ex+8,0);eg.addColorStop(0,le[0]);eg.addColorStop(.5,le[1]);eg.addColorStop(1,le[2]);ctx.fillStyle=eg;ctx.fill();ctx.strokeStyle="rgba(0,0,0,.35)";ctx.stroke();ctx.strokeStyle="rgba(60,30,10,.5)";ctx.beginPath();ctx.moveTo(ex,cy);ctx.lineTo(ex+Math.cos(this.angle)*5,cy+Math.sin(this.angle)*eY);ctx.stroke();
+    ctx.fillStyle=md.latheChip;for(const c of this.chips){ctx.globalAlpha=Math.max(0,c.life);ctx.fillRect(zX(c.px),rB(c.py),c.size,c.size);}ctx.globalAlpha=1;
+    const tx=zX(this.s.z),ty=rB(this.s.x);ctx.fillStyle="#c7ccd1";ctx.strokeStyle="#2a2e31";ctx.lineWidth=1;roundRect(ctx,tx-6,ty+8,12,h-(ty+8),2);ctx.fill();ctx.stroke();ctx.beginPath();ctx.moveTo(tx,ty);ctx.lineTo(tx+12,ty+16);ctx.lineTo(tx-12,ty+16);ctx.closePath();ctx.fillStyle="#f2c94c";ctx.fill();ctx.strokeStyle="#8a6d12";ctx.stroke();
+    if(this.s.coolantMode!=="off"){const cAlpha=this.s.coolantMode==="flood"?0.4:0.2;ctx.fillStyle="rgba(80,180,255,1)";for(const c of this.coolantParticles){ctx.globalAlpha=Math.max(0,c.life)*cAlpha;ctx.beginPath();ctx.arc(tx+c.ox,ty+c.oy,c.size,0,Math.PI*2);ctx.fill();}ctx.globalAlpha=1;if(this.s.actualRpm>30){ctx.save();ctx.globalAlpha=this.s.coolantMode==="flood"?0.2:0.1;const cg=ctx.createRadialGradient(tx,ty-8,2,tx,ty-8,this.s.coolantMode==="flood"?28:16);cg.addColorStop(0,"rgba(80,180,255,.6)");cg.addColorStop(1,"rgba(80,180,255,0)");ctx.fillStyle=cg;ctx.fillRect(tx-30,ty-30,60,40);ctx.restore();}}
+    ctx.strokeStyle="rgba(120,220,160,.6)";ctx.setLineDash([4,4]);ctx.beginPath();ctx.moveTo(tx,0);ctx.lineTo(tx,h);ctx.moveTo(0,ty);ctx.lineTo(w,ty);ctx.stroke();ctx.setLineDash([]);}
+}
+const lathe=new LatheEngine();
+
+/* ---- torna arayüz bağlantıları ---- */
+$("mdi-rows").innerHTML=["O","N","G","7","8","9","X","Z","F","4","5","6","M","S","T","1","2","3","U","W","EOB","-","0","."].map(k=>`<button class="mdi-key h-7 text-[10px]">${k}</button>`).join("");
+$("mdi-fn").innerHTML=["POS","PROG","SET","SHIFT","CAN","INPUT","SYSTEM","MSG","GRAPH","ALTER","INSERT","DELETE"].map(k=>`<button class="mdi-key h-6 text-[8px]">${k}</button>`).join("");
+$("rng-rpm").oninput=e=>{lathe.setSpindleRpm(+e.target.value);$("lbl-rpm").textContent=lathe.s.spindleRpm+" rpm";};
+$("rng-feed").oninput=e=>{lathe.setFeed(+e.target.value);$("lbl-feed").textContent=lathe.s.feed+" mm/m";};
+$("rng-ovr").oninput=e=>{lathe.setFeedOverride(+e.target.value);$("lbl-ovr").textContent=Math.round(lathe.s.feedOverride*100)+"%";};
+$("btn-goto").onclick=()=>{const x=parseFloat($("edit-x").value),z=parseFloat($("edit-z").value);lathe.gotoTarget(Number.isFinite(x)?x:lathe.s.x,Number.isFinite(z)?z:lathe.s.z);};
+$("mode-manual").onclick=()=>lathe.setMode("MANUAL");$("mode-auto").onclick=()=>lathe.setMode("AUTO");
+$("tool-minus").onclick=()=>lathe.setToolNo(lathe.s.toolNo-1);$("tool-plus").onclick=()=>lathe.setToolNo(lathe.s.toolNo+1);
+document.querySelectorAll(".jog").forEach(b=>{const dx=+b.dataset.dx,dz=+b.dataset.dz;const dn=e=>{e.preventDefault();lathe.setJog(dx,dz);},up=()=>lathe.setJog(0,0);b.addEventListener("pointerdown",dn);b.addEventListener("pointerup",up);b.addEventListener("pointerleave",up);b.addEventListener("pointercancel",up);});
+$("btn-spindle").onclick=()=>lathe.toggleSpindle();$("btn-cycle").onclick=()=>lathe.startCycle();$("btn-hold").onclick=()=>lathe.stopCycle();
+$("btn-emg").onclick=()=>lathe.emergencyStop();$("btn-reset").onclick=()=>lathe.clearAlarm();$("btn-new").onclick=()=>lathe.reset();
+function syncLathe(){const s=lathe.s;$("lcd-x").textContent=fmt(s.x);$("lcd-z").textContent=fmt(s.z);
+  $("lcd-actf").textContent="ACT.F "+Math.round(s.spindleOn?s.feed*s.feedOverride:0)+" MM/M";$("lcd-rpm").textContent="S "+Math.round(s.actualRpm)+" RPM";
+  $("lcd-tool").textContent="T"+String(s.toolNo).padStart(2,"0")+"00";$("lcd-ovr").textContent="OVR "+Math.round(s.feedOverride*100)+"%";$("lcd-removed").textContent="REMOVED "+Math.round(s.removed*100)+"%";
+  $("lcd-mode").textContent=s.mode;$("lcd-mode").className=s.mode==="AUTO"?"text-[#eaffef]":"text-[#59c98e]";
+  const al=$("lcd-alarm");if(s.alarm){al.textContent=s.alarm==="EMG"?"-EMG-":"ALM "+s.alarm;al.className="animate-pulse font-bold text-red-400";}else{al.textContent="READY";al.className="text-[#59c98e]";}
+  $("lcd-run").textContent=s.running?"RUN":"STOP";$("lcd-run").className=s.running?"font-bold text-[#7effb0]":"text-[#59c98e]";
+  $("lbl-tool").textContent="T"+String(s.toolNo).padStart(2,"0");
+  const A="bg-amber-400 text-zinc-900",I="bg-zinc-700 text-zinc-200 hover:bg-zinc-600";
+  $("mode-manual").className="rounded py-2 text-[10px] font-bold "+(s.mode==="MANUAL"?A:I)+(s.running?" opacity-40":"");
+  $("mode-auto").className="rounded py-2 text-[10px] font-bold "+(s.mode==="AUTO"?A:I)+(s.running?" opacity-40":"");
+  $("mode-manual").disabled=s.running;$("mode-auto").disabled=s.running;
+  $("spindle-label").textContent="SPINDLE "+(s.spindleOn?"ON":"OFF");$("btn-spindle").className="flex flex-col items-center gap-1 rounded py-2 text-[10px] font-bold "+(s.spindleOn?"bg-cyan-600 text-white":"bg-zinc-700 text-zinc-200 hover:bg-zinc-600");$("spindle-icon").className="text-base"+(s.spindleOn?" animate-spin-slow":"");
+  $("btn-cycle").disabled=s.mode!=="AUTO"||s.running;$("btn-goto").disabled=s.mode!=="MANUAL";
+  const lcl=s.coolantMode;$("lcoolant-label").textContent="COOLANT "+(lcl==="off"?"OFF":lcl.toUpperCase());$("lbtn-coolant").className="flex flex-1 flex-col items-center gap-1 rounded py-2 text-[10px] font-bold "+(lcl!=="off"?"bg-blue-600 text-white":"bg-zinc-700 text-zinc-200 hover:bg-zinc-600");$("lcoolant-icon").textContent=lcl==="flood"?"🌊":lcl==="mist"?"🌫️":"💧";
+  $("lcd-coolant").textContent="COOLANT "+(lcl==="off"?"OFF":lcl.toUpperCase());$("lcd-coolant").className=lcl!=="off"?"col-span-2 text-cyan-300":"col-span-2 text-[#59c98e]";
+  $("lcd-stock").textContent="STOCK Ø"+(STOCK_R*2)+"x"+STOCK_LEN;
+  $("hud").textContent="X "+fmt(s.x)+"   Z "+fmt(s.z)+"   "+(s.spindleOn?Math.round(s.actualRpm)+" rpm":"spindle off")+"   coolant: "+lcl;}
+const latheCanvas=$("lathe-canvas"),lctx=latheCanvas.getContext("2d");
+function latheResize(){const dpr=Math.min(window.devicePixelRatio||1,2),r=latheCanvas.getBoundingClientRect();latheCanvas.width=Math.max(1,r.width*dpr|0);latheCanvas.height=Math.max(1,r.height*dpr|0);lctx.setTransform(dpr,0,0,dpr,0,0);}
+new ResizeObserver(latheResize).observe(latheCanvas);
+
+/* ==================================================================== */
+/* ============================  FREZE (3B)  ========================== */
+/* ==================================================================== */
+let W=200, D=140, TOP=60;
+const COLS=150, ROWS=105, MARGIN=6;
+let dx=W/(COLS-1), dz=D/(ROWS-1);
+const mill={
+  x:0,y:90,z:0, tx:0,ty:90,tz:0,
+  spindleOn:false, spindleRpm:6000, actualRpm:0, feed:400, feedOverride:1,
+  mode:"MANUAL", running:false, paused:false, alarm:null, emergency:false, removed:0, toolNo:1,
+  spinAngle:0, jog:{x:0,y:0,z:0}, queue:[], moveActive:null, dirty:false, muted:false, coolantMode:"off"
+};
+let heights=new Float32Array(COLS*ROWS).fill(TOP);
+
+let renderer,scene,camera,controls,plane,planeGeo,toolGroup,chipPool=[],raf3d;
+let CUTTER_R=13, CUTTER_H=26;
+
+const TOOL_LIBRARY=[
+  {id:1, name:"Ø6 Parmak Freze",   type:"endmill",  dia:6,  fluteLen:20, totalLen:50, maxRpm:12000},
+  {id:2, name:"Ø10 Parmak Freze",  type:"endmill",  dia:10, fluteLen:25, totalLen:60, maxRpm:10000},
+  {id:3, name:"Ø16 Parmak Freze",  type:"endmill",  dia:16, fluteLen:30, totalLen:70, maxRpm:9000},
+  {id:4, name:"Ø20 Parmak Freze",  type:"endmill",  dia:20, fluteLen:35, totalLen:75, maxRpm:8000},
+  {id:5, name:"Ø26 Parmak Freze",  type:"endmill",  dia:26, fluteLen:26, totalLen:70, maxRpm:7000},
+  {id:6, name:"Ø32 Kaba Freze",    type:"roughing", dia:32, fluteLen:35, totalLen:80, maxRpm:6000},
+  {id:7, name:"Ø8 Matkap",         type:"drill",    dia:8,  fluteLen:40, totalLen:80, maxRpm:6000},
+  {id:8, name:"Ø12 Matkap",        type:"drill",    dia:12, fluteLen:50, totalLen:90, maxRpm:5000},
+  {id:9, name:"Ø5 Top Freze",      type:"ballmill", dia:5,  fluteLen:15, totalLen:45, maxRpm:15000},
+  {id:10,name:"Ø10 Top Freze",     type:"ballmill", dia:10, fluteLen:20, totalLen:55, maxRpm:12000},
+  {id:11,name:"Ø3 Pah Freze",      type:"chamfer",  dia:3,  fluteLen:10, totalLen:40, maxRpm:18000},
+  {id:12,name:"Ø6 Pah Freze",      type:"chamfer",  dia:6,  fluteLen:12, totalLen:45, maxRpm:15000},
+];
+
+class ToolMagazine{
+  constructor(cap=40){
+    this.capacity=cap;
+    this.slots=new Array(cap).fill(null);
+    this.activeSlot=4;
+  }
+  loadDefaults(){
+    for(let i=0;i<TOOL_LIBRARY.length&&i<this.capacity;i++) this.slots[i]=i;
+    this.activeSlot=4;
+    this._applyTool();
+  }
+  getActiveTool(){
+    const idx=this.slots[this.activeSlot];
+    return idx!==null&&idx!==undefined?TOOL_LIBRARY[idx]:null;
+  }
+  getToolInSlot(s){
+    if(s<0||s>=this.capacity)return null;
+    const idx=this.slots[s];
+    return idx!==null&&idx!==undefined?TOOL_LIBRARY[idx]:null;
+  }
+  findSlotForOp(opType,reqDia,reqDepth){
+    let best=-1,bestScore=Infinity;
+    for(let s=0;s<this.capacity;s++){
+      const idx=this.slots[s];
+      if(idx===null||idx===undefined)continue;
+      const tl=TOOL_LIBRARY[idx];
+      if(tl.fluteLen<reqDepth)continue;
+      let score=Infinity;
+      if(opType==="drill"){
+        if(tl.type!=="endmill"&&tl.type!=="drill")continue;
+        if(tl.dia>reqDia)continue;
+        score=(reqDia-tl.dia)+0.01;
+        if(tl.type==="drill")score-=0.005;
+      }else if(opType==="pocket"||opType==="slot"){
+        if(tl.type!=="endmill"&&tl.type!=="roughing")continue;
+        if(tl.dia>=reqDia)continue;
+        score=1/(tl.dia+1);
+      }else if(opType==="face"||opType==="contour"){
+        if(tl.type!=="endmill"&&tl.type!=="roughing")continue;
+        score=1/(tl.dia+1);
+      }else if(opType==="chamfer"){
+        if(tl.type!=="chamfer"&&tl.type!=="endmill")continue;
+        score=tl.type==="chamfer"?0:1;
+      }else{
+        if(tl.type!=="endmill")continue;
+        score=Math.abs(tl.dia-reqDia);
+      }
+      if(score<bestScore){bestScore=score;best=s;}
+    }
+    return best;
+  }
+  requestChange(targetSlot){
+    if(targetSlot<0||targetSlot>=this.capacity)return false;
+    if(this.slots[targetSlot]===null||this.slots[targetSlot]===undefined)return false;
+    this.activeSlot=targetSlot;
+    this._applyTool();
+    return true;
+  }
+  _applyTool(){
+    const tl=this.getActiveTool();
+    if(tl){CUTTER_R=tl.dia/2;CUTTER_H=tl.fluteLen;mill.toolNo=this.activeSlot+1;}
+  }
+  genToolChange(targetSlot,safeY){
+    if(targetSlot===this.activeSlot)return[];
+    return[{type:"rapid",x:mill.x,y:safeY||TOP+8,z:mill.z},{type:"tc",targetSlot:targetSlot}];
+  }
+  listTools(){
+    const lines=[];
+    for(let s=0;s<this.capacity;s++){
+      const tl=this.getToolInSlot(s);
+      if(!tl)continue;
+      const tag=s===this.activeSlot?" ◄":"";
+      lines.push("T"+String(s+1).padStart(2,"0")+": "+tl.name+" (Ø"+tl.dia+"mm, boy:"+tl.fluteLen+"mm)"+tag);
+    }
+    return lines;
+  }
+}
+const magazine=new ToolMagazine();
+magazine.loadDefaults();
+
+function initMill(){
+  const wrap=$("mill-canvas-wrap");
+  renderer=new THREE.WebGLRenderer({antialias:true});
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
+  renderer.shadowMap.enabled=true;
+  wrap.appendChild(renderer.domElement);
+  renderer.domElement.style.width="100%";renderer.domElement.style.height="100%";
+
+  scene=new THREE.Scene();
+  scene.background=new THREE.Color("#8b9299");
+  scene.fog=new THREE.Fog("#8b9299",500,1400);
+
+  camera=new THREE.PerspectiveCamera(45,1,1,3000);
+  controls=new OrbitControls(camera,renderer.domElement);
+  controls.enableDamping=true;controls.target.set(0,20,0);
+  setView("iso");
+
+  scene.add(new THREE.HemisphereLight(0xffffff,0x556070,0.85));
+  const dir=new THREE.DirectionalLight(0xffffff,1.1);dir.position.set(180,320,160);dir.castShadow=true;
+  dir.shadow.mapSize.set(1024,1024);dir.shadow.camera.left=-260;dir.shadow.camera.right=260;dir.shadow.camera.top=260;dir.shadow.camera.bottom=-260;scene.add(dir);
+
+  // makine tablası (T-kanallı görünüm)
+  const table=new THREE.Mesh(new THREE.BoxGeometry(520,40,360),new THREE.MeshStandardMaterial({color:0xbfc4c9,metalness:.6,roughness:.5}));
+  table.position.y=-22;table.receiveShadow=true;scene.add(table);
+  for(let i=-2;i<=2;i++){const slot=new THREE.Mesh(new THREE.BoxGeometry(6,6,360),new THREE.MeshStandardMaterial({color:0x6b7076}));slot.position.set(i*70,0.5,0);scene.add(slot);}
+  const floor=new THREE.Mesh(new THREE.PlaneGeometry(2400,2400),new THREE.MeshStandardMaterial({color:0x9aa0a6}));
+  floor.rotation.x=-Math.PI/2;floor.position.y=-42;floor.receiveShadow=true;scene.add(floor);
+
+  buildWorkpiece();
+  buildTool();
+  buildMagazineDisk();
+  buildChipPool();
+  buildCoolantPool();
+
+  const ro=new ResizeObserver(millResize);ro.observe(wrap);
+  millResize();
+}
+
+let sideMeshes=[], stockMat=null, bottomMat=null;
+function buildWorkpiece(){
+  if(plane){scene.remove(plane);planeGeo.dispose();}
+  sideMeshes.forEach(m=>scene.remove(m));sideMeshes=[];
+  const md=MAT_DB[curMat]||MAT_DB.steel;
+  stockMat=new THREE.MeshStandardMaterial({color:md.color,metalness:md.metalness,roughness:md.roughness,side:THREE.DoubleSide});
+  bottomMat=new THREE.MeshStandardMaterial({color:md.bottom,metalness:md.metalness,roughness:md.roughness});
+  planeGeo=new THREE.PlaneGeometry(W,D,COLS-1,ROWS-1);
+  planeGeo.rotateX(-Math.PI/2);
+  const pos=planeGeo.attributes.position;
+  for(let i=0;i<pos.count;i++) pos.setY(i,TOP);
+  pos.needsUpdate=true;planeGeo.computeVertexNormals();
+  plane=new THREE.Mesh(planeGeo,stockMat);plane.castShadow=true;plane.receiveShadow=true;scene.add(plane);
+  const mk=(w,h,rx,ry,px,py,pz)=>{const m=new THREE.Mesh(new THREE.PlaneGeometry(w,h),stockMat);m.rotation.set(rx,ry,0);m.position.set(px,py,pz);m.castShadow=true;scene.add(m);sideMeshes.push(m);};
+  mk(W,TOP,0,0,0,TOP/2, D/2);
+  mk(W,TOP,0,Math.PI,0,TOP/2,-D/2);
+  mk(D,TOP,0,-Math.PI/2,-W/2,TOP/2,0);
+  mk(D,TOP,0,Math.PI/2, W/2,TOP/2,0);
+  const bottom=new THREE.Mesh(new THREE.PlaneGeometry(W,D),bottomMat);
+  bottom.rotation.x=Math.PI/2;bottom.position.y=0;scene.add(bottom);sideMeshes.push(bottom);
+}
+
+function buildTool(){
+  if(toolGroup){
+    while(toolGroup.children.length){const c=toolGroup.children[0];c.geometry.dispose();c.material.dispose();toolGroup.remove(c);}
+    scene.remove(toolGroup);
+  }
+  toolGroup=new THREE.Group();
+  const steel=new THREE.MeshStandardMaterial({color:0xd7dde2,metalness:.9,roughness:.25});
+  const dark=new THREE.MeshStandardMaterial({color:0x3a3f45,metalness:.7,roughness:.4});
+  const gold=new THREE.MeshStandardMaterial({color:0xd8a52a,metalness:.6,roughness:.4});
+  const cutter=new THREE.Mesh(new THREE.CylinderGeometry(CUTTER_R,CUTTER_R,CUTTER_H,24),dark);cutter.position.y=CUTTER_H/2;cutter.castShadow=true;toolGroup.add(cutter);
+  const insR=Math.max(CUTTER_R,3);
+  for(let i=0;i<4;i++){const t=new THREE.Mesh(new THREE.BoxGeometry(3,3,4),gold);const a=i/4*Math.PI*2;t.position.set(Math.cos(a)*insR,2,Math.sin(a)*insR);toolGroup.add(t);}
+  const shaft=new THREE.Mesh(new THREE.CylinderGeometry(CUTTER_R*.7,CUTTER_R*.7,40,24),steel);shaft.position.y=CUTTER_H+20;shaft.castShadow=true;toolGroup.add(shaft);
+  const holder=new THREE.Mesh(new THREE.CylinderGeometry(CUTTER_R*1.5,CUTTER_R*.9,46,24),steel);holder.position.y=CUTTER_H+40+23;holder.castShadow=true;toolGroup.add(holder);
+  const taper=new THREE.Mesh(new THREE.CylinderGeometry(CUTTER_R*2.2,CUTTER_R*1.5,40,24),steel);taper.position.y=CUTTER_H+40+46+20;toolGroup.add(taper);
+  scene.add(toolGroup);
+}
+
+let magGroup=null,toolYOff=0;
+function buildMagazineDisk(){
+  if(magGroup){while(magGroup.children.length){const c=magGroup.children[0];if(c.geometry)c.geometry.dispose();if(c.material)c.material.dispose();magGroup.remove(c);}scene.remove(magGroup);}
+  magGroup=new THREE.Group();
+  const dkMat=new THREE.MeshStandardMaterial({color:0x4a4a4a,metalness:.85,roughness:.2});
+  const disk=new THREE.Mesh(new THREE.CylinderGeometry(55,55,4,48),dkMat);disk.castShadow=true;magGroup.add(disk);
+  const hub=new THREE.Mesh(new THREE.CylinderGeometry(10,10,8,24),new THREE.MeshStandardMaterial({color:0x666,metalness:.9,roughness:.15}));hub.position.y=2;magGroup.add(hub);
+  const sltMat=new THREE.MeshStandardMaterial({color:0x2c2c2c,metalness:.7,roughness:.4});
+  for(let i=0;i<12;i++){const a=(i/12)*Math.PI*2;const s=new THREE.Mesh(new THREE.CylinderGeometry(5,5,7,8),sltMat);s.position.set(Math.cos(a)*42,-5.5,Math.sin(a)*42);s.castShadow=true;magGroup.add(s);}
+  magGroup.visible=false;
+  scene.add(magGroup);
+}
+
+let chipMat=null;
+function buildChipPool(){
+  const geo=new THREE.BoxGeometry(3,3,3);
+  const md=MAT_DB[curMat]||MAT_DB.steel;
+  chipMat=new THREE.MeshStandardMaterial({color:md.chip,metalness:Math.min(md.metalness+.1,.9),roughness:md.roughness});
+  for(let i=0;i<160;i++){const m=new THREE.Mesh(geo,chipMat);m.visible=false;m.castShadow=true;scene.add(m);chipPool.push({mesh:m,vx:0,vy:0,vz:0,life:0});}
+}
+function spawnChip(px,py,pz){
+  for(const c of chipPool){if(c.life<=0){c.mesh.visible=true;c.mesh.position.set(px+(Math.random()-.5)*10,py,pz+(Math.random()-.5)*10);
+    c.vx=(Math.random()-.5)*120;c.vy=60+Math.random()*90;c.vz=(Math.random()-.5)*120;c.life=.8+Math.random()*.5;return;}}
+}
+function updateChips(dt){for(const c of chipPool){if(c.life>0){c.life-=dt;c.vy-=260*dt;c.mesh.position.x+=c.vx*dt;c.mesh.position.y+=c.vy*dt;c.mesh.position.z+=c.vz*dt;c.mesh.rotation.x+=dt*8;c.mesh.rotation.y+=dt*6;if(c.life<=0||c.mesh.position.y<-40)c.mesh.visible=false;}}}
+
+let coolantPool=[],coolantMat=null;
+function buildCoolantPool(){
+  const geo=new THREE.SphereGeometry(1,4,4);
+  coolantMat=new THREE.MeshStandardMaterial({color:0x60b8e8,transparent:true,opacity:0.45,metalness:0.1,roughness:0.2});
+  for(let i=0;i<120;i++){const m=new THREE.Mesh(geo,coolantMat);m.visible=false;scene.add(m);coolantPool.push({mesh:m,vx:0,vy:0,vz:0,life:0});}
+}
+function spawnCoolant(){
+  if(mill.coolantMode==="off"||!mill.spindleOn)return;
+  const isFlood=mill.coolantMode==="flood",count=isFlood?3:1,spread=isFlood?12:20;
+  for(let n=0;n<count;n++){for(const c of coolantPool){if(c.life<=0){
+    const s=isFlood?1.2+Math.random()*.8:0.6+Math.random()*.4;
+    c.mesh.scale.set(s,s,s);c.mesh.visible=true;
+    c.mesh.position.set(mill.x+(Math.random()-.5)*spread,mill.y+CUTTER_H*0.3+Math.random()*10,mill.z+(Math.random()-.5)*spread);
+    c.vx=(Math.random()-.5)*30;c.vy=-50-Math.random()*40;c.vz=(Math.random()-.5)*30;
+    c.life=0.5+Math.random()*0.5;break;}}}
+}
+function updateCoolant(dt){for(const c of coolantPool){if(c.life>0){c.life-=dt*1.5;c.vy-=80*dt;c.mesh.position.x+=c.vx*dt;c.mesh.position.y+=c.vy*dt;c.mesh.position.z+=c.vz*dt;if(c.life<=0||c.mesh.position.y<-10)c.mesh.visible=false;}}}
+
+function resizeMillStock(newW, newD, newTop){
+  if(W===newW && D===newD && TOP===newTop) return;
+  W=newW; D=newD; TOP=newTop;
+  dx=W/(COLS-1); dz=D/(ROWS-1);
+  heights=new Float32Array(COLS*ROWS).fill(TOP);
+  buildWorkpiece();
+  mill.x=0; mill.y=TOP+30; mill.z=0;
+  mill.running=false; mill.queue=[]; mill.moveActive=null; mill.removed=0;
+  controls.target.set(0,TOP*0.3,0);
+  setView("iso");
+}
+
+function resizeLatheStock(newLen, newR){
+  if(STOCK_LEN===newLen && STOCK_R===newR) return;
+  STOCK_LEN=newLen; STOCK_R=newR;
+  lathe.radii=new Float32Array(N).fill(STOCK_R);
+  lathe.initialVolume=lathe.volume();
+  lathe.chips=[];
+  lathe.s.x=STOCK_R+8; lathe.s.z=-12;
+  lathe.s.targetX=lathe.s.x; lathe.s.targetZ=lathe.s.z;
+  lathe.s.removed=0; lathe.s.running=false;
+  lathe.queue=[]; lathe.moveActive=null;
+}
+
+function millResize(){if(!renderer)return;const wrap=$("mill-canvas-wrap"),w=wrap.clientWidth||1,h=wrap.clientHeight||1;renderer.setSize(w,h,false);camera.aspect=w/h;camera.updateProjectionMatrix();}
+function setView(v){const d=360;const map={iso:[d*.9,d*.7,d*.9],top:[0,d*1.2,1],front:[0,d*.4,d*1.1],right:[d*1.1,d*.4,0]};const p=map[v]||map.iso;camera.position.set(p[0],p[1],p[2]);controls&&controls.update();}
+
+/* --- freze fiziği --- */
+function colX(ix){return -W/2+ix*dx;} function colZ(iy){return -D/2+iy*dz;}
+function carve(tx,tz,ty){
+  const ixC=Math.round((tx+W/2)/dx), iyC=Math.round((tz+D/2)/dz);
+  const rx=Math.ceil(CUTTER_R/dx), rz=Math.ceil(CUTTER_R/dz);
+  let cut=false;const pos=planeGeo.attributes.position;
+  for(let iy=Math.max(MARGIN,iyC-rz);iy<=Math.min(ROWS-1-MARGIN,iyC+rz);iy++){
+    for(let ix=Math.max(MARGIN,ixC-rx);ix<=Math.min(COLS-1-MARGIN,ixC+rx);ix++){
+      const wx=colX(ix),wz=colZ(iy);if(Math.hypot(wx-tx,wz-tz)>CUTTER_R)continue;
+      const vi=iy*COLS+ix;const h=heights[vi];
+      if(h>ty+.05){const nh=Math.max(ty,0);heights[vi]=nh;pos.setY(vi,nh);cut=true;}
+    }
+  }
+  if(cut){pos.needsUpdate=true;mill.dirty=true;}
+  return cut;
+}
+function computeRemoved(){let s=0,n=0;for(let iy=MARGIN;iy<ROWS-MARGIN;iy++)for(let ix=MARGIN;ix<COLS-MARGIN;ix++){s+=TOP-heights[iy*COLS+ix];n++;}return clamp((s/n)/TOP,0,1);}
+
+let millProgramText=null,latheProgramText=null;
+function millStartCycle(){
+  if(mill.emergency||mill.mode!=="AUTO")return;
+  if(millProgramText){runMillGcode(parseGcode(millProgramText,"mill"));return;}
+  mill.spindleOn=true;mill.paused=false;if(mill.coolantMode==="off")mill.coolantMode="flood";
+  const q=[],safeY=TOP+8,step=CUTTER_R*1.25,x0=-W*0.29,x1=W*0.29,z0=-D*0.27,z1=D*0.27;
+  for(const depth of [TOP-14,TOP-26]){
+    q.push({type:"rapid",x:x0,y:safeY,z:z0});
+    q.push({type:"feed", x:x0,y:depth,z:z0});
+    let z=z0,dir=1;
+    while(z<=z1){const xa=dir>0?x1:x0;q.push({type:"feed",x:xa,y:depth,z:z});z=Math.min(z+step,z1+.001);if(z<=z1)q.push({type:"feed",x:xa,y:depth,z:z});dir*=-1;
+      if(z>z1)break;}
+    q.push({type:"rapid",x:q[q.length-1].x,y:safeY,z:z1});
+  }
+  q.push({type:"rapid",x:0,y:TOP+30,z:0});
+  mill.queue=q;mill.moveActive=q.shift();mill.running=true;
+}
+function millStop(){mill.queue=[];mill.moveActive={type:"rapid",x:mill.x,y:TOP+30,z:mill.z};mill.running=false;mill.paused=false;toolYOff=0;if(magGroup)magGroup.visible=false;toolGroup.visible=true;}
+function millGoto(x,y,z){if(mill.emergency||mill.mode!=="MANUAL")return;mill.moveActive={type:"rapid",x:clamp(x,-W/2+MARGIN*dx,W/2-MARGIN*dx),y:clamp(y,0,120),z:clamp(z,-D/2+MARGIN*dz,D/2-MARGIN*dz)};}
+
+function updateMill(dt){
+  const tr=mill.spindleOn?mill.spindleRpm:0;mill.actualRpm+=(tr-mill.actualRpm)*Math.min(1,dt*3);if(mill.actualRpm<1)mill.actualRpm=tr===0?0:mill.actualRpm;
+  mill.spinAngle+=(mill.actualRpm/60)*dt*Math.PI*2;
+  if(!mill.emergency&&!mill.paused){
+    const feedRate=(mill.feed/60)*mill.feedOverride, rapid=260;
+    if(mill.mode==="MANUAL"&&!mill.moveActive&&(mill.jog.x||mill.jog.y||mill.jog.z)){
+      const rate=mill.spindleOn?feedRate:rapid*.4;
+      mill.x=clamp(mill.x+mill.jog.x*rate*dt,-W/2+MARGIN*dx,W/2-MARGIN*dx);
+      mill.z=clamp(mill.z+mill.jog.z*rate*dt,-D/2+MARGIN*dz,D/2-MARGIN*dz);
+      mill.y=clamp(mill.y+mill.jog.y*rate*dt,0,120);
+    }
+    if(mill.moveActive){const m=mill.moveActive;
+      if(m.type==="tc"){
+        if(!m._t){m._t=0;m._ph=0;mill.spindleOn=false;mill.coolantMode="off";
+          const cur=magazine.activeSlot,tgt=m.targetSlot,diff=((tgt-cur)%12+12)%12;
+          m._rotStart=magGroup.rotation.y;m._rotEnd=magGroup.rotation.y-diff*(Math.PI*2/12);
+          magGroup.position.set(mill.x,mill.y+CUTTER_H+140,mill.z);
+        }
+        m._t+=dt;
+        if(m._ph===0){const p=Math.min(m._t/0.3,1);toolYOff=p*80;toolGroup.visible=p<0.9;if(m._t>=0.3){m._ph=1;magGroup.visible=true;}}
+        else if(m._ph===1){const p=Math.min((m._t-0.3)/0.6,1);const e=p<.5?2*p*p:-1+(4-2*p)*p;magGroup.rotation.y=m._rotStart+(m._rotEnd-m._rotStart)*e;if(m._t>=0.9){m._ph=2;magazine.requestChange(m.targetSlot);buildTool();toolGroup.visible=false;}}
+        else if(m._ph===2){toolGroup.visible=true;const p=Math.min((m._t-0.9)/0.3,1);toolYOff=80*(1-p);if(m._t>=1.2){m._ph=3;}}
+        else{toolYOff=0;magGroup.visible=false;mill.spindleOn=true;mill.coolantMode="flood";mill.moveActive=mill.queue.shift()||null;if(!mill.moveActive&&mill.running)mill.running=false;}
+      }else{const rate=m.type==="feed"?feedRate:rapid;
+      const ex=m.x-mill.x,ey=m.y-mill.y,ez=m.z-mill.z,dist=Math.hypot(ex,ey,ez),stepv=rate*dt;
+      if(dist<=stepv||dist<1e-4){mill.x=m.x;mill.y=m.y;mill.z=m.z;mill.moveActive=mill.queue.shift()||null;if(!mill.moveActive&&mill.running)mill.running=false;}
+      else{mill.x+=ex/dist*stepv;mill.y+=ey/dist*stepv;mill.z+=ez/dist*stepv;}}}
+    // talaş kaldırma
+    let cutting=false;
+    if(mill.actualRpm>60){const cut=carve(mill.x,mill.z,mill.y);if(cut){cutting=true;if(Math.random()<.8)spawnChip(mill.x,mill.y+2,mill.z);}}
+    mill.cutting=cutting;
+  } else mill.cutting=false;
+  if(mill.dirty){planeGeo.computeVertexNormals();mill.dirty=false;mill.removed=computeRemoved();}
+  updateChips(dt);
+  spawnCoolant();updateCoolant(dt);
+  // takım konumu
+  toolGroup.position.set(mill.x,mill.y+toolYOff,mill.z);
+  toolGroup.rotation.y=mill.spinAngle;
+}
+
+/* --- freze arayüz --- */
+$("mmdi").innerHTML=["7","8","9","X","Y","Z","4","5","6","G","M","S","1","2","3","F","H","T","0",".","-","EOB","INP","CAN"].map(k=>`<button class="mdi-key h-7 text-[10px]">${k}</button>`).join("");
+$("mrng-rpm").oninput=e=>{mill.spindleRpm=clamp(+e.target.value,0,12000);$("mlbl-rpm").textContent=mill.spindleRpm+" rpm";};
+$("mrng-feed").oninput=e=>{mill.feed=clamp(+e.target.value,1,2000);$("mlbl-feed").textContent=mill.feed+" mm/m";};
+$("mrng-ovr").oninput=e=>{mill.feedOverride=clamp(+e.target.value,0,1.2);$("mlbl-ovr").textContent=Math.round(mill.feedOverride*100)+"%";};
+$("me-go").onclick=()=>{const x=parseFloat($("me-x").value),y=parseFloat($("me-z").value),z=parseFloat($("me-y").value);millGoto(Number.isFinite(x)?x:mill.x,Number.isFinite(y)?y:mill.y,Number.isFinite(z)?z:mill.z);};
+$("mmode-manual").onclick=()=>{if(!mill.running)mill.mode="MANUAL";};$("mmode-auto").onclick=()=>{if(!mill.running)mill.mode="AUTO";};
+$("mtool-minus").onclick=()=>{const s=clamp(mill.toolNo-2,0,39);if(magazine.getToolInSlot(s)){magazine.requestChange(s);buildTool();}};
+$("mtool-plus").onclick=()=>{const s=clamp(mill.toolNo,0,39);if(magazine.getToolInSlot(s)){magazine.requestChange(s);buildTool();}};
+document.querySelectorAll(".mjog").forEach(b=>{const a=b.dataset.a,d=+b.dataset.d;const dn=e=>{e.preventDefault();mill.jog[a]=d;},up=()=>mill.jog[a]=0;b.addEventListener("pointerdown",dn);b.addEventListener("pointerup",up);b.addEventListener("pointerleave",up);b.addEventListener("pointercancel",up);});
+$("mbtn-spindle").onclick=()=>{if(!mill.emergency)mill.spindleOn=!mill.spindleOn;};
+$("mbtn-cycle").onclick=()=>millStartCycle(); $("mbtn-hold").onclick=()=>mill.paused=!mill.paused;
+$("mbtn-emg").onclick=()=>{mill.emergency=true;mill.running=false;mill.spindleOn=false;mill.coolantMode="off";mill.queue=[];mill.moveActive=null;mill.alarm="EMG";toolYOff=0;if(magGroup)magGroup.visible=false;toolGroup.visible=true;};
+$("mbtn-reset").onclick=()=>{mill.alarm=null;mill.emergency=false;};
+$("mbtn-newp").onclick=()=>{heights=new Float32Array(COLS*ROWS).fill(TOP);const pos=planeGeo.attributes.position;for(let i=0;i<pos.count;i++)pos.setY(i,TOP);pos.needsUpdate=true;planeGeo.computeVertexNormals();mill.removed=0;mill.running=false;mill.queue=[];mill.moveActive=null;mill.x=0;mill.y=TOP+30;mill.z=0;toolYOff=0;if(magGroup)magGroup.visible=false;toolGroup.visible=true;millProgramText=null;$("m-file-info").classList.add("hidden");};
+$("m-play").onclick=()=>{mill.mode="AUTO";millStartCycle();};
+$("m-pause").onclick=()=>mill.paused=!mill.paused;
+$("m-stop").onclick=()=>millStop();
+$("m-new").onclick=()=>$("mbtn-newp").click();
+$("m-mute").onclick=()=>{mill.muted=!mill.muted;$("m-mute").textContent=mill.muted?"🔇":"🔊";};
+$("m-wire").onclick=()=>{plane.material.wireframe=!plane.material.wireframe;};
+document.querySelectorAll("[data-view]").forEach(b=>b.onclick=()=>setView(b.dataset.view));
+
+function setMaterial(key){
+  if(!MAT_DB[key])return;curMat=key;
+  const md=MAT_DB[key];
+  if(stockMat){stockMat.color.setHex(md.color);stockMat.metalness=md.metalness;stockMat.roughness=md.roughness;stockMat.needsUpdate=true;}
+  if(bottomMat){bottomMat.color.setHex(md.bottom);bottomMat.metalness=md.metalness;bottomMat.roughness=md.roughness;bottomMat.needsUpdate=true;}
+  if(chipMat){chipMat.color.setHex(md.chip);chipMat.needsUpdate=true;}
+  $("mmat-sel").value=key;$("lmat-sel").value=key;
+}
+$("mmat-sel").onchange=e=>setMaterial(e.target.value);
+$("lmat-sel").onchange=e=>setMaterial(e.target.value);
+
+function cycleCoolant(target){const modes=["off","flood","mist"];const cur=target==="mill"?mill.coolantMode:lathe.s.coolantMode;const next=modes[(modes.indexOf(cur)+1)%3];if(target==="mill")mill.coolantMode=next;else lathe.s.coolantMode=next;}
+$("mbtn-coolant").onclick=()=>cycleCoolant("mill");
+$("lbtn-coolant").onclick=()=>cycleCoolant("lathe");
+
+let fpsT=0,fpsC=0,fps=0;
+function syncMill(dt){
+  fpsT+=dt;fpsC++;if(fpsT>=.5){fps=Math.round(fpsC/fpsT);fpsT=0;fpsC=0;}
+  $("ml-x").textContent=fmt(mill.x);$("ml-y").textContent=fmt(mill.y);$("ml-z").textContent=fmt(mill.z);
+  $("ml-actf").textContent="ACT.F "+Math.round(mill.spindleOn?mill.feed*mill.feedOverride:0);
+  $("ml-rpm").textContent="S "+Math.round(mill.actualRpm);
+  const _at=magazine.getActiveTool();$("ml-tool").textContent="T"+String(mill.toolNo).padStart(2,"0")+(_at?" Ø"+_at.dia:"");
+  $("ml-ovr").textContent="OVR "+Math.round(mill.feedOverride*100)+"%";
+  $("ml-removed").textContent="REMOVED "+Math.round(mill.removed*100)+"%";
+  $("ml-mode").textContent=mill.mode;$("ml-mode").className=mill.mode==="AUTO"?"text-[#eaffef]":"text-[#59c98e]";
+  const al=$("ml-alarm");if(mill.alarm){al.textContent=mill.paused?"HOLD":"-EMG-";al.className="animate-pulse font-bold text-red-400";}else if(mill.paused){al.textContent="HOLD";al.className="font-bold text-amber-300";}else{al.textContent="READY";al.className="text-[#59c98e]";}
+  $("ml-run").textContent=mill.running?"RUN":"STOP";$("ml-run").className=mill.running?"font-bold text-[#7effb0]":"text-[#59c98e]";
+  $("mlbl-tool").textContent="T"+String(mill.toolNo).padStart(2,"0")+(_at?" "+_at.name:"");
+  const A="bg-amber-400 text-zinc-900",I="bg-zinc-700 text-zinc-200 hover:bg-zinc-600";
+  $("mmode-manual").className="rounded py-2 text-[10px] font-bold "+(mill.mode==="MANUAL"?A:I)+(mill.running?" opacity-40":"");
+  $("mmode-auto").className="rounded py-2 text-[10px] font-bold "+(mill.mode==="AUTO"?A:I)+(mill.running?" opacity-40":"");
+  $("mspindle-label").textContent="SPINDLE "+(mill.spindleOn?"ON":"OFF");$("mbtn-spindle").className="flex flex-col items-center gap-1 rounded py-2 text-[10px] font-bold "+(mill.spindleOn?"bg-cyan-600 text-white":"bg-zinc-700 text-zinc-200 hover:bg-zinc-600");$("mspindle-icon").className="text-base"+(mill.spindleOn?" animate-spin-slow":"");
+  $("mbtn-cycle").disabled=mill.mode!=="AUTO"||mill.running;$("me-go").disabled=mill.mode!=="MANUAL";
+  const mcl=mill.coolantMode;$("mcoolant-label").textContent="COOLANT "+(mcl==="off"?"OFF":mcl.toUpperCase());$("mbtn-coolant").className="flex flex-1 flex-col items-center gap-1 rounded py-2 text-[10px] font-bold "+(mcl!=="off"?"bg-blue-600 text-white":"bg-zinc-700 text-zinc-200 hover:bg-zinc-600");$("mcoolant-icon").textContent=mcl==="flood"?"🌊":mcl==="mist"?"🌫️":"💧";
+  $("ml-coolant").textContent="COOLANT "+(mcl==="off"?"OFF":mcl.toUpperCase());$("ml-coolant").className=mcl!=="off"?"text-right text-cyan-300":"text-right text-[#59c98e]";
+  $("ml-stock").textContent="STOCK "+W+"x"+D+"x"+TOP;
+  $("m-stat-pos").textContent="X "+fmt(mill.x)+"  Y "+fmt(mill.y)+"  Z "+fmt(mill.z);
+  $("m-stat-tool").textContent="tool = T"+mill.toolNo+(_at?" "+_at.name+" R"+CUTTER_R:"");
+  $("m-stat-cut").textContent="cutting_status = "+(mill.cutting?1:0);
+  $("m-stat-fps").textContent="FPS: "+fps;
+}
+
+/* ==================================================================== */
+/* =========================  G-CODE PARSER  ========================== */
+/* ==================================================================== */
+function parseGcode(text, type){
+  const lines=text.split(/\r?\n/);
+  const q=[];
+  let cur={x:0,y:type==="mill"?90:0,z:0}, feed=200, lastG=0;
+  const bounds={xMin:Infinity,xMax:-Infinity,yMin:Infinity,yMax:-Infinity,zMin:Infinity,zMax:-Infinity};
+  for(let raw of lines){
+    raw=raw.replace(/;.*$/,"").replace(/\(.*?\)/g,"").trim().toUpperCase();
+    if(!raw) continue;
+    const tokens=raw.match(/[A-Z][+-]?[\d.]+/g);
+    if(!tokens) continue;
+    const p={};
+    for(const t of tokens){const c=t[0],v=parseFloat(t.slice(1));p[c]=v;}
+    if("G" in p) lastG=p.G;
+    if("F" in p) feed=p.F;
+    if("S" in p && type==="mill") mill.spindleRpm=clamp(p.S,0,12000);
+    if("S" in p && type==="lathe") lathe.setSpindleRpm(p.S);
+    if("M" in p){
+      if(p.M===3||p.M===4){ if(type==="mill") mill.spindleOn=true; else lathe.s.spindleOn=true; }
+      if(p.M===5){ if(type==="mill") mill.spindleOn=false; else lathe.s.spindleOn=false; }
+      if(p.M===7){ if(type==="mill") mill.coolantMode="mist"; else lathe.s.coolantMode="mist"; }
+      if(p.M===8){ if(type==="mill") mill.coolantMode="flood"; else lathe.s.coolantMode="flood"; }
+      if(p.M===9){ if(type==="mill") mill.coolantMode="off"; else lathe.s.coolantMode="off"; }
+      if(p.M===30||p.M===2) continue;
+    }
+    if("T" in p){
+      if(type==="mill"){const tSlot=clamp(Math.round(p.T),1,40)-1;q.push({type:"tc",targetSlot:tSlot});}
+      else lathe.setToolNo(Math.round(p.T/100)||1);
+    }
+    if(lastG===0||lastG===1||lastG===2||lastG===3){
+      if(type==="mill"){
+        const nx="X" in p?p.X:cur.x, ny="Y" in p?p.Y:cur.y, nz="Z" in p?p.Z:cur.z;
+        if(lastG!==0){bounds.xMin=Math.min(bounds.xMin,nx);bounds.xMax=Math.max(bounds.xMax,nx);bounds.yMin=Math.min(bounds.yMin,ny);bounds.yMax=Math.max(bounds.yMax,ny);bounds.zMin=Math.min(bounds.zMin,nz);bounds.zMax=Math.max(bounds.zMax,nz);}
+        q.push({type:lastG===0?"rapid":"feed",x:nx,y:ny,z:nz});
+        cur={x:nx,y:ny,z:nz};
+      } else {
+        const nx="X" in p?p.X/2:cur.x, nz="Z" in p?p.Z:cur.z;
+        if(lastG!==0){bounds.xMin=Math.min(bounds.xMin,nx);bounds.xMax=Math.max(bounds.xMax,nx);bounds.zMin=Math.min(bounds.zMin,nz);bounds.zMax=Math.max(bounds.zMax,nz);}
+        q.push({type:lastG===0?"rapid":"feed",x:nx,z:nz});
+        cur={x:nx,z:nz};
+      }
+    }
+  }
+  return {q, bounds};
+}
+
+/* ==================================================================== */
+/* ========  SafetyInterceptor (Çarpışma ve Güvenlik Katmanı)  ======== */
+/* ==================================================================== */
+class SafetyInterceptor {
+  _heightAt(x,z){
+    const col=Math.round((x+W/2)/dx), row=Math.round((z+D/2)/dz);
+    if(col<0||col>=COLS||row<0||row>=ROWS) return 0;
+    return heights[row*COLS+col];
+  }
+  _maxHeightInRadius(x,z,r){
+    let h=this._heightAt(x,z);
+    const R7=r*0.707;
+    const pts=[[r,0],[-r,0],[0,r],[0,-r],[R7,R7],[-R7,R7],[R7,-R7],[-R7,-R7]];
+    for(const p of pts) h=Math.max(h,this._heightAt(x+p[0],z+p[1]));
+    return h;
+  }
+  _pathCollision(px,py,pz,nx,ny,nz,toolR){
+    const hLen=Math.hypot(nx-px,nz-pz);
+    if(hLen<0.1){
+      const surfH=this._maxHeightInRadius(nx,nz,toolR);
+      if(ny<=surfH+0.3&&ny<py) return {hit:true,surfH,toolY:ny};
+      return {hit:false};
+    }
+    const steps=Math.max(3,Math.ceil(hLen/3));
+    for(let s=1;s<=steps;s++){
+      const t=s/steps;
+      const sx=px+(nx-px)*t, sy=py+(ny-py)*t, sz=pz+(nz-pz)*t;
+      const surfH=this._maxHeightInRadius(sx,sz,toolR);
+      if(sy<=surfH+0.3) return {hit:true,surfH,toolY:sy};
+    }
+    return {hit:false};
+  }
+  validateMill(queue, sw, sd, sh, spindleOn, cx, cy, cz){
+    const xLim=sw/2+20, zLim=sd/2+20, yMax=sh+60, maxPlunge=10, errs=[];
+    let toolR=CUTTER_R;
+    let px=cx, py=cy, pz=cz;
+    for(let i=0;i<queue.length;i++){
+      const m=queue[i];
+      if(m.type==="tc"){const tl=magazine.getToolInSlot(m.targetSlot);if(tl)toolR=tl.dia/2;continue;}
+      const nx=m.x, ny=m.y, nz=m.z;
+      if(Math.abs(nx)>xLim)
+        errs.push(`Satır ${i+1}: X soft limit aşımı (${nx.toFixed(1)}mm, limit ±${xLim.toFixed(0)}mm) — takım tezgah dışına çıkar`);
+      if(ny<-0.5)
+        errs.push(`Satır ${i+1}: Z alt limit aşımı (${ny.toFixed(1)}mm) — takım tabla altına iner`);
+      if(ny>yMax)
+        errs.push(`Satır ${i+1}: Z üst limit aşımı (${ny.toFixed(1)}mm, limit ${yMax.toFixed(0)}mm)`);
+      if(Math.abs(nz)>zLim)
+        errs.push(`Satır ${i+1}: Y soft limit aşımı (${nz.toFixed(1)}mm, limit ±${zLim.toFixed(0)}mm) — takım tezgah dışına çıkar`);
+      if(m.type==="rapid"){
+        const chk=this._pathCollision(px,py,pz,nx,ny,nz,toolR);
+        if(chk.hit)
+          errs.push(`Satır ${i+1}: G00 rapid çarpışma — takım Z=${chk.toolY.toFixed(1)}mm, yüzey: ${chk.surfH.toFixed(1)}mm (heightmap)`);
+        const destSurf=this._maxHeightInRadius(nx,nz,toolR);
+        if(!chk.hit&&ny<destSurf-0.5&&py>destSurf+0.5)
+          errs.push(`Satır ${i+1}: G00 ile malzemeye dalma (Z: ${py.toFixed(1)}→${ny.toFixed(1)}mm, yüzey: ${destSurf.toFixed(1)}mm) — G01 feed kullanılmalı`);
+      }
+      if(m.type==="feed"&&!spindleOn){
+        const surfH=this._maxHeightInRadius(nx,nz,toolR);
+        if(ny<=surfH+0.5)
+          errs.push(`Satır ${i+1}: Spindle kapalı, malzemeye dalma girişimi (Z=${ny.toFixed(1)}mm, yüzey: ${surfH.toFixed(1)}mm)`);
+      }
+      if(m.type==="feed"&&py-ny>maxPlunge){
+        const surfH=this._maxHeightInRadius(nx,nz,toolR);
+        if(ny<surfH)
+          errs.push(`Satır ${i+1}: Tek seferde ${(py-ny).toFixed(1)}mm dalma (max ${maxPlunge}mm, yüzey: ${surfH.toFixed(1)}mm) — takım kırılma riski`);
+      }
+      px=nx;py=ny;pz=nz;
+    }
+    return errs;
+  }
+  validateLathe(queue, sLen, sR, spindleOn, cx, cz){
+    const xMax=sR*2+20, zMin=-25, zMax=sLen+20, errs=[];
+    let px=cx, pz=cz;
+    for(let i=0;i<queue.length;i++){
+      const m=queue[i];
+      if(m.x<-0.5)
+        errs.push(`Satır ${i+1}: X negatif limit (${m.x.toFixed(1)}mm) — merkez altı`);
+      if(m.x>xMax)
+        errs.push(`Satır ${i+1}: X limit aşımı (${m.x.toFixed(1)}mm, limit ${xMax.toFixed(0)}mm)`);
+      if(m.z<zMin)
+        errs.push(`Satır ${i+1}: Z limit aşımı (${m.z.toFixed(1)}mm, limit ${zMin}mm) — aynaya çarpma riski`);
+      if(m.z>zMax)
+        errs.push(`Satır ${i+1}: Z limit aşımı (${m.z.toFixed(1)}mm, limit ${zMax.toFixed(0)}mm)`);
+      if(m.type==="rapid"){
+        const inStock=m.z>=-0.5&&m.z<=sLen+0.5;
+        if(m.x<sR-0.5&&px>=sR-0.5&&inStock)
+          errs.push(`Satır ${i+1}: G00 rapid stok içine dalıyor (X=${m.x.toFixed(1)}mm, stok R: ${sR}mm) — çarpışma riski`);
+        if(px<sR-0.5&&inStock&&Math.abs(m.z-pz)>0.5)
+          errs.push(`Satır ${i+1}: G00 rapid stok içinde yatay hareket (X=${px.toFixed(1)}mm < stok R: ${sR}mm) — çarpışma riski`);
+      }
+      if(m.type==="feed"&&!spindleOn&&m.x<=sR+0.5&&m.z>=-0.5&&m.z<=sLen+0.5)
+        errs.push(`Satır ${i+1}: Spindle kapalı, malzemeye dalma (X=${m.x.toFixed(1)}mm) — hasar riski`);
+      px=m.x;pz=m.z;
+    }
+    return errs;
+  }
+  _eStop(target, taiMsgFn, errs){
+    if(target.emergency!==undefined){
+      target.emergency=true;target.running=false;target.spindleOn=false;
+      target.coolantMode="off";target.queue=[];target.moveActive=null;target.alarm="SAFETY";
+    } else {
+      target.emergencyStop();
+    }
+    const unique=[...new Set(errs)];
+    taiMsgFn('<span style="color:#ff4444;font-weight:bold">⛔ GÜVENLİK İHLALİ — E-STOP</span><br>'+
+      unique.map(m=>'<span style="color:#ff6666">• '+m+'</span>').join('<br>')+
+      '<br><span style="color:#ffaa44">Sistemi sıfırlamak için <b>RESET</b> yazın.</span>',"bot");
+  }
+}
+const safetyInterceptor=new SafetyInterceptor();
+
+function runMillGcode(parsed, stockDims){
+  const {q, bounds}=parsed;
+  if(!q.length) return;
+  for(const m of q){if(m.type==="tc")continue;const gy=m.y,gz=m.z;m.y=gz;m.z=gy;}
+  const bYmin=bounds.yMin,bYmax=bounds.yMax,bZmin=bounds.zMin,bZmax=bounds.zMax;
+  bounds.yMin=bZmin;bounds.yMax=bZmax;bounds.zMin=bYmin;bounds.zMax=bYmax;
+  if(stockDims){
+    resizeMillStock(stockDims.w,stockDims.d,stockDims.h);
+    for(const m of q){
+      m.x=clamp(m.x, -W/2+MARGIN*dx, W/2-MARGIN*dx);
+      if(m.z!==undefined) m.z=clamp(m.z, -D/2+MARGIN*dz, D/2-MARGIN*dz);
+      if(m.y!==undefined) m.y=clamp(m.y, 0, TOP+40);
+    }
+  } else if(bounds.xMax>bounds.xMin){
+    const margin=20;
+    const newW=Math.max(80,(bounds.xMax-bounds.xMin)+margin*2);
+    const newD=Math.max(60,(bounds.zMax-bounds.zMin)+margin*2);
+    const newTop=Math.max(20,Math.round(bounds.yMax+10));
+    resizeMillStock(Math.round(newW),Math.round(newD),newTop);
+    const cx=(bounds.xMax+bounds.xMin)/2, cz=(bounds.zMax+bounds.zMin)/2;
+    for(const m of q){
+      m.x=clamp(m.x-cx, -W/2+MARGIN*dx, W/2-MARGIN*dx);
+      if(m.z!==undefined) m.z=clamp(m.z-cz, -D/2+MARGIN*dz, D/2-MARGIN*dz);
+      if(m.y!==undefined) m.y=clamp(m.y, 0, TOP+40);
+    }
+  }
+  const sfErrs=safetyInterceptor.validateMill(q,W,D,TOP,true,mill.x,mill.y,mill.z);
+  if(sfErrs.length){safetyInterceptor._eStop(mill,taiMsg,sfErrs);return;}
+  mill.mode="AUTO"; mill.spindleOn=true; mill.paused=false; if(mill.coolantMode==="off")mill.coolantMode="flood";
+  mill.queue=q; mill.moveActive=mill.queue.shift(); mill.running=true;
+}
+
+function runLatheGcode(parsed, stockDims){
+  const {q, bounds}=parsed;
+  if(!q.length) return;
+  if(bounds.xMax>bounds.xMin||bounds.zMax>bounds.zMin){
+    if(stockDims){resizeLatheStock(stockDims.len,stockDims.r);}
+    else{const newR=Math.max(20,Math.round(bounds.xMax+10));
+      const zRange=Math.abs(bounds.zMax-bounds.zMin);
+      const newLen=Math.max(40,Math.round(zRange+40));
+      resizeLatheStock(newLen,newR);}
+    const zOff=bounds.zMin<0?-bounds.zMin+20:0;
+    for(const m of q){
+      m.x=clamp(m.x, 0, STOCK_R+12);
+      m.z=clamp(m.z+zOff, -20, STOCK_LEN);
+    }
+  } else if(stockDims){resizeLatheStock(stockDims.len,stockDims.r);}
+  const sfErrsL=safetyInterceptor.validateLathe(q,STOCK_LEN,STOCK_R,true,lathe.s.x,lathe.s.z);
+  if(sfErrsL.length){safetyInterceptor._eStop(lathe,taiMsg,sfErrsL);return;}
+  lathe.setMode("AUTO"); lathe.s.spindleOn=true; if(lathe.s.coolantMode==="off")lathe.s.coolantMode="flood";
+  lathe.queue=q; lathe.moveActive=lathe.queue.shift()||null; lathe.s.running=true;
+}
+
+$("m-file").onchange=e=>{
+  const f=e.target.files[0]; if(!f) return;
+  $("m-file-info").textContent=f.name; $("m-file-info").classList.remove("hidden");
+  f.text().then(txt=>{millProgramText=txt;runMillGcode(parseGcode(txt,"mill"));});
+  e.target.value="";
+};
+$("l-file").onchange=e=>{
+  const f=e.target.files[0]; if(!f) return;
+  $("l-file-info").textContent=f.name; $("l-file-info").classList.remove("hidden");
+  f.text().then(txt=>{latheProgramText=txt;runLatheGcode(parseGcode(txt,"lathe"));});
+  e.target.value="";
+};
+
+/* --- CAM sayfasından gelen G-code otomatik yükleme --- */
+{const raw=sessionStorage.getItem("rover_cnc_gcode");
+if(raw){try{const d=JSON.parse(raw);if(d.gcode){
+  const isMill=!d.machineType||d.machineType==="freze"||d.machineType==="mill";
+  if(d.material){const mk=d.material.toLowerCase();const map={"celik":"steel","çelik":"steel","steel":"steel","aluminyum":"aluminum","alüminyum":"aluminum","aluminum":"aluminum","pirinc":"brass","pirinç":"brass","brass":"brass","bakir":"copper","bakır":"copper","copper":"copper","dokme demir":"cast-iron","dökme demir":"cast-iron","cast-iron":"cast-iron","titanyum":"titanium","titanium":"titanium","ahsap":"wood","ahşap":"wood","wood":"wood","plastik":"plastic","plastic":"plastic","pom":"plastic","nylon":"plastic","akrilik":"acrylic","acrylic":"acrylic","pmma":"acrylic"};const matKey=map[mk];if(matKey)setMaterial(matKey);}
+  let camStock=null;
+  if(isMill){
+    const sw=d.stockWidth||d.bbox?.width, sl=d.stockLength||d.bbox?.length, sh=d.stockHeight||d.bbox?.height;
+    if(sw&&sl&&sh)camStock={w:Math.round(sw),d:Math.round(sl),h:Math.round(sh)};
+    else if(sw&&sl)camStock={w:Math.round(sw),d:Math.round(sl),h:TOP};
+  } else {
+    const sd=d.stockDiameter, slen=d.stockLength||d.bbox?.length;
+    if(sd)camStock={len:slen?Math.round(slen):STOCK_LEN,r:Math.round(sd/2)};
+    else if(slen)camStock={len:Math.round(slen),r:STOCK_R};
+  }
+  setTimeout(()=>{
+    if(isMill){setTab("mill");$("m-file-info").textContent="CAM çıktısı";$("m-file-info").classList.remove("hidden");millProgramText=d.gcode;runMillGcode(parseGcode(d.gcode,"mill"),camStock);}
+    else{setTab("lathe");$("l-file-info").textContent="CAM çıktısı";$("l-file-info").classList.remove("hidden");latheProgramText=d.gcode;runLatheGcode(parseGcode(d.gcode,"lathe"),camStock);}
+  },300);
+  sessionStorage.removeItem("rover_cnc_gcode");
+}}catch(e){console.error("CAM gcode yüklenemedi:",e);}}}
+
+/* ==================================================================== */
+/* ==========================  TAB DEĞİŞTİRME  ======================== */
+/* ==================================================================== */
+function setTab(t){
+  active=t;
+  $("view-mill").classList.toggle("hidden",t!=="mill");
+  $("view-mill").classList.toggle("flex",t==="mill");
+  $("view-lathe").classList.toggle("hidden",t!=="lathe");
+  $("view-lathe").classList.toggle("flex",t==="lathe");
+  const on="bg-cyan-600 text-white",off="bg-zinc-700 text-zinc-300";
+  $("tab-mill").className="px-4 py-1.5 text-[12px] font-bold "+(t==="mill"?on:off);
+  $("tab-lathe").className="px-4 py-1.5 text-[12px] font-bold "+(t==="lathe"?on:off);
+  if(t==="mill"){millResize();} else {latheResize();}
+  const modeLabel=t==="mill"?"FREZE":"TORNA";
+  const mb=$("tai-mode-badge");if(mb)mb.textContent=modeLabel;
+  const mm=$("mtai-mode");if(mm)mm.textContent=modeLabel;
+  const lm=$("ltai-mode");if(lm)lm.textContent=modeLabel;
+}
+$("tab-mill").onclick=()=>setTab("mill");
+$("tab-lathe").onclick=()=>setTab("lathe");
+
+/* ==================================================================== */
+/* =============================  ANA DÖNGÜ  ========================== */
+/* ==================================================================== */
+initMill();
+setTab("mill");
+let last=performance.now(),uiAcc=0;
+function loop(now){
+  const dt=Math.min(.05,(now-last)/1000);last=now;
+  if(active==="mill"){updateMill(dt);controls.update();renderer.render(scene,camera);}
+  else{lathe.update(dt);const r=latheCanvas.getBoundingClientRect();lathe.draw(lctx,r.width,r.height);}
+  uiAcc+=dt;if(uiAcc>.066){uiAcc=0;if(active==="mill")syncMill(uiAcc||dt);else syncLathe();}
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+/* ==================================================================== */
+/* =======================  TOPKAPI AI CHAT BOT  ====================== */
+/* ==================================================================== */
+const taiToggle=$("tai-toggle"), taiPanel=$("tai-panel"), taiClose=$("tai-close");
+const taiMessages=$("tai-messages"), taiInput=$("tai-input"), taiSend=$("tai-send"), taiChips=$("tai-chips");
+const taiBadge=$("tai-mode-badge");
+let taiLastOp=null;
+
+function taiOpen(){taiPanel.classList.toggle("open");if(taiPanel.classList.contains("open")){taiInput.focus();taiRenderChips();}}
+taiToggle.onclick=taiOpen;
+$("mtai-btn").onclick=taiOpen;
+$("ltai-btn").onclick=taiOpen;
+taiClose.onclick=()=>taiPanel.classList.remove("open");
+
+function taiMsg(text,who){const d=document.createElement("div");d.className="tai-msg "+(who==="bot"?"tai-msg-bot":"tai-msg-user");d.innerHTML=text;taiMessages.appendChild(d);taiMessages.scrollTop=taiMessages.scrollHeight;return d;}
+const A=s=>`<span class="tai-msg-action">${s}</span>`;
+function taiNorm(s){return s.toLowerCase().replace(/ı/g,"i").replace(/ö/g,"o").replace(/ü/g,"u").replace(/ş/g,"s").replace(/ç/g,"c").replace(/ğ/g,"g");}
+function taiNum(t,keys){for(const k of keys){const m=t.match(new RegExp(k+"\\s*(\\d+\\.?\\d*)","i"))||t.match(new RegExp("(\\d+\\.?\\d*)\\s*(?:mm\\s*)?"+k,"i"));if(m)return parseFloat(m[1]);}return null;}
+function taiAllNums(t){return(t.match(/\d+\.?\d*/g)||[]).map(Number);}
+function isMill(){return active==="mill";}
+
+/* ---- freze toolpath generators ---- */
+function tpMillDrill(dia,depth,cx,cz){
+  const r=dia/2, safeY=TOP+8, q=[];
+  mill.spindleOn=true;mill.mode="AUTO";mill.paused=false;
+  if(r<=CUTTER_R){
+    const orbitR=Math.max(0.5,r-CUTTER_R*0.3);
+    q.push({type:"rapid",x:cx,y:safeY,z:cz});
+    const steps=Math.ceil(depth/3);
+    for(let s=1;s<=steps;s++){
+      const y=Math.max(0,TOP-depth*(s/steps));
+      const pts=16;
+      for(let i=0;i<=pts;i++){const a=(i/pts)*Math.PI*2;q.push({type:"feed",x:cx+Math.cos(a)*orbitR,y:y,z:cz+Math.sin(a)*orbitR});}
+    }
+  } else {
+    q.push({type:"rapid",x:cx,y:safeY,z:cz});
+    const targetY=Math.max(0,TOP-depth);
+    const spiralSteps=Math.ceil(r/CUTTER_R)*16;
+    for(let i=0;i<=spiralSteps;i++){const frac=i/spiralSteps;const cr=frac*r;const a=frac*Math.PI*6;const y=TOP-(TOP-targetY)*frac;q.push({type:"feed",x:cx+Math.cos(a)*cr,y:y,z:cz+Math.sin(a)*cr});}
+    const pts=24;for(let i=0;i<=pts;i++){const a=(i/pts)*Math.PI*2;q.push({type:"feed",x:cx+Math.cos(a)*r,y:Math.max(0,TOP-depth),z:cz+Math.sin(a)*r});}
+  }
+  q.push({type:"rapid",x:cx,y:safeY,z:cz});
+  return q;
+}
+
+function tpMillRectPocket(pw,pl,depth,cx,cz){
+  const safeY=TOP+8,q=[],stepD=4,step=CUTTER_R*1.1;
+  mill.spindleOn=true;mill.mode="AUTO";mill.paused=false;
+  const hw=pw/2-CUTTER_R,hl=pl/2-CUTTER_R;
+  for(let d=stepD;d<=depth;d+=stepD){
+    const y=Math.max(0,TOP-Math.min(d,depth));
+    q.push({type:"rapid",x:cx-hw,y:safeY,z:cz-hl});
+    q.push({type:"feed",x:cx-hw,y:y,z:cz-hl});
+    let z=cz-hl,dir=1;
+    while(z<=cz+hl+0.01){const xa=dir>0?cx+hw:cx-hw;q.push({type:"feed",x:xa,y:y,z:Math.min(z,cz+hl)});z+=step;if(z<=cz+hl+0.01)q.push({type:"feed",x:xa,y:y,z:Math.min(z,cz+hl)});dir*=-1;}
+    q.push({type:"rapid",x:q[q.length-1].x,y:safeY,z:q[q.length-1].z});
+  }
+  if(depth%stepD!==0){
+    const y=Math.max(0,TOP-depth);
+    q.push({type:"rapid",x:cx-hw,y:safeY,z:cz-hl});
+    q.push({type:"feed",x:cx-hw,y:y,z:cz-hl});
+    let z=cz-hl,dir=1;
+    while(z<=cz+hl+0.01){const xa=dir>0?cx+hw:cx-hw;q.push({type:"feed",x:xa,y:y,z:Math.min(z,cz+hl)});z+=step;if(z<=cz+hl+0.01)q.push({type:"feed",x:xa,y:y,z:Math.min(z,cz+hl)});dir*=-1;}
+  }
+  q.push({type:"rapid",x:cx,y:safeY,z:cz});
+  return q;
+}
+
+function tpMillCircPocket(dia,depth,cx,cz){
+  const r=dia/2,safeY=TOP+8,q=[],stepD=4;
+  mill.spindleOn=true;mill.mode="AUTO";mill.paused=false;
+  for(let d=stepD;d<=depth+0.01;d+=stepD){
+    const y=Math.max(0,TOP-Math.min(d,depth));
+    q.push({type:"rapid",x:cx,y:safeY,z:cz});
+    q.push({type:"feed",x:cx,y:y,z:cz});
+    const rings=Math.ceil((r-CUTTER_R)/CUTTER_R)+1;
+    for(let ri=1;ri<=rings;ri++){
+      const cr=Math.min((ri/rings)*(r-CUTTER_R*0.5),r-CUTTER_R*0.3);
+      const pts=Math.max(12,Math.round(cr*1.5));
+      for(let i=0;i<=pts;i++){const a=(i/pts)*Math.PI*2;q.push({type:"feed",x:cx+Math.cos(a)*cr,y:y,z:cz+Math.sin(a)*cr});}
+    }
+    const pts=24;for(let i=0;i<=pts;i++){const a=(i/pts)*Math.PI*2;q.push({type:"feed",x:cx+Math.cos(a)*(r-CUTTER_R*0.3),y:y,z:cz+Math.sin(a)*(r-CUTTER_R*0.3)});}
+  }
+  q.push({type:"rapid",x:cx,y:safeY,z:cz});
+  return q;
+}
+
+function tpMillSlot(sw,sl,depth,cx,cz,dirAngle){
+  const safeY=TOP+8,q=[],stepD=4;
+  mill.spindleOn=true;mill.mode="AUTO";mill.paused=false;
+  const rad=dirAngle*(Math.PI/180);
+  const hx=Math.cos(rad)*sl/2, hz=Math.sin(rad)*sl/2;
+  for(let d=stepD;d<=depth+0.01;d+=stepD){
+    const y=Math.max(0,TOP-Math.min(d,depth));
+    q.push({type:"rapid",x:cx-hx,y:safeY,z:cz-hz});
+    q.push({type:"feed",x:cx-hx,y:y,z:cz-hz});
+    q.push({type:"feed",x:cx+hx,y:y,z:cz+hz});
+    q.push({type:"feed",x:cx-hx,y:y,z:cz-hz});
+  }
+  q.push({type:"rapid",x:cx,y:safeY,z:cz});
+  return q;
+}
+
+function tpMillFace(depth){
+  const safeY=TOP+8,q=[],step=CUTTER_R*1.25;
+  mill.spindleOn=true;mill.mode="AUTO";mill.paused=false;
+  const y=Math.max(0,TOP-depth);
+  const x0=-W/2+MARGIN*dx+CUTTER_R,x1=W/2-MARGIN*dx-CUTTER_R;
+  const z0=-D/2+MARGIN*dz+CUTTER_R,z1=D/2-MARGIN*dz-CUTTER_R;
+  q.push({type:"rapid",x:x0,y:safeY,z:z0});
+  q.push({type:"feed",x:x0,y:y,z:z0});
+  let z=z0,dir=1;
+  while(z<=z1+0.01){const xa=dir>0?x1:x0;q.push({type:"feed",x:xa,y:y,z:Math.min(z,z1)});z+=step;if(z<=z1+0.01)q.push({type:"feed",x:xa,y:y,z:Math.min(z,z1)});dir*=-1;}
+  q.push({type:"rapid",x:0,y:safeY,z:0});
+  return q;
+}
+
+function tpMillContour(depth,inset){
+  const safeY=TOP+8,q=[],stepD=4,ins=inset||CUTTER_R;
+  mill.spindleOn=true;mill.mode="AUTO";mill.paused=false;
+  const x0=-W/2+MARGIN*dx+ins,x1=W/2-MARGIN*dx-ins,z0=-D/2+MARGIN*dz+ins,z1=D/2-MARGIN*dz-ins;
+  for(let d=stepD;d<=depth+0.01;d+=stepD){
+    const y=Math.max(0,TOP-Math.min(d,depth));
+    q.push({type:"rapid",x:x0,y:safeY,z:z0});
+    q.push({type:"feed",x:x0,y:y,z:z0});
+    q.push({type:"feed",x:x1,y:y,z:z0});
+    q.push({type:"feed",x:x1,y:y,z:z1});
+    q.push({type:"feed",x:x0,y:y,z:z1});
+    q.push({type:"feed",x:x0,y:y,z:z0});
+  }
+  q.push({type:"rapid",x:0,y:safeY,z:0});
+  return q;
+}
+
+function tpMillChamfer(depth,cw){
+  const safeY=TOP+8,q=[],w=cw||depth;
+  mill.spindleOn=true;mill.mode="AUTO";mill.paused=false;
+  const y=TOP-depth;
+  const x0=-W/2+MARGIN*dx+w,x1=W/2-MARGIN*dx-w,z0=-D/2+MARGIN*dz+w,z1=D/2-MARGIN*dz-w;
+  q.push({type:"rapid",x:x0,y:safeY,z:z0});
+  q.push({type:"feed",x:x0,y:y,z:z0});
+  q.push({type:"feed",x:x1,y:y,z:z0});
+  q.push({type:"feed",x:x1,y:y,z:z1});
+  q.push({type:"feed",x:x0,y:y,z:z1});
+  q.push({type:"feed",x:x0,y:y,z:z0});
+  q.push({type:"rapid",x:0,y:safeY,z:0});
+  return q;
+}
+
+/* ---- torna toolpath generators ---- */
+function tpLatheTurn(targetDia,startZ,endZ){
+  const targetR=targetDia/2,clearZ=startZ-5,q=[];let r=STOCK_R;
+  lathe.s.spindleOn=true;lathe.setMode("AUTO");
+  while(r>targetR){r=Math.max(targetR,r-6);q.push({type:"rapid",x:r,z:clearZ});q.push({type:"feed",x:r,z:endZ});q.push({type:"rapid",x:r+6,z:endZ});q.push({type:"rapid",x:r+6,z:clearZ});}
+  q.push({type:"rapid",x:STOCK_R+8,z:startZ-10});
+  return q;
+}
+
+function tpLatheFace(depth){
+  const q=[];let z=0;
+  lathe.s.spindleOn=true;lathe.setMode("AUTO");
+  while(z<depth){z=Math.min(depth,z+3);
+    q.push({type:"rapid",x:STOCK_R+3,z:-z});
+    q.push({type:"feed",x:0,z:-z});
+    q.push({type:"rapid",x:STOCK_R+3,z:-z});
+  }
+  q.push({type:"rapid",x:STOCK_R+8,z:-12});
+  return q;
+}
+
+function tpLatheGroove(gWidth,gDepth,gPosZ){
+  const q=[],targetR=Math.max(2,STOCK_R-gDepth);
+  lathe.s.spindleOn=true;lathe.setMode("AUTO");
+  const z0=gPosZ,z1=gPosZ+gWidth;let r=STOCK_R;
+  while(r>targetR){r=Math.max(targetR,r-4);
+    q.push({type:"rapid",x:r,z:z0});q.push({type:"feed",x:r,z:z1});
+    q.push({type:"rapid",x:STOCK_R+3,z:z1});q.push({type:"rapid",x:STOCK_R+3,z:z0});
+  }
+  q.push({type:"rapid",x:STOCK_R+8,z:-12});
+  return q;
+}
+
+function tpLatheTaper(startDia,endDia,startZ,endZ){
+  const q=[],startR=startDia/2,endR=endDia/2,steps=Math.ceil(Math.abs(startR-endR)/4);
+  lathe.s.spindleOn=true;lathe.setMode("AUTO");
+  for(let s=1;s<=steps;s++){
+    const frac=s/steps;
+    const r1=STOCK_R-(STOCK_R-startR)*frac;
+    const r2=STOCK_R-(STOCK_R-endR)*frac;
+    q.push({type:"rapid",x:Math.max(r1,r2)+3,z:startZ});
+    q.push({type:"rapid",x:r1,z:startZ});
+    q.push({type:"feed",x:r2,z:endZ});
+    q.push({type:"rapid",x:Math.max(r1,r2)+3,z:endZ});
+  }
+  q.push({type:"rapid",x:STOCK_R+8,z:-12});
+  return q;
+}
+
+/* ---- freze örnek parçalar ---- */
+function sampleBoltFlange(){
+  const q=[],safeY=TOP+8;
+  mill.spindleOn=true;mill.mode="AUTO";mill.paused=false;
+  const centerHole=tpMillDrill(16,TOP,0,0);
+  q.push(...centerHole);
+  const boltR=35,hDia=8;
+  for(let i=0;i<4;i++){
+    const a=(i/4)*Math.PI*2;
+    const hx=Math.cos(a)*boltR,hz=Math.sin(a)*boltR;
+    q.push(...tpMillDrill(hDia,TOP,hx,hz));
+  }
+  q.push({type:"rapid",x:0,y:90,z:0});
+  return q;
+}
+
+function sampleKeySlot(){
+  return tpMillSlot(CUTTER_R*2,60,15,0,0,0);
+}
+
+function sampleStepBlock(){
+  const q=[],safeY=TOP+8;
+  mill.spindleOn=true;mill.mode="AUTO";mill.paused=false;
+  q.push(...tpMillRectPocket(80,50,15,-30,0));
+  q.push(...tpMillRectPocket(80,50,30,30,0));
+  q.push({type:"rapid",x:0,y:90,z:0});
+  return q;
+}
+
+function sampleHexPocket(){
+  const q=[],safeY=TOP+8,r=25,depth=12;
+  mill.spindleOn=true;mill.mode="AUTO";mill.paused=false;
+  const stepD=4;
+  for(let d=stepD;d<=depth+0.01;d+=stepD){
+    const y=Math.max(0,TOP-Math.min(d,depth));
+    q.push({type:"rapid",x:0,y:safeY,z:0});
+    for(let ring=1;ring<=3;ring++){
+      const cr=ring*(r/3)-CUTTER_R*0.3;
+      const pts=6*ring;
+      for(let i=0;i<=pts;i++){const a=(i/pts)*Math.PI*2;q.push({type:"feed",x:Math.cos(a)*cr,y:y,z:Math.sin(a)*cr});}
+    }
+  }
+  q.push({type:"rapid",x:0,y:safeY,z:0});
+  return q;
+}
+
+/* ---- torna örnek parçalar ---- */
+function sampleSteppedShaft(){
+  const q=[];
+  lathe.s.spindleOn=true;lathe.setMode("AUTO");
+  q.push(...tpLatheTurn(80,0,60));
+  q.push(...tpLatheTurn(50,60,130));
+  q.push(...tpLatheTurn(30,130,180));
+  q.push({type:"rapid",x:STOCK_R+8,z:-12});
+  return q;
+}
+
+function sampleTaperedPin(){
+  const q=[];
+  lathe.s.spindleOn=true;lathe.setMode("AUTO");
+  q.push(...tpLatheTurn(90,0,STOCK_LEN-20));
+  q.push(...tpLatheTaper(90,20,0,STOCK_LEN-20));
+  q.push({type:"rapid",x:STOCK_R+8,z:-12});
+  return q;
+}
+
+function sampleGroovedShaft(){
+  const q=[];
+  lathe.s.spindleOn=true;lathe.setMode("AUTO");
+  q.push(...tpLatheTurn(80,0,STOCK_LEN-20));
+  q.push(...tpLatheGroove(8,20,40));
+  q.push(...tpLatheGroove(8,20,100));
+  q.push(...tpLatheGroove(8,20,STOCK_LEN-60));
+  q.push({type:"rapid",x:STOCK_R+8,z:-12});
+  return q;
+}
+
+function sampleBoltProfile(){
+  const q=[];
+  lathe.s.spindleOn=true;lathe.setMode("AUTO");
+  q.push(...tpLatheTurn(40,0,120));
+  q.push(...tpLatheGroove(4,12,115));
+  q.push({type:"rapid",x:STOCK_R+8,z:-12});
+  return q;
+}
+
+/* ---- akıllı öneri sistemi ---- */
+function taiGetChips(){
+  if(isMill()){
+    if(taiLastOp==="drill")return[
+      {l:"Başka konumda delik",c:"X20 Z10 noktasında 10mm çapında 15mm delik aç"},
+      {l:"Cep aç",c:"60x40mm 10mm derin dikdörtgen cep aç"},
+      {l:"Yüzey düzelt",c:"2mm yüzey düzelt"},
+      {l:"Yeni parça",c:"Yeni parça"},
+    ];
+    if(taiLastOp==="pocket")return[
+      {l:"Delik aç",c:"10mm çapında 15mm delik aç"},
+      {l:"Kontur kes",c:"10mm derin kontur kes"},
+      {l:"Pah kır",c:"2mm pah kır"},
+      {l:"Yeni parça",c:"Yeni parça"},
+    ];
+    if(taiLastOp==="face")return[
+      {l:"Cep aç",c:"60x40mm 10mm derin cep aç"},
+      {l:"Delik aç",c:"12mm çapında 20mm delik aç"},
+      {l:"Kontur kes",c:"8mm derin kontur kes"},
+      {l:"Yeni parça",c:"Yeni parça"},
+    ];
+    if(taiLastOp==="sample")return[
+      {l:"Cıvata flanşı",c:"Cıvata flanşı yap"},
+      {l:"Kama kanalı",c:"Kama kanalı aç"},
+      {l:"Basamaklı blok",c:"Basamaklı blok yap"},
+      {l:"Altıgen cep",c:"Altıgen cep aç"},
+    ];
+    return[
+      {l:"12mm delik aç",c:"12mm çapında 15mm derinlikte delik aç"},
+      {l:"Dikdörtgen cep",c:"60x40mm 10mm derin dikdörtgen cep aç"},
+      {l:"Örnek parçalar",c:"Örnek parçaları göster"},
+      {l:"📐 Stok boyutu",c:"Stok boyut 200x140x60"},
+    ];
+  } else {
+    if(taiLastOp==="turn")return[
+      {l:"Kanal aç",c:"8mm genişliğinde 15mm derin kanal aç"},
+      {l:"Alın torna",c:"5mm alın tornalama yap"},
+      {l:"Konik kıs",c:"Konik tornalama yap"},
+      {l:"Yeni parça",c:"Yeni parça"},
+    ];
+    if(taiLastOp==="groove")return[
+      {l:"Çap düşür",c:"Çapı 60mm'ye düşür"},
+      {l:"Başka kanal",c:"Başka konumda kanal aç"},
+      {l:"Konik kıs",c:"Konik tornalama yap"},
+      {l:"Yeni parça",c:"Yeni parça"},
+    ];
+    if(taiLastOp==="sample")return[
+      {l:"Kademeli mil",c:"Kademeli mil yap"},
+      {l:"Konik pim",c:"Konik pim yap"},
+      {l:"Kanallı mil",c:"Kanallı mil yap"},
+      {l:"Cıvata profili",c:"Cıvata profili yap"},
+    ];
+    return[
+      {l:"Çapı 40mm yap",c:"Çapı 40mm'ye düşür"},
+      {l:"Kanal aç",c:"8mm genişliğinde 15mm derin kanal aç"},
+      {l:"Örnek parçalar",c:"Örnek parçaları göster"},
+      {l:"📐 Stok boyutu",c:"Stok boyut çap 80 uzunluk 200"},
+    ];
+  }
+}
+
+function taiRenderChips(){
+  taiBadge.textContent=isMill()?"FREZE":"TORNA";
+  taiChips.innerHTML="";
+  const R=window._rover||{taiGetChips,taiUserInput};
+  (R.taiGetChips||taiGetChips)().forEach(c=>{const b=document.createElement("button");b.className="tai-chip";b.textContent=c.l;b.onclick=()=>(R.taiUserInput||taiUserInput)(c.c);taiChips.appendChild(b);});
+}
+
+/* ---- ana komut işleyici ---- */
+function taiSendMsg(){const txt=taiInput.value.trim();if(!txt)return;taiInput.value="";const R=window._rover;if(R&&R.taiUserInput)R.taiUserInput(txt);else taiUserInput(txt);}
+taiSend.onclick=taiSendMsg;
+taiInput.onkeydown=e=>{if(e.key==="Enter")taiSendMsg();};
+
+function taiUserInput(text){
+  taiMsg(text,"user");
+  const result=taiExec(text);
+  if(result){taiMsg(result,"bot");taiRenderChips();return;}
+  taiMsg("Bu komutu anlayamadım. Şu tarz komutlar deneyebilirsin:<br>• <b>12mm çapında 20mm delik aç</b><br>• <b>60x40mm 10mm cep aç</b><br>• <b>Çapı 30mm'ye düşür</b><br>• <b>Örnek parçaları göster</b><br>• <b>Yardım</b>","bot");
+  taiRenderChips();
+}
+
+function taiRunMill(q){mill.queue=q;mill.moveActive=q.shift();mill.running=true;}
+function taiRunLathe(q){lathe.queue=q;lathe.moveActive=lathe.queue.shift()||null;lathe.s.running=true;}
+function taiRunMillWithTool(opType,reqDia,reqDepth,genQ){
+  const slot=magazine.findSlotForOp(opType,reqDia,reqDepth);
+  if(slot===-1)return null;
+  let tcPre=[];
+  if(slot!==magazine.activeSlot){tcPre=[{type:"rapid",x:mill.x,y:TOP+8,z:mill.z},{type:"tc",targetSlot:slot}];}
+  const newTl=magazine.getToolInSlot(slot);
+  const oldR=CUTTER_R,oldH=CUTTER_H;
+  CUTTER_R=newTl.dia/2;CUTTER_H=newTl.fluteLen;
+  const opQ=genQ();
+  CUTTER_R=oldR;CUTTER_H=oldH;
+  const q=[...tcPre,...opQ];
+  taiRunMill(q);
+  return slot;
+}
+
+function taiExec(raw){
+  const t=taiNorm(raw);
+  const im=isMill();
+
+  /* --- yardım --- */
+  if(/^(yardim|help|komutlar|ne yapabilirsin)/i.test(t)){
+    taiLastOp=null;
+    if(im) return `<b>Freze Komutları:</b><br>
+• <b>Delik aç:</b> "12mm çapında 20mm delik aç"<br>
+• <b>Dikdörtgen cep:</b> "60x40mm 10mm derin cep aç"<br>
+• <b>Daire cep:</b> "30mm çapında daire cep aç"<br>
+• <b>Kanal:</b> "8mm kanal aç 50mm uzunluk"<br>
+• <b>Yüzey düzelt:</b> "3mm yüzey düzelt"<br>
+• <b>Kontur kes:</b> "10mm kontur kes"<br>
+• <b>Pah kır:</b> "2mm pah kır"<br>
+• <b>Kontrol:</b> "devir 8000", "feed 500", "durdur"<br>
+• <b>Takım:</b> "takım 3", "magazin göster", "takım listesi"<br>
+• <b>Soğutma:</b> "soğutma aç", "coolant flood", "coolant mist", "soğutma kapat"<br>
+• <b>Stok boyutu:</b> "stok boyut 200x140x60" (genişlik x derinlik x yükseklik)<br>
+• <b>Malzeme:</b> "malzeme alüminyum", "malzeme ahşap"<br>
+• <b>Örnek parçalar:</b> "örnek parçaları göster"`;
+    return `<b>Torna Komutları:</b><br>
+• <b>Çap düşür:</b> "Çapı 40mm'ye düşür"<br>
+• <b>Alın torna:</b> "5mm alın tornalama"<br>
+• <b>Kanal aç:</b> "8mm genişliğinde 15mm derin kanal"<br>
+• <b>Konik torna:</b> "80mm'den 30mm'ye konik torna"<br>
+• <b>Kontrol:</b> "devir 2000", "feed 300", "durdur"<br>
+• <b>Soğutma:</b> "soğutma aç", "coolant flood", "coolant mist", "soğutma kapat"<br>
+• <b>Stok boyutu:</b> "stok boyut çap 80 uzunluk 200" veya "stok boyut 80x200"<br>
+• <b>Malzeme:</b> "malzeme pirinç", "malzeme plastik"<br>
+• <b>Örnek parçalar:</b> "örnek parçaları göster"`;
+  }
+
+  /* --- örnek parça listesi --- */
+  if(/(ornek|sample|hazir)\s*(parca|part|islem)?/i.test(t) && /(goster|listele|neler|ne var)/i.test(t)){
+    taiLastOp="sample";
+    if(im) return `<b>Freze Örnek Parçalar:</b><br>
+• <b>Cıvata flanşı</b> — 4 delikli + merkez delikli flanş<br>
+• <b>Kama kanalı</b> — standart kama yuvası<br>
+• <b>Basamaklı blok</b> — iki kademeli yüzey<br>
+• <b>Altıgen cep</b> — altıgen şekilli cep<br><br>Birini yazmak yeterli.`;
+    return `<b>Torna Örnek Parçalar:</b><br>
+• <b>Kademeli mil</b> — 3 kademeli mil profili<br>
+• <b>Konik pim</b> — sivrilen konik parça<br>
+• <b>Kanallı mil</b> — 3 kanallı mil<br>
+• <b>Cıvata profili</b> — basit cıvata gövdesi<br><br>Birini yazmak yeterli.`;
+  }
+
+  /* --- freze örnek parçalar --- */
+  if(im){
+    if(/(civata|bolt)\s*(flans|plaka|flange)/i.test(t)){taiLastOp="sample";taiRunMill(sampleBoltFlange());return A("✓ Cıvata flanşı işleniyor:")+" 4 adet M8 delik + Ø16 merkez delik.";}
+    if(/(kama|key)\s*(kanal|slot|yuva)/i.test(t)){taiLastOp="sample";taiRunMill(sampleKeySlot());return A("✓ Kama kanalı açılıyor:")+" 60mm uzunluk, 15mm derinlik.";}
+    if(/(basamakli|step)\s*(blok|block)/i.test(t)){taiLastOp="sample";taiRunMill(sampleStepBlock());return A("✓ Basamaklı blok işleniyor:")+" 2 kademe — 15mm ve 30mm.";}
+    if(/(altigen|hex)\s*(cep|pocket)/i.test(t)){taiLastOp="sample";taiRunMill(sampleHexPocket());return A("✓ Altıgen cep açılıyor:")+" Ø50mm, 12mm derinlik.";}
+  }
+  /* --- torna örnek parçalar --- */
+  if(!im){
+    if(/(kademeli|stepped|basamakli)\s*(mil|shaft)/i.test(t)){taiLastOp="sample";taiRunLathe(sampleSteppedShaft());return A("✓ Kademeli mil tornalama başlatıldı:")+" Ø80→Ø50→Ø30 üç kademe.";}
+    if(/(konik|taper)\s*(pim|pin)/i.test(t)){taiLastOp="sample";taiRunLathe(sampleTaperedPin());return A("✓ Konik pim tornalama başlatıldı:")+" Ø90→Ø20 konik profil.";}
+    if(/(kanalli|grooved)\s*(mil|shaft)/i.test(t)){taiLastOp="sample";taiRunLathe(sampleGroovedShaft());return A("✓ Kanallı mil başlatıldı:")+" Ø80 mil üzerine 3 kanal.";}
+    if(/(civata|bolt)\s*(profil|profile|govde)/i.test(t)){taiLastOp="sample";taiRunLathe(sampleBoltProfile());return A("✓ Cıvata profili başlatıldı:")+" Ø40 gövde + kanal.";}
+  }
+
+  /* --- malzeme değiştir --- */
+  {const matMap={"celik":"steel","cilik":"steel","steel":"steel","aluminyum":"aluminum","aluminum":"aluminum","pirinc":"brass","brass":"brass","bakir":"copper","copper":"copper","dokme demir":"cast-iron","dokmedemir":"cast-iron","titanyum":"titanium","titanium":"titanium","ahsap":"wood","wood":"wood","tahta":"wood","plastik":"plastic","plastic":"plastic","pom":"plastic","nylon":"plastic","akrilik":"acrylic","acrylic":"acrylic","pmma":"acrylic"};
+  if(/(malzeme|material)/i.test(t)){for(const[k,v] of Object.entries(matMap)){if(t.includes(k)){setMaterial(v);const md=MAT_DB[v];return A("✓ Malzeme değiştirildi:")+" "+md.label+".";}}
+  const list=Object.values(MAT_DB).map(m=>m.label).join(", ");return "Hangi malzeme? Seçenekler: "+list;}}
+
+  /* --- spindle kontrol --- */
+  if(/(mil|spindle).*(ac|on|baslat|calistir)/i.test(t)||/ac.*mil/i.test(t)){
+    if(im){mill.spindleOn=true;}else{lathe.s.spindleOn=true;}
+    if(/baslat/i.test(t)){if(im){mill.mode="AUTO";millStartCycle();}else{lathe.setMode("AUTO");lathe.startCycle();}return A("✓ İş mili açıldı ve otomatik çalışma başlatıldı.");}
+    return A("✓ İş mili açıldı.")+" "+(im?mill.spindleRpm:lathe.s.spindleRpm)+" RPM.";
+  }
+  if(/(mil|spindle).*(kapat|off|kapa)/i.test(t)){if(im)mill.spindleOn=false;else lathe.s.spindleOn=false;return A("✓ İş mili kapatıldı.");}
+  /* --- soğutma sıvısı kontrolü --- */
+  if(/(sogutma|coolant|soguma).*(mist|sis|pus|buhar)/i.test(t)){if(im)mill.coolantMode="mist";else lathe.s.coolantMode="mist";return A("✓ Soğutma sıvısı MIST açıldı.")+" (M7)";}
+  if(/(sogutma|coolant|soguma).*(flood|tazyik|basincli)/i.test(t)){if(im)mill.coolantMode="flood";else lathe.s.coolantMode="flood";return A("✓ Soğutma sıvısı FLOOD açıldı.")+" (M8)";}
+  if(/(sogutma|coolant|soguma)\s*(ac|on|baslat|calistir)/i.test(t)){if(im)mill.coolantMode="flood";else lathe.s.coolantMode="flood";return A("✓ Soğutma sıvısı açıldı (FLOOD).")+" (M8)";}
+  if(/(sogutma|coolant|soguma)\s*(kapat|off|kapa|kaldir|durdur)/i.test(t)){if(im)mill.coolantMode="off";else lathe.s.coolantMode="off";return A("✓ Soğutma sıvısı kapatıldı.")+" (M9)";}
+  if(/^m7$/i.test(t.trim())){if(im)mill.coolantMode="mist";else lathe.s.coolantMode="mist";return A("✓ M7 — Soğutma MIST.");}
+  if(/^m8$/i.test(t.trim())){if(im)mill.coolantMode="flood";else lathe.s.coolantMode="flood";return A("✓ M8 — Soğutma FLOOD.");}
+  if(/^m9$/i.test(t.trim())){if(im)mill.coolantMode="off";else lathe.s.coolantMode="off";return A("✓ M9 — Soğutma OFF.");}
+  if(/^(baslat|start|cycle\s*start)$/i.test(t.trim())||/cycle.*start/i.test(t)){if(im){mill.mode="AUTO";millStartCycle();}else{lathe.setMode("AUTO");lathe.startCycle();}return A("✓ Otomatik işleme başlatıldı.");}
+  if(/^(durdur|dur|stop|feed\s*hold|beklet)$/i.test(t.trim())||/(durdur|dur\b)/i.test(t)||/feed.*hold/i.test(t)){if(im)mill.paused=true;else lathe.stopCycle();return A("✓ Duraklatıldı.");}
+  if(/^(devam|devam\s*et|resume)$/i.test(t.trim())){if(im)mill.paused=false;return A("✓ Devam ediyor.");}
+  if(/^(reset|sifirla)$/i.test(t.trim())){if(im){mill.alarm=null;mill.emergency=false;}else lathe.clearAlarm();return A("✓ Alarm temizlendi, sistem sıfırlandı.");}
+  if(/(acil|emergency|emg)/i.test(t)){if(im){mill.emergency=true;mill.running=false;mill.spindleOn=false;mill.coolantMode="off";mill.queue=[];mill.moveActive=null;mill.alarm="EMG";}else lathe.emergencyStop();return A("⚠ ACİL DURDURMA aktif!")+" RESET yazarak devam edebilirsiniz.";}
+  if(/(yeni\s*parca|new\s*work|yeni\s*is)/i.test(t)){if(im)$("mbtn-newp").click();else{lathe.reset();latheProgramText=null;$("l-file-info").classList.add("hidden");}taiLastOp=null;return A("✓ Yeni iş parçası yüklendi.");}
+
+  /* --- stok boyutu ayarla --- */
+  if(/(stok|stock)\s*(boyut|olcu|ebat|size)/i.test(t)||/(boyut|olcu|ebat|size)\s*(ayarla|degistir|belirle|set)/i.test(t)){
+    if(im){
+      const dims=t.match(/(\d+\.?\d*)\s*x\s*(\d+\.?\d*)\s*(?:x\s*(\d+\.?\d*))?/i);
+      if(dims){const w=parseFloat(dims[1]),d=parseFloat(dims[2]),h=dims[3]?parseFloat(dims[3]):TOP;
+        resizeMillStock(Math.max(40,Math.round(w)),Math.max(30,Math.round(d)),Math.max(10,Math.round(h)));
+        return A("✓ Stok boyutu ayarlandı:")+" "+Math.round(w)+"x"+Math.round(d)+"x"+Math.round(h)+" mm.";}
+      return "Freze stok boyutunu şu formatta gir:<br><b>stok boyut 200x140x60</b> (genişlik x derinlik x yükseklik mm)";
+    } else {
+      let dia=taiNum(t,["cap","capi","capinda","dia","diameter","\\bø"]);
+      let len=taiNum(t,["uzunluk","uzunlugu","boy","length","long","len"]);
+      if(!dia&&!len){const dims=t.match(/(\d+\.?\d*)\s*x\s*(\d+\.?\d*)/i);if(dims){dia=parseFloat(dims[1]);len=parseFloat(dims[2]);}}
+      if(dia||len){resizeLatheStock(len?Math.max(20,Math.round(len)):STOCK_LEN,dia?Math.max(5,Math.round(dia/2)):STOCK_R);
+        return A("✓ Stok boyutu ayarlandı:")+" Ø"+(dia||STOCK_R*2)+"mm, uzunluk "+(len||STOCK_LEN)+"mm.";}
+      return "Torna stok boyutunu şu formatta gir:<br><b>stok boyut çap 80 uzunluk 200</b> veya <b>stok boyut 80x200</b> (çap x uzunluk mm)";
+    }
+  }
+  if(im&&/(stok|stock)\s*(\d+\.?\d*)\s*x\s*(\d+\.?\d*)\s*(?:x\s*(\d+\.?\d*))?/i.test(t)){
+    const m=t.match(/(\d+\.?\d*)\s*x\s*(\d+\.?\d*)\s*(?:x\s*(\d+\.?\d*))?/i);
+    const w=parseFloat(m[1]),d=parseFloat(m[2]),h=m[3]?parseFloat(m[3]):TOP;
+    resizeMillStock(Math.max(40,Math.round(w)),Math.max(30,Math.round(d)),Math.max(10,Math.round(h)));
+    return A("✓ Stok boyutu ayarlandı:")+" "+Math.round(w)+"x"+Math.round(d)+"x"+Math.round(h)+" mm.";
+  }
+  if(!im&&/(stok|stock)\s*(cap|capi|dia|diameter|\\bø)\s*(\d+\.?\d*)/i.test(t)){
+    const mc=t.match(/(cap|capi|dia|diameter|ø)\s*(\d+\.?\d*)/i);
+    const ml=t.match(/(uzunluk|uzunlugu|boy|length|len)\s*(\d+\.?\d*)/i);
+    const dia=mc?parseFloat(mc[2]):STOCK_R*2,len=ml?parseFloat(ml[2]):STOCK_LEN;
+    resizeLatheStock(Math.max(20,Math.round(len)),Math.max(5,Math.round(dia/2)));
+    return A("✓ Stok boyutu ayarlandı:")+" Ø"+Math.round(dia)+"mm, uzunluk "+Math.round(len)+"mm.";
+  }
+
+  /* --- parametre ayarları --- */
+  let rpm=t.match(/(?:devir|rpm)\s*(\d+)/i)||t.match(/(\d+)\s*(?:devir|rpm)/i);
+  if(rpm){const v=parseInt(rpm[1]);if(im){mill.spindleRpm=clamp(v,0,12000);$("mrng-rpm").value=mill.spindleRpm;$("mlbl-rpm").textContent=mill.spindleRpm+" rpm";}else{lathe.setSpindleRpm(v);$("rng-rpm").value=lathe.s.spindleRpm;$("lbl-rpm").textContent=lathe.s.spindleRpm+" rpm";}return A("✓ Devir "+(im?mill.spindleRpm:lathe.s.spindleRpm)+" RPM.");}
+  let fd=t.match(/(?:feed|ilerleme)\s*(\d+)/i)||t.match(/(\d+)\s*(?:feed|mm\/m|ilerleme)/i);
+  if(fd){const v=parseInt(fd[1]);if(im){mill.feed=clamp(v,1,2000);$("mrng-feed").value=mill.feed;$("mlbl-feed").textContent=mill.feed+" mm/m";}else{lathe.setFeed(v);$("rng-feed").value=lathe.s.feed;$("lbl-feed").textContent=lathe.s.feed+" mm/m";}return A("✓ İlerleme "+(im?mill.feed:lathe.s.feed)+" mm/m.");}
+  let ovr=t.match(/(?:override|ovr)\s*(\d+)/i)||t.match(/(\d+)\s*%?\s*(?:override|ovr)/i);
+  if(ovr){const v=parseInt(ovr[1])/100;if(im){mill.feedOverride=clamp(v,0,1.2);$("mrng-ovr").value=mill.feedOverride;$("mlbl-ovr").textContent=Math.round(mill.feedOverride*100)+"%";}else{lathe.setFeedOverride(v);$("rng-ovr").value=lathe.s.feedOverride;$("lbl-ovr").textContent=Math.round(lathe.s.feedOverride*100)+"%";}return A("✓ Override %"+Math.round(v*100));}
+  let tc=t.match(/(?:takim|tool)\s*(\d+)/i)||t.match(/(\d+)\s*(?:no.?lu\s*takim)/i);
+  if(tc){const v=parseInt(tc[1]);if(im){const slot=clamp(v,1,40)-1;const tl=magazine.getToolInSlot(slot);if(!tl)return A("⛔ T"+String(v).padStart(2,"0")+" slotunda takım yok.");magazine.requestChange(slot);buildTool();return A("✓ Takım T"+String(v).padStart(2,"0")+" seçildi: "+tl.name+" (Ø"+tl.dia+"mm, boy:"+tl.fluteLen+"mm)");}else{lathe.setToolNo(v);return A("✓ Takım T"+String(v).padStart(2,"0")+" seçildi.");}}
+  if(im&&(/(magazin|magazine|takim\s*list|tool\s*list)/i.test(t)||(/(takim|tool)/i.test(t)&&/(goster|listele|liste)/i.test(t)))){
+    const lines=magazine.listTools();
+    return "<b>Takım Magazini ("+lines.length+"/"+magazine.capacity+" dolu):</b><br>"+lines.map(l=>"• "+l).join("<br>");
+  }
+
+  /* --- mod değiştir --- */
+  if(/(auto|otomatik)\s*(mod)?/i.test(t)||/mod.*auto/i.test(t)){if(im){if(!mill.running)mill.mode="AUTO";}else lathe.setMode("AUTO");return A("✓ AUTO modu.");}
+  if(/(manual|manuel|jog|mdi)\s*(mod)?/i.test(t)||/mod.*(manual|manuel)/i.test(t)){if(im){if(!mill.running)mill.mode="MANUAL";}else lathe.setMode("MANUAL");return A("✓ MANUAL modu.");}
+
+  /* --- görünüm --- */
+  if(/(ustten|top|ust)\s*(gorunum|view|bak)?/i.test(t)||/gorunum.*(ust|top)/i.test(t)){if(im)setView("top");return A("✓ Üstten görünüm.");}
+  if(/(onden|front|on)\s*(gorunum|view|bak)?/i.test(t)||/gorunum.*(on|front)/i.test(t)){if(im)setView("front");return A("✓ Önden görünüm.");}
+  if(/(yandan|right|yan|sag)\s*(gorunum|view|bak)?/i.test(t)||/gorunum.*(yan|sag|right)/i.test(t)){if(im)setView("right");return A("✓ Yandan görünüm.");}
+  if(/(izometrik|iso)\s*(gorunum|view|bak)?/i.test(t)||/gorunum.*(iso|izometrik)/i.test(t)){if(im)setView("iso");return A("✓ İzometrik görünüm.");}
+  if(/(wireframe|tel\s*kafes)/i.test(t)){if(im&&plane)plane.material.wireframe=!plane.material.wireframe;return A("✓ Tel kafes "+(plane?.material?.wireframe?"açıldı":"kapatıldı")+".");}
+
+  /* --- konum --- */
+  let moveM=t.match(/(?:git|move|tasi|pozisyon|konum)\s*(?:x\s*([+-]?\d+\.?\d*))?[,\s]*(?:y\s*([+-]?\d+\.?\d*))?[,\s]*(?:z\s*([+-]?\d+\.?\d*))?/i);
+  if(moveM&&(moveM[1]||moveM[2]||moveM[3])){const mx=moveM[1]?parseFloat(moveM[1]):null,my=moveM[2]?parseFloat(moveM[2]):null,mz=moveM[3]?parseFloat(moveM[3]):null;
+    if(im){if(!mill.running)mill.mode="MANUAL";millGoto(mx??mill.x,my??mill.y,mz??mill.z);return A("✓ Takım hareket ediyor:")+" X"+(mx??mill.x)+" Y"+(my??mill.y)+" Z"+(mz??mill.z);}
+    else{lathe.setMode("MANUAL");lathe.gotoTarget(mx??lathe.s.x,mz??lathe.s.z);return A("✓ Takım hareket ediyor:")+" X"+(mx??lathe.s.x)+" Z"+(mz??lathe.s.z);}
+  }
+
+  /* ================================================================== */
+  /* ===============  AKILLI İŞLEM KOMUTLARI (FREZE)  ================= */
+  /* ================================================================== */
+  if(im){
+    /* --- delik delme --- */
+    if(/(delik|drill|del|bore)/i.test(t)){
+      let dia=taiNum(t,["cap","capinda","capi","dia","diameter","\\bø"])||taiNum(t,["delik"])||10;
+      let dep=taiNum(t,["derin","derinlik","derinlig","depth","deep"]);
+      if(dep===null){const nums=taiAllNums(t);const di=nums.indexOf(dia);if(di!==-1)nums.splice(di,1);dep=nums.length?nums[0]:dia*1.5;}
+      let cx=0,cz=0;
+      const posM=t.match(/x\s*([+-]?\d+\.?\d*)/i);if(posM)cx=parseFloat(posM[1]);
+      const posZ=t.match(/z\s*([+-]?\d+\.?\d*)/i);if(posZ)cz=parseFloat(posZ[1]);
+      taiLastOp="drill";
+      const slot=taiRunMillWithTool("drill",dia,dep,()=>tpMillDrill(dia,dep,cx,cz));
+      if(slot===null)return A("⛔ Magazinde Ø"+dia+"mm delik için uygun takım yok! İşlem iptal edildi.");
+      const tn=magazine.getToolInSlot(slot);
+      return A("✓ Delik delme başlatıldı:")+" Ø"+dia+"mm, "+dep+"mm derin"+(cx||cz?" (X"+cx+" Z"+cz+")":"")+"<br>Takım: "+tn.name+" | Spindle "+mill.spindleRpm+" RPM";
+    }
+
+    /* --- dikdörtgen cep --- */
+    if(/(dikdortgen|rect)\s*(cep|pocket)/i.test(t)||/(cep|pocket)\s*(ac)?/i.test(t)&&!/(daire|circ|yuvarlak|altigen|hex)/i.test(t)){
+      const dims=t.match(/(\d+\.?\d*)\s*x\s*(\d+\.?\d*)/i);
+      let pw=dims?parseFloat(dims[1]):60, pl=dims?parseFloat(dims[2]):40;
+      let dep=taiNum(t,["derin","derinlik","derinlig","depth","deep"])||10;
+      let cx=0,cz=0;
+      const posM=t.match(/x\s*([+-]?\d+\.?\d*)\s*(?:z|,)\s*([+-]?\d+\.?\d*)/i);
+      if(posM){cx=parseFloat(posM[1]);cz=parseFloat(posM[2]);}
+      const minDim=Math.min(pw,pl);
+      taiLastOp="pocket";
+      const slot=taiRunMillWithTool("pocket",minDim,dep,()=>tpMillRectPocket(pw,pl,dep,cx,cz));
+      if(slot===null)return A("⛔ Magazinde "+pw+"x"+pl+"mm cep için uygun takım yok! İşlem iptal edildi.");
+      const tn=magazine.getToolInSlot(slot);
+      return A("✓ Dikdörtgen cep açılıyor:")+" "+pw+"x"+pl+"mm, "+dep+"mm derin<br>Takım: "+tn.name+" | Spindle "+mill.spindleRpm+" RPM";
+    }
+
+    /* --- daire cep --- */
+    if(/(daire|circ|yuvarlak)\s*(cep|pocket)/i.test(t)){
+      let dia=taiNum(t,["cap","capi","capinda","dia","\\bø"])||40;
+      let dep=taiNum(t,["derin","derinlik","derinlig","depth"])||10;
+      taiLastOp="pocket";
+      const slot=taiRunMillWithTool("pocket",dia,dep,()=>tpMillCircPocket(dia,dep,0,0));
+      if(slot===null)return A("⛔ Magazinde Ø"+dia+"mm daire cep için uygun takım yok!");
+      const tn=magazine.getToolInSlot(slot);
+      return A("✓ Daire cep açılıyor:")+" Ø"+dia+"mm, "+dep+"mm derin<br>Takım: "+tn.name;
+    }
+
+    /* --- kanal / slot --- */
+    if(/(kanal|slot)\s*(ac)?/i.test(t)){
+      let sw=taiNum(t,["genislik","genisligi","en","width"])||CUTTER_R*2;
+      let sl=taiNum(t,["uzunluk","uzunlugu","boy","length","long"])||60;
+      let dep=taiNum(t,["derin","derinlik","derinlig","depth"])||10;
+      taiLastOp="pocket";
+      const slot=taiRunMillWithTool("slot",sw,dep,()=>tpMillSlot(sw,sl,dep,0,0,0));
+      if(slot===null)return A("⛔ Magazinde "+sw+"mm kanal için uygun takım yok!");
+      const tn=magazine.getToolInSlot(slot);
+      return A("✓ Kanal açılıyor:")+" "+sw+"mm genişlik, "+sl+"mm uzunluk, "+dep+"mm derin<br>Takım: "+tn.name;
+    }
+
+    /* --- yüzey düzeltme --- */
+    if(/(yuzey|surface|surfacing|face|facing)\s*(duzelt|temizle|al|isle)?/i.test(t)||/(duzelt|surfacing|facing)/i.test(t)){
+      let dep=taiNum(t,["derin","derinlik","mm","depth"])||taiAllNums(t)[0]||3;
+      taiLastOp="face";
+      const slot=taiRunMillWithTool("face",999,dep,()=>tpMillFace(dep));
+      if(slot===null)return A("⛔ Magazinde yüzey düzeltme için uygun takım yok!");
+      const tn=magazine.getToolInSlot(slot);
+      return A("✓ Yüzey düzeltme başlatıldı:")+" "+dep+"mm talaş kaldırılıyor<br>Takım: "+tn.name;
+    }
+
+    /* --- kontur --- */
+    if(/(kontur|contour)\s*(kes|isle|ac)?/i.test(t)){
+      let dep=taiNum(t,["derin","derinlik","mm","depth"])||taiAllNums(t)[0]||10;
+      taiLastOp="pocket";
+      const slot=taiRunMillWithTool("contour",999,dep,()=>tpMillContour(dep));
+      if(slot===null)return A("⛔ Magazinde kontur kesme için uygun takım yok!");
+      const tn=magazine.getToolInSlot(slot);
+      return A("✓ Kontur kesme başlatıldı:")+" "+dep+"mm derin dış kontur<br>Takım: "+tn.name;
+    }
+
+    /* --- pah kırma --- */
+    if(/(pah|chamfer)\s*(kir|ac|isle)?/i.test(t)){
+      let dep=taiNum(t,["mm","derin","derinlik","depth"])||taiAllNums(t)[0]||2;
+      taiLastOp="pocket";
+      const slot=taiRunMillWithTool("chamfer",dep*2,dep,()=>tpMillChamfer(dep));
+      if(slot===null)return A("⛔ Magazinde pah kırma için uygun takım yok!");
+      const tn=magazine.getToolInSlot(slot);
+      return A("✓ Pah kırma başlatıldı:")+" "+dep+"mm pah<br>Takım: "+tn.name;
+    }
+  }
+
+  /* ================================================================== */
+  /* ===============  AKILLI İŞLEM KOMUTLARI (TORNA)  ================= */
+  /* ================================================================== */
+  if(!im){
+    /* --- çap düşürme --- */
+    if(/(cap|diameter|dis\s*cap)/i.test(t)||/(\d+)\s*mm.*(cap|capa|dusur)/i.test(t)){
+      let dia=taiNum(t,["cap","capi","capina","capa","dia","diameter","\\bø"])||taiAllNums(t)[0]||40;
+      let startZ=taiNum(t,["baslangic","start","z"])||0;
+      let endZ=taiNum(t,["bitis","son","end","uzunluk","boy"])||STOCK_LEN-20;
+      taiLastOp="turn";
+      taiRunLathe(tpLatheTurn(dia,startZ,endZ));
+      return A("✓ Çap "+dia+"mm'ye düşürülüyor.")+" Z"+startZ+"→Z"+endZ+" arası.";
+    }
+
+    /* --- alın tornalama --- */
+    if(/(alin|facing|face)\s*(torna|isle)?/i.test(t)||/alin.*torna/i.test(t)){
+      let dep=taiNum(t,["mm","derin","derinlik","depth"])||taiAllNums(t)[0]||5;
+      taiLastOp="turn";
+      taiRunLathe(tpLatheFace(dep));
+      return A("✓ Alın tornalama başlatıldı:")+" "+dep+"mm alınıyor.";
+    }
+
+    /* --- kanal açma --- */
+    if(/(kanal|groove|oluk)\s*(ac)?/i.test(t)){
+      let gw=taiNum(t,["genislik","genisligi","en","width"])||8;
+      let gd=taiNum(t,["derin","derinlik","derinlig","depth"])||15;
+      let gz=taiNum(t,["pozisyon","konum","z","mesafe"])||STOCK_LEN/2;
+      taiLastOp="groove";
+      taiRunLathe(tpLatheGroove(gw,gd,gz));
+      return A("✓ Kanal açılıyor:")+" "+gw+"mm genişlik, "+gd+"mm derin, Z"+gz+" konumunda.";
+    }
+
+    /* --- konik tornalama --- */
+    if(/(konik|taper|koni)\s*(torna|isle|yap)?/i.test(t)){
+      const nums=taiAllNums(t);
+      let startDia=nums[0]||STOCK_R*2-20;
+      let endDia=nums[1]||startDia/3;
+      if(startDia<endDia)[startDia,endDia]=[endDia,startDia];
+      taiLastOp="turn";
+      taiRunLathe(tpLatheTaper(startDia,endDia,0,STOCK_LEN-20));
+      return A("✓ Konik tornalama başlatıldı:")+" Ø"+startDia+"mm → Ø"+endDia+"mm.";
+    }
+  }
+
+  /* --- G-code --- */
+  if(/^(g\d+|m\d+|[gm]\s*\d)/i.test(t)||/^[gnomxyzfs\d\s.;]+$/i.test(t.trim())){
+    const parsed=parseGcode(raw,im?"mill":"lathe");
+    if(parsed.q.length>0){if(im)runMillGcode(parsed);else runLatheGcode(parsed);return A("✓ G-code çalıştırıldı:")+" "+parsed.q.length+" hareket komutu.";}
+  }
+
+  return null;
+}
+
+taiMsg("Merhaba! Ben <b>Topkapı AI</b>, CNC asistanın.<br>Doğal dilde komut verebilirsin:<br>• \"<b>12mm çapında 20mm delik aç</b>\"<br>• \"<b>60x40mm 10mm derin cep aç</b>\"<br>• \"<b>Soğutma aç</b>\" / \"<b>Coolant flood</b>\" / \"<b>M8</b>\"<br>• \"<b>Örnek parçaları göster</b>\"<br>• \"<b>Yardım</b>\" yazarak tüm komutları gör.","bot");
+taiRenderChips();
+
+window._rover = {
+  taiUserInput, taiExec, taiGetChips, taiNorm, taiMsg, taiRenderChips,
+  taiMessages, parseGcode, runMillGcode, runLatheGcode, safetyInterceptor,
+  magazine, TOOL_LIBRARY, buildTool, buildMagazineDisk,
+  get CUTTER_R(){ return CUTTER_R; }, get CUTTER_H(){ return CUTTER_H; },
+  get active(){ return active; },
+  get W(){ return W; }, get D(){ return D; }, get TOP(){ return TOP; },
+  get STOCK_LEN(){ return STOCK_LEN; }, get STOCK_R(){ return STOCK_R; },
+  get mill(){ return mill; }, get lathe(){ return lathe; },
+};
+</script>
+
+<!-- ================================================================== -->
+<!-- ==========  KATMAN 1: WebSocket + LLM Entegrasyon Script  ======== -->
+<!-- ================================================================== -->
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+<script>
+(function(){
+"use strict";
+
+var R = null;
+function r(){ if(!R) R = window._rover; return R; }
+
+/* ------------------------------------------------------------------ */
+/*  CONFIG                                                             */
+/* ------------------------------------------------------------------ */
+const WS_URL = window.ROVER_WS_URL || (
+  (location.hostname === "localhost" || location.hostname === "127.0.0.1")
+    ? "http://localhost:5050"
+    : "https://rover-cnc-backend.onrender.com"
+);
+const ENABLE_LLM = window.ROVER_ENABLE_LLM !== false;
+
+/* ------------------------------------------------------------------ */
+/*  STATE                                                              */
+/* ------------------------------------------------------------------ */
+let wsConnected = false;
+let wsSessionKey = localStorage.getItem("rover_cnc_session") || "";
+let masterGcode = [];
+let opCounter = 0;
+
+/* ------------------------------------------------------------------ */
+/*  WEBSOCKET CONNECTION                                               */
+/* ------------------------------------------------------------------ */
+let socket = null;
+
+function wsConnect() {
+  if (!ENABLE_LLM) return;
+  if (!window._rover) { setTimeout(wsConnect, 200); return; }
+  try {
+    socket = io(WS_URL, {
+      transports: ["websocket", "polling"],
+      reconnectionAttempts: 5,
+      reconnectionDelay: 2000,
+    });
+  } catch (e) {
+    console.warn("Rover WS: socket.io not available, LLM mode disabled");
+    return;
+  }
+
+  socket.on("connect", function() {
+    wsConnected = true;
+    console.log("Rover WS: connected");
+    socket.emit("init_session", {
+      sessionKey: wsSessionKey,
+      machineType: r().active,
+    });
+  });
+
+  socket.on("session_ready", function(data) {
+    wsSessionKey = data.sessionKey;
+    localStorage.setItem("rover_cnc_session", wsSessionKey);
+    console.log("Rover WS: session", wsSessionKey);
+  });
+
+  socket.on("disconnect", function() {
+    wsConnected = false;
+    console.log("Rover WS: disconnected");
+  });
+
+  socket.on("connect_error", function() {
+    wsConnected = false;
+  });
+
+  socket.on("chat_typing", function() {
+    showTypingIndicator();
+  });
+
+  socket.on("chat_response", function(data) {
+    hideTypingIndicator();
+    if (data.error) {
+      r().taiMsg("Hata: " + data.error, "bot");
+      return;
+    }
+    if (data.text) {
+      r().taiMsg(data.text, "bot");
+    }
+    if (data.gcodeBlocks && data.gcodeBlocks.length > 0) {
+      handleGcodeBlocks(data.gcodeBlocks, data.opIndices || []);
+    }
+    r().taiRenderChips();
+  });
+
+  socket.on("master_gcode", function(data) {
+    if (data.gcode) {
+      downloadNcFile(data.gcode, wsSessionKey);
+    } else {
+      r().taiMsg("Henüz kaydedilmiş G-code operasyonu yok.", "bot");
+    }
+  });
+
+  hookChatInput();
+}
+
+/* ------------------------------------------------------------------ */
+/*  MACHINE STATE COLLECTOR                                            */
+/* ------------------------------------------------------------------ */
+function collectMachineState() {
+  const R = r();
+  const im = (R.active === "mill");
+  const state = {
+    machineType: R.active,
+    stock: {},
+    tool: {},
+    spindleRpm: 0,
+    feed: 0,
+    coolantMode: "off",
+    material: "",
+    mode: "",
+  };
+
+  if (im) {
+    state.stock = { w: R.W, d: R.D, h: R.TOP };
+    var at = R.magazine.getActiveTool();
+    state.tool = { x: R.mill.x, y: R.mill.y, z: R.mill.z, no: R.mill.toolNo, dia: at ? at.dia : 26, name: at ? at.name : "Ø26" };
+    state.spindleRpm = R.mill.spindleRpm;
+    state.feed = R.mill.feed;
+    state.coolantMode = R.mill.coolantMode || "off";
+    state.mode = R.mill.mode;
+  } else {
+    state.stock = { len: R.STOCK_LEN, r: R.STOCK_R };
+    state.tool = { x: R.lathe.s.x, z: R.lathe.s.z };
+    state.spindleRpm = R.lathe.s.spindleRpm;
+    state.feed = R.lathe.s.feed;
+    state.coolantMode = R.lathe.s.coolantMode || "off";
+    state.mode = R.lathe.s.mode;
+  }
+
+  return state;
+}
+
+/* ------------------------------------------------------------------ */
+/*  G-CODE HANDLER (from LLM response <gcode> blocks)                  */
+/* ------------------------------------------------------------------ */
+function handleGcodeBlocks(blocks, opIndices) {
+  const R = r();
+  const im = (R.active === "mill");
+  var stockDims = im
+    ? { w: R.W, d: R.D, h: R.TOP }
+    : { len: R.STOCK_LEN, r: R.STOCK_R };
+  blocks.forEach(function(block, i) {
+    masterGcode.push({
+      index: opIndices[i] !== undefined ? opIndices[i] : opCounter++,
+      gcode: block,
+      timestamp: new Date().toISOString(),
+    });
+
+    const parsed = R.parseGcode(block, im ? "mill" : "lathe");
+    if (parsed.q.length > 0) {
+      if (im) {
+        millProgramText=block;
+        R.runMillGcode(parsed, stockDims);
+      } else {
+        latheProgramText=block;
+        R.runLatheGcode(parsed, stockDims);
+      }
+      R.taiMsg('<span class="tai-msg-action">▶ G-code çalıştırıldı:</span> ' +
+             parsed.q.length + " hareket komutu.", "bot");
+    }
+  });
+}
+
+/* ------------------------------------------------------------------ */
+/*  TYPING INDICATOR                                                   */
+/* ------------------------------------------------------------------ */
+let typingEl = null;
+
+function showTypingIndicator() {
+  if (typingEl) return;
+  typingEl = document.createElement("div");
+  typingEl.className = "tai-msg tai-msg-bot";
+  typingEl.innerHTML = '<span class="animate-spin-slow">⚙</span> Düşünüyorum...';
+  r().taiMessages.appendChild(typingEl);
+  r().taiMessages.scrollTop = r().taiMessages.scrollHeight;
+}
+
+function hideTypingIndicator() {
+  if (typingEl) {
+    typingEl.remove();
+    typingEl = null;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/*  .NC FILE DOWNLOAD                                                  */
+/* ------------------------------------------------------------------ */
+function downloadNcFile(gcodeText, sessionKey) {
+  const blob = new Blob([gcodeText], { type: "text/plain" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "rover_" + (sessionKey || "export") + ".nc";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  r().taiMsg('<span class="tai-msg-action">✓ NC dosyası indirildi:</span> ' + a.download, "bot");
+}
+
+function exportMasterGcode() {
+  if (wsConnected && wsSessionKey) {
+    socket.emit("get_master_gcode", { sessionKey: wsSessionKey });
+    return;
+  }
+  if (masterGcode.length === 0) {
+    r().taiMsg("Henüz kaydedilmiş G-code operasyonu yok.", "bot");
+    return;
+  }
+  var lines = [
+    "(Rover CNC · Local Export)",
+    "(Date: " + new Date().toISOString().slice(0, 16) + ")",
+    "(Operations: " + masterGcode.length + ")",
+    "",
+  ];
+  masterGcode.forEach(function(op) {
+    lines.push("(--- Op " + op.index + " ---)");
+    lines.push(op.gcode);
+    lines.push("");
+  });
+  lines.push("M30");
+  downloadNcFile(lines.join("\n"), "local");
+}
+
+/* ------------------------------------------------------------------ */
+/*  HOOK taiUserInput — route through WS when connected                */
+/* ------------------------------------------------------------------ */
+function hookChatInput() {
+  const R = r();
+  const _origInput = R.taiUserInput;
+  const _origChips = R.taiGetChips;
+
+  R.taiUserInput = function(text) {
+    var tNorm = R.taiNorm(text);
+
+    if (/^(nc|export|indir|download|kaydet)\s*(dosya|file|nc)?$/i.test(tNorm) ||
+        /(nc\s*(indir|export|dosya))|(master\s*gcode)|(dosya\s*indir)/i.test(tNorm)) {
+      R.taiMsg(text, "user");
+      exportMasterGcode();
+      return;
+    }
+
+    if (/(master|toplam|tum)\s*(gcode|g-code|operasyon|islem)/i.test(tNorm) &&
+        /(listele|goster|kac)/i.test(tNorm)) {
+      R.taiMsg(text, "user");
+      R.taiMsg('<span class="tai-msg-action">Master G-Code:</span> ' +
+             masterGcode.length + " operasyon kayıtlı." +
+             (masterGcode.length > 0 ? '<br>"<b>nc indir</b>" yazarak .nc dosyası indirebilirsin.' : ""),
+             "bot");
+      return;
+    }
+
+    if (wsConnected && ENABLE_LLM) {
+      R.taiMsg(text, "user");
+
+      var isControl = /^(yardim|help|komutlar)/i.test(tNorm) ||
+        /(mil|spindle).*(ac|on|kapat|off)/i.test(tNorm) ||
+        /(sogutma|coolant)/i.test(tNorm) ||
+        /^m[789]$/i.test(tNorm.trim()) ||
+        /(?:devir|rpm)\s*\d/i.test(tNorm) || /\d+\s*(?:devir|rpm)/i.test(tNorm) ||
+        /(?:feed|ilerleme)\s*\d/i.test(tNorm) || /\d+\s*(?:feed|ilerleme)/i.test(tNorm) ||
+        /(?:override|ovr)\s*\d/i.test(tNorm) ||
+        /^(baslat|start|cycle|durdur|dur|stop|devam|resume|reset|sifirla)$/i.test(tNorm.trim()) ||
+        /(acil|emergency|emg)/i.test(tNorm) ||
+        /^(auto|otomatik|manual|manuel|jog|mdi)\s*(mod)?$/i.test(tNorm.trim()) ||
+        /(ustten|onden|yandan|izometrik|wireframe|tel\s*kafes)\s*(gorunum|view)?/i.test(tNorm) ||
+        /(yeni\s*parca|new\s*work)/i.test(tNorm) ||
+        /(malzeme|material)/i.test(tNorm) ||
+        /(stok|stock)\s*(boyut|olcu|ebat|size|cap|capi|dia|\d)/i.test(tNorm) ||
+        /(boyut|olcu|ebat|size)\s*(ayarla|degistir)/i.test(tNorm) ||
+        /(takim|tool)\s*\d/i.test(tNorm) ||
+        /(magazin|magazine|takim\s*list|tool\s*list)/i.test(tNorm) ||
+        (/(takim|tool)/i.test(tNorm) && /(goster|listele|liste)/i.test(tNorm)) ||
+        /(ornek|sample).*(goster|listele)/i.test(tNorm) ||
+        /(delik|drill|bore)/i.test(tNorm) ||
+        /(cep|pocket)\s*(ac)?/i.test(tNorm) ||
+        /(kanal|slot)\s*(ac)?/i.test(tNorm) ||
+        /(yuzey|surface|surfacing|face|facing)/i.test(tNorm) ||
+        /(kontur|contour)/i.test(tNorm) ||
+        /(pah|chamfer)/i.test(tNorm) ||
+        /^(g\d|m\d|[gnomxyzfs\d\s.;]+)$/i.test(tNorm.trim());
+
+      if (isControl) {
+        var localResult = R.taiExec(text);
+        if (localResult) {
+          R.taiMsg(localResult, "bot");
+          R.taiRenderChips();
+          return;
+        }
+      }
+
+      var machineState = collectMachineState();
+      socket.emit("chat_message", {
+        sessionKey: wsSessionKey,
+        message: text,
+        machineState: machineState,
+      });
+      return;
+    }
+
+    _origInput(text);
+  };
+
+  R.taiGetChips = function() {
+    var chips = _origChips();
+    if (masterGcode.length > 0) {
+      chips.push({ l: "📥 NC İndir", c: "nc indir" });
+      chips.push({ l: "📋 Operasyonlar", c: "master gcode listele" });
+    }
+    return chips;
+  };
+}
+
+/* ------------------------------------------------------------------ */
+/*  INIT                                                               */
+/* ------------------------------------------------------------------ */
+wsConnect();
+
+})();
+</script>
+</body>
+</html>

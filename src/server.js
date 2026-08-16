@@ -20,6 +20,8 @@ import { machinesRouter, toolsRouter } from "./routes/inventory.js";
 import { callFreecadTool, disconnectFreecad } from "./services/freecadMcpClient.js";
 import authRouter from "./routes/auth.js";
 import adminRouter from "./routes/admin.js";
+import { closeDatabase } from "./services/database.js";
+import { startQuotaCron, stopQuotaCron } from "./services/quotaCron.js";
 
 fs.mkdirSync(config.outputDir, { recursive: true });
 
@@ -29,8 +31,8 @@ const app = express();
 app.set("trust proxy", true);
 app.use(
   cors({
-    origin: true,
-    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    origin: config.corsOrigin === "*" ? true : config.corsOrigin.split(",").map((item) => item.trim()),
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
     maxAge: 1,
   }),
@@ -78,6 +80,7 @@ app.use((err, req, res, next) => {
 
 const server = app.listen(config.port, () => {
   console.log(`Rover CAD backend listening on http://localhost:${config.port}`);
+  startQuotaCron();
   // Pre-warm FreeCAD: open the MCP connection and launch FreeCAD now so the first
   // real request doesn't pay the cold-start (uvx resolve + FreeCAD boot) cost.
   callFreecadTool(config.freecadMcp.toolName, {
@@ -89,8 +92,10 @@ const server = app.listen(config.port, () => {
 
 async function shutdown() {
   console.log("Shutting down...");
+  stopQuotaCron();
   server.close();
   await disconnectFreecad();
+  await closeDatabase();
   process.exit(0);
 }
 

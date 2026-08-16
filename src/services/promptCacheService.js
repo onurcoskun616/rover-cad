@@ -15,6 +15,9 @@ function cacheMode() {
   return ALLOWED_MODES.has(requested) ? requested : "observe";
 }
 
+// Keep technical punctuation and decimal separators intact. Only differences
+// that cannot change geometry (Unicode representation, case and whitespace)
+// are ignored. In particular, 10.5 and 105 must never share a key.
 export function normalizeTechnicalPrompt(prompt) {
   return String(prompt ?? "")
     .normalize("NFKC")
@@ -83,10 +86,15 @@ function appendTelemetry(event) {
       "utf8",
     );
   } catch (error) {
+    // Cache must never make the working generation path fail.
     console.warn("[prompt-cache] telemetri yazilamadi:", error.message);
   }
 }
 
+/**
+ * Prepare a cache lookup for one from-scratch generation request.
+ * "observe" reports hits but never skips the LLM. "read" may reuse a hit.
+ */
 export function preparePromptCache({ prompt, operation, userId, systemPromptFile }) {
   const mode = cacheMode();
   if (mode === "off") return null;
@@ -144,6 +152,9 @@ export function preparePromptCache({ prompt, operation, userId, systemPromptFile
       };
 
       try {
+        // Observation mode must not silently replace an existing validated
+        // result when a fresh, non-deterministic LLM run produces different
+        // (but still valid) code. Keep the established entry for review.
         if (!(hit && mode === "observe")) {
           atomicWriteJson(filePath, entry);
         }

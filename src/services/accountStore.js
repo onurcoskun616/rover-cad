@@ -7,6 +7,7 @@ function number(value) {
 
 function publicUser(row) {
   const monthlyTokens = number(row.monthly_token_limit);
+  const bonusTokens = number(row.bonus_tokens);
   const usedTokens = number(row.used_tokens);
   const reservedTokens = number(row.reserved_tokens);
   return {
@@ -17,9 +18,10 @@ function publicUser(row) {
     plan: row.plan,
     status: row.status,
     monthlyTokens,
+    bonusTokens,
     usedTokens,
     reservedTokens,
-    remainingTokens: Math.max(0, monthlyTokens - usedTokens - reservedTokens),
+    remainingTokens: Math.max(0, monthlyTokens + bonusTokens - usedTokens - reservedTokens),
     usageMonth: row.usage_month,
     createdAt: row.created_at,
   };
@@ -111,6 +113,19 @@ export async function stats() {
     activeUsers: number(row.active_users),
     monthlyTokensUsed: number(row.monthly_tokens_used),
   };
+}
+
+export async function grantBonusTokens(id, amount) {
+  const tokens = Math.max(0, Math.floor(Number(amount)));
+  if (!tokens) throw Object.assign(new Error("Geçerli bir token miktarı giriniz"), { status: 400 });
+  const result = await database().query(
+    `update public.profiles
+        set bonus_tokens = coalesce(bonus_tokens, 0) + $2, updated_at = now()
+      where id = $1 returning *`,
+    [id, tokens],
+  );
+  if (!result.rows[0]) throw Object.assign(new Error("Kullanıcı bulunamadı"), { status: 404 });
+  return publicUser(result.rows[0]);
 }
 
 export async function usageSummary(days = 31) {

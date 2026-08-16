@@ -12,7 +12,7 @@
   --radius: 10px;
 }
 
-.account-strip,.app-bar{display:flex;align-items:center;gap:1rem}.account-strip{justify-content:flex-end;max-width:70rem;margin:-1rem auto 1rem}.account-strip a,.app-bar a{color:var(--text-muted);text-decoration:none}.link-button{width:auto;padding:.25rem;background:transparent;color:var(--text-muted)}
+.account-strip,.app-bar{display:flex;align-items:center;gap:1rem}.account-strip{justify-content:flex-end;max-width:70rem;margin:-1rem auto 1rem}.account-strip a,.app-bar a{color:var(--text-muted);text-decoration:none}.link-button{width:auto;padding:.25rem;background:transparent;color:var(--text-muted)}.cam-back-link{font-weight:600;margin-right:auto;color:var(--accent)!important}
 .auth-page{background:var(--bg)}.auth-header{padding-bottom:.75rem}.auth-main{max-width:46rem}.eyebrow{font-size:.75rem!important;letter-spacing:.16em;color:#7fb1ff!important;font-weight:700}.auth-card,.welcome-card,.usage-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:1.5rem}.auth-card form{display:grid;gap:1rem}.auth-card label{display:grid;gap:.4rem;color:var(--text-muted)}input,select{font:inherit;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:.7rem}.auth-card button{width:100%}.muted{color:var(--text-muted);font-size:.9rem}.form-error{color:var(--error-text);margin:0}
 .app-bar{height:64px;padding:0 2rem;justify-content:space-between;border-bottom:1px solid var(--border);background:var(--surface)}.dashboard{max-width:70rem;padding-top:3rem}.welcome-card h1,.admin h1{margin:.25rem 0}.welcome-card p{color:var(--text-muted)}.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:1rem}.metrics article{background:var(--surface);border:1px solid var(--border);padding:1.25rem;border-radius:14px}.metrics span,.metrics small{display:block;color:var(--text-muted);font-size:.8rem}.metrics strong{display:block;font-size:1.6rem;margin-top:.35rem}.usage-head{display:flex;align-items:center;justify-content:space-between;gap:1rem}.progress{height:12px;background:var(--bg);border-radius:99px;overflow:hidden}.progress i{display:block;height:100%;background:linear-gradient(90deg,#3478e5,#70adff);border-radius:inherit}.usage-list>div{display:grid;grid-template-columns:1fr auto;gap:.25rem;padding:.8rem 0;border-bottom:1px solid var(--border)}.usage-list small{grid-column:1/-1;color:var(--text-muted)}.table-wrap{overflow:auto}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:.8rem;border-bottom:1px solid var(--border)}td small{display:block;color:var(--text-muted)}td input{width:9rem}td button{padding:.45rem .7rem}.admin{max-width:78rem}
 @media(max-width:760px){.metrics{grid-template-columns:1fr 1fr}.account-strip{margin:0 0 1rem}.app-bar{padding:0 1rem}.usage-head{align-items:flex-start;flex-direction:column}}
@@ -24,9 +24,10 @@
 
 /* --- Admin workspace --- */
 .admin-llm-panel{margin-bottom:18px;padding:24px}.admin-llm-panel .admin-table-wrap{margin:18px -24px -24px}.admin-llm-table{min-width:920px}.admin-llm-table th{padding:11px 16px;background:#fafbfd;color:#8996aa;font-size:9px;font-weight:800;letter-spacing:.06em;text-transform:uppercase}.admin-llm-table td{padding:14px 16px;color:#5e6d83;font-size:11px}.admin-llm-table td:first-child strong,.admin-llm-table td:first-child small{display:block}.admin-llm-table td:first-child strong{color:#1d2b43;font-size:12px}.admin-llm-table td:first-child small{margin-top:3px;color:#8b97a9}.admin-llm-table td b{color:#2f70d1}
-.admin-main{max-width:1540px}.admin-actions{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:18px}.admin-metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:18px}.admin-metrics article{display:flex;align-items:center;gap:14px;padding:19px;border:1px solid #e2e9f2;border-radius:18px;background:#fff;box-shadow:0 10px 34px #1b3e7509}.admin-metrics article>div:last-child{display:grid;gap:3px;min-width:0}.admin-metrics span{color:#8794a8;font-size:11px}.admin-metrics strong{color:#14213d;font-size:22px;letter-spacing:-.03em}.admin-metrics small{color:#58916f;font-size:10px}.admin-metric-icon{display:grid;place-items:center;width:44px;height:44px;flex:0 0 44px;border-radius:13px;background:#eaf3ff;color:#2d72d6;font-size:19px}.admin-metric-icon.active{background:#e9f8ef;color:#2d9960}.admin-metric-icon.tokens{background:#f0edff;color:#7758d0}.admin-metric-icon.files{background:#fff2e5;color:#dd7a28}.admin-users-panel{padding:0;overflow:hidden}.admin-section-head{display:flex;align-items:flex-end;justify-content:space-between;gap:20px;padding:23px 24px 19px}.admin-section-head h2{margin:6px 0 3px;font-size:19px}.admin-section-head p:not(.account-kicker){margin:0;color:#8794a8;font-size:11px}.admin-filters{display:flex;align-items:center;gap:9px}.admin-search{display:flex;align-items:center;gap:7px;width:250px;padding:0 11px;border:1px solid #dfe7f0;border-radius:11px;background:#f9fbfd;color:#8290a4}.admin-search input{width:100%;height:38px;padding:0;border:0;outline:0;background:transparent;color:#24324a;font:inherit;font-size:12px}.admin-filters>select,.admin-inline-select,.admin-quota-input{height:40px;padding:0 30px 0 11px;border:1px solid #dfe7f0;border-radius:10px;outline:0;background:#f9fbfd;color:#4e5f77;font:inherit;font-size:11px}.admin-table-wrap{overflow:auto;border-top:1px solid #edf1f6}.admin-users-table{min-width:930px}.admin-users-table th{padding:11px 16px;background:#fafbfd;color:#8996aa;font-size:9px;font-weight:800;letter-spacing:.06em;text-transform:uppercase}.admin-users-table td{padding:13px 16px;font-size:11px;vertical-align:middle}.admin-user-cell{display:flex;align-items:center;gap:10px}.admin-user-cell>span{display:grid;place-items:center;width:36px;height:36px;flex:0 0 36px;border-radius:11px;background:#eaf3ff;color:#3275d4;font-size:10px;font-weight:850}.admin-user-cell>div{display:grid;gap:3px}.admin-user-cell strong{color:#1e2c45;font-size:12px}.admin-user-cell small{color:#8b97a9;font-size:10px}.admin-inline-select{height:32px;padding-right:25px;background:#fff}.admin-inline-select.status-active{border-color:#caead7;background:#f0faf4;color:#2b8653}.admin-inline-select.status-blocked{border-color:#f2d0d0;background:#fff4f4;color:#b54747}.admin-usage-cell{display:grid;gap:7px;min-width:145px}.admin-usage-cell span{color:#7e8ca1;font-size:10px}.admin-usage-cell b{color:#33445f}.admin-usage-cell i{display:block;height:5px;overflow:hidden;border-radius:99px;background:#edf1f6}.admin-usage-cell em{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,#377fe9,#70adff)}.admin-quota-input{width:105px;height:34px;padding-right:8px;background:#fff}.admin-save-btn{width:auto;padding:8px 11px;border:1px solid #d8e3f0;border-radius:9px;background:#f6f9fd;color:#336dbd;font:inherit;font-size:10px;font-weight:800;cursor:pointer}.admin-save-btn:hover{border-color:#377fe9;background:#377fe9;color:#fff}.admin-pagination{display:flex;align-items:center;justify-content:space-between;padding:15px 24px;color:#8693a6;font-size:10px}.admin-pagination div{display:flex;gap:5px}.admin-pagination button{width:29px;height:29px;padding:0;border:1px solid #e0e7f0;border-radius:8px;background:#fff;color:#657690}.admin-pagination button.is-current{border-color:#397fe6;background:#397fe6;color:#fff}.admin-lower-grid{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(300px,.65fr);gap:18px;margin-top:18px}.admin-activity-list{display:grid;margin-top:14px}.admin-activity{display:grid;grid-template-columns:38px 1fr auto;align-items:center;gap:11px;padding:11px 0;border-bottom:1px solid #edf1f6}.admin-activity:last-child{border:0}.admin-activity>span{display:grid;place-items:center;width:36px;height:36px;border-radius:11px;background:#eaf3ff;color:#3476d6}.admin-activity>span.green{background:#eaf8f0;color:#2c9660}.admin-activity>span.violet{background:#f1edff;color:#7656cf}.admin-activity>span.orange{background:#fff0e4;color:#d47427}.admin-activity>div{display:grid;gap:3px}.admin-activity strong{font-size:12px}.admin-activity small,.admin-activity time{color:#8895a8;font-size:10px}.admin-system-card{display:flex;flex-direction:column}.system-row{display:flex;align-items:center;justify-content:space-between;gap:15px;padding:14px 0;border-bottom:1px solid #edf1f6;font-size:11px}.system-row span{display:flex;align-items:center;color:#68778e}.system-row strong{font-size:10px}.system-light{display:inline-block;width:7px;height:7px;margin-right:8px;border-radius:50%;background:#34a866;box-shadow:0 0 0 4px #e7f7ee}.system-light.is-warning{background:#e8a52e;box-shadow:0 0 0 4px #fff4de}.admin-system-card .account-secondary-btn{align-self:flex-start;margin-top:auto}
+.admin-main{max-width:1540px}.admin-actions{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:18px}.admin-metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:18px}.admin-metrics article{display:flex;align-items:center;gap:14px;padding:19px;border:1px solid #e2e9f2;border-radius:18px;background:#fff;box-shadow:0 10px 34px #1b3e7509}.admin-metrics article>div:last-child{display:grid;gap:3px;min-width:0}.admin-metrics span{color:#8794a8;font-size:11px}.admin-metrics strong{color:#14213d;font-size:22px;letter-spacing:-.03em}.admin-metrics small{color:#58916f;font-size:10px}.admin-metric-icon{display:grid;place-items:center;width:44px;height:44px;flex:0 0 44px;border-radius:13px;background:#eaf3ff;color:#2d72d6;font-size:19px}.admin-metric-icon.active{background:#e9f8ef;color:#2d9960}.admin-metric-icon.tokens{background:#f0edff;color:#7758d0}.admin-metric-icon.files{background:#fff2e5;color:#dd7a28}.admin-users-panel{padding:0;overflow:hidden}.admin-section-head{display:flex;align-items:flex-end;justify-content:space-between;gap:20px;padding:23px 24px 19px}.admin-section-head h2{margin:6px 0 3px;font-size:19px}.admin-section-head p:not(.account-kicker){margin:0;color:#8794a8;font-size:11px}.admin-filters{display:flex;align-items:center;gap:9px}.admin-search{display:flex;align-items:center;gap:7px;width:250px;padding:0 11px;border:1px solid #dfe7f0;border-radius:11px;background:#f9fbfd;color:#8290a4}.admin-search input{width:100%;height:38px;padding:0;border:0;outline:0;background:transparent;color:#24324a;font:inherit;font-size:12px}.admin-filters>select,.admin-inline-select,.admin-quota-input{height:40px;padding:0 30px 0 11px;border:1px solid #dfe7f0;border-radius:10px;outline:0;background:#f9fbfd;color:#4e5f77;font:inherit;font-size:11px}.admin-table-wrap{overflow:auto;border-top:1px solid #edf1f6}.admin-users-table{min-width:1060px}.admin-users-table th{padding:11px 16px;background:#fafbfd;color:#8996aa;font-size:9px;font-weight:800;letter-spacing:.06em;text-transform:uppercase}.admin-users-table td{padding:13px 16px;font-size:11px;vertical-align:middle}.admin-user-cell{display:flex;align-items:center;gap:10px}.admin-user-cell>span{display:grid;place-items:center;width:36px;height:36px;flex:0 0 36px;border-radius:11px;background:#eaf3ff;color:#3275d4;font-size:10px;font-weight:850}.admin-user-cell>div{display:grid;gap:3px}.admin-user-cell strong{color:#1e2c45;font-size:12px}.admin-user-cell small{color:#8b97a9;font-size:10px}.admin-inline-select{height:32px;padding-right:25px;background:#fff}.admin-inline-select.status-active{border-color:#caead7;background:#f0faf4;color:#2b8653}.admin-inline-select.status-blocked{border-color:#f2d0d0;background:#fff4f4;color:#b54747}.admin-usage-cell{display:grid;gap:7px;min-width:145px}.admin-usage-cell span{color:#7e8ca1;font-size:10px}.admin-usage-cell b{color:#33445f}.admin-usage-cell i{display:block;height:5px;overflow:hidden;border-radius:99px;background:#edf1f6}.admin-usage-cell em{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,#377fe9,#70adff)}.admin-quota-input{width:105px;height:34px;padding-right:8px;background:#fff}.admin-save-btn{width:auto;padding:8px 11px;border:1px solid #d8e3f0;border-radius:9px;background:#f6f9fd;color:#336dbd;font:inherit;font-size:10px;font-weight:800;cursor:pointer}.admin-save-btn:hover{border-color:#377fe9;background:#377fe9;color:#fff}.admin-pagination{display:flex;align-items:center;justify-content:space-between;padding:15px 24px;color:#8693a6;font-size:10px}.admin-pagination div{display:flex;gap:5px}.admin-pagination button{width:29px;height:29px;padding:0;border:1px solid #e0e7f0;border-radius:8px;background:#fff;color:#657690}.admin-pagination button.is-current{border-color:#397fe6;background:#397fe6;color:#fff}.admin-lower-grid{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(300px,.65fr);gap:18px;margin-top:18px}.admin-activity-list{display:grid;margin-top:14px}.admin-activity{display:grid;grid-template-columns:38px 1fr auto;align-items:center;gap:11px;padding:11px 0;border-bottom:1px solid #edf1f6}.admin-activity:last-child{border:0}.admin-activity>span{display:grid;place-items:center;width:36px;height:36px;border-radius:11px;background:#eaf3ff;color:#3476d6}.admin-activity>span.green{background:#eaf8f0;color:#2c9660}.admin-activity>span.violet{background:#f1edff;color:#7656cf}.admin-activity>span.orange{background:#fff0e4;color:#d47427}.admin-activity>div{display:grid;gap:3px}.admin-activity strong{font-size:12px}.admin-activity small,.admin-activity time{color:#8895a8;font-size:10px}.admin-system-card{display:flex;flex-direction:column}.system-row{display:flex;align-items:center;justify-content:space-between;gap:15px;padding:14px 0;border-bottom:1px solid #edf1f6;font-size:11px}.system-row span{display:flex;align-items:center;color:#68778e}.system-row strong{font-size:10px}.system-light{display:inline-block;width:7px;height:7px;margin-right:8px;border-radius:50%;background:#34a866;box-shadow:0 0 0 4px #e7f7ee}.system-light.is-warning{background:#e8a52e;box-shadow:0 0 0 4px #fff4de}.admin-system-card .account-secondary-btn{align-self:flex-start;margin-top:auto}
 @media(max-width:1180px){.admin-metrics{grid-template-columns:repeat(2,1fr)}.admin-section-head{align-items:flex-start;flex-direction:column}.admin-filters{width:100%}.admin-search{flex:1}.admin-lower-grid{grid-template-columns:1fr}}
 @media(max-width:760px){.admin-actions{grid-template-columns:1fr}.admin-metrics{grid-template-columns:1fr 1fr}.admin-filters{align-items:stretch;flex-direction:column}.admin-search{box-sizing:border-box;width:100%}.admin-filters>select{width:100%}.admin-section-head{padding:20px}.admin-pagination{padding:14px 20px}.admin-lower-grid{grid-template-columns:1fr}}
+.admin-bonus-cell{display:flex;align-items:center;gap:8px;min-width:130px}.admin-bonus-cell>span{color:#5e6d83;font-size:11px;min-width:50px}.admin-grant-btn{width:auto;padding:5px 9px;border:1px solid #c8e0c4;border-radius:8px;background:#eef8ed;color:#2d8043;font:inherit;font-size:10px;font-weight:800;white-space:nowrap;cursor:pointer}.admin-grant-btn:hover{border-color:#2d8043;background:#2d8043;color:#fff}
 @media(max-width:460px){.admin-metrics{grid-template-columns:1fr}}
 
 * {
@@ -102,7 +103,7 @@ main {
 
 .tabs {
   display: flex;
-  gap: 0.5rem;
+  gap: 0;
   border-bottom: 1px solid var(--border);
   margin-bottom: 0.25rem;
 }
@@ -528,111 +529,821 @@ button.secondary:hover:not(:disabled) {
   gap: 0.5rem;
 }
 
-.cam-preview-view {
+/* === G-code Output Section === */
+
+.cam-gcode-output {
+  margin-top: 1rem;
+  padding: 1rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.cam-gcode-output-title {
+  margin: 0 0 0.75rem;
+  font-size: 1rem;
+  color: var(--accent);
+}
+
+.cam-gcode-preview {
+  max-height: 400px;
+  overflow-y: auto;
+  background: #0d1117;
+  color: #c9d1d9;
+  border-radius: calc(var(--radius) - 4px);
+  padding: 0.5rem 0;
+  font-family: "Fira Code", "JetBrains Mono", monospace;
+  font-size: 0.8rem;
+  line-height: 1.6;
+  border: 1px solid #30363d;
+}
+
+.cam-gcode-line {
+  padding: 0 0.75rem;
+  white-space: pre;
+}
+
+.cam-gcode-line:hover {
+  background: rgba(56, 139, 253, 0.1);
+}
+
+.cam-gcode-linenum {
+  display: inline-block;
+  width: 3.5em;
+  text-align: right;
+  margin-right: 1em;
+  color: #484f58;
+  user-select: none;
+}
+
+.cam-gcode-more {
+  color: #8b949e;
+  font-style: italic;
+  padding-top: 0.25rem;
+}
+
+.cam-gcode-actions {
   display: flex;
-  flex-direction: column;
-  gap: 0.6rem;
-  padding-top: 0.5rem;
-  border-top: 1px solid var(--border);
-}
-
-.cam-preview-note {
-  margin: 0;
-  color: var(--text-muted);
-  font-size: 0.85rem;
-}
-
-.cam-sim-controls {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.cam-sim-op {
-  margin: 0;
-  font-size: 0.9rem;
-  font-weight: 600;
-}
-
-.cam-sim-progress {
-  width: 100%;
-}
-
-.cam-sim-buttons {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
   flex-wrap: wrap;
 }
 
-.cam-sim-buttons button {
-  width: auto;
-  padding: 0.4rem 0.9rem;
+.cam-gcode-download {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--accent);
+  text-decoration: none;
+  font-weight: 600;
+  padding: 0.5rem 0.9rem;
+  border: 1px solid var(--accent);
+  border-radius: calc(var(--radius) - 4px);
+  transition: background 0.15s, color 0.15s;
 }
 
-.cam-sim-speed-label {
-  color: var(--text-muted);
-  font-size: 0.85rem;
-}
-
-.sim-speed.active {
+.cam-gcode-download:hover {
   background: var(--accent);
-  color: #fff;
-  border-color: var(--accent);
+  color: white;
 }
 
-.collision-alert {
-  padding: 0.75rem 1rem;
-  background: var(--error-bg);
-  border: 1px solid var(--error-border);
-  color: var(--error-text);
+.cam-gcode-sim-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: var(--accent);
+  color: white;
+  border: none;
+  padding: 0.5rem 0.9rem;
   border-radius: calc(var(--radius) - 4px);
   font-weight: 600;
-  margin-top: 0.5rem;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.cam-gcode-sim-btn:hover {
+  opacity: 0.85;
+}
+
+/* === CNC Simulation Panel — Fanuc-style (matches cnc-sim.html) === */
+
+/* Fanuc aside panel inside sim-workspace */
+.sim-fanuc-aside {
+  width: 380px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border-radius: 6px;
+  overflow-y: auto;
+  background: #27272a;
+  padding: 8px;
+}
+
+/* Fanuc LCD */
+.cnc-panel-lcd {
+  border: 4px solid #71717a;
+  border-radius: 4px;
+  background: #18181b;
+  padding: 6px;
+}
+.cnc-screen {
+  border-radius: 4px;
+}
+.cnc-screen-inner {
+  border-radius: 4px;
+  background: #0f261b;
+  padding: 8px;
+  font-family: "JetBrains Mono", "Fira Code", "Courier New", monospace;
+  font-size: 11px;
+  color: #5be08a;
+}
+.cnc-pos-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #0d4a6b;
+  padding: 2px 6px;
+  color: #cfe8ff;
+  font-size: 11px;
+  font-weight: 700;
+}
+.cnc-pos-rows {
+  margin: 8px 0;
+  padding: 0 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.cnc-pos-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+.cnc-pos-label {
+  font-size: 16px;
+  font-weight: 700;
+  color: #7effb0;
+}
+.cnc-pos-val {
+  font-size: 22px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: #eaffef;
+  letter-spacing: 0.05em;
+}
+.cnc-info-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px 12px;
+  border-top: 1px solid #1f5c42;
+  padding: 4px 6px 0;
+  font-size: 10px;
+  color: #59c98e;
+}
+.cnc-right { text-align: right; }
+.cnc-status-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 4px;
+  border-top: 1px solid #1f5c42;
+  padding: 4px 6px 0;
+  font-size: 10px;
+  color: #59c98e;
+}
+.cnc-run-label { color: #59c98e; }
+
+/* G-code section */
+.cnc-gcode-section {
+  border: 1px solid #52525b;
+  border-radius: 4px;
+  background: rgba(24,24,27,0.6);
+  overflow: hidden;
+}
+.cnc-gcode-title {
+  padding: 4px 8px;
+  background: #0f261b;
+  border-bottom: 1px solid #1f5c42;
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  font-size: 9px;
+  font-weight: 800;
+  color: #59c98e;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.cam-lcd-lines {
+  min-height: 60px;
+  max-height: 100px;
+  overflow-y: auto;
+  padding: 4px 0;
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  font-size: 11px;
+  line-height: 1.6;
+  color: #5be08a;
+  background: #0f261b;
+}
+.cam-lcd-line {
+  padding: 0 8px;
+  white-space: nowrap;
+  transition: background .1s;
+}
+.cam-lcd-line.active {
+  background: rgba(0,255,80,.12);
+  color: #7effb0;
+  font-weight: 700;
+}
+.cam-lcd-lines::-webkit-scrollbar { width: 4px; }
+.cam-lcd-lines::-webkit-scrollbar-track { background: transparent; }
+.cam-lcd-lines::-webkit-scrollbar-thumb { background: #1f5c42; border-radius: 2px; }
+
+/* Spindle / Feed sliders */
+.cnc-sliders-section {
+  border: 1px solid #52525b;
+  border-radius: 4px;
+  background: rgba(24,24,27,0.6);
+  padding: 8px;
+}
+.cnc-sliders-legend {
+  font-size: 9px;
+  font-weight: 800;
+  text-transform: uppercase;
+  color: #67e8f9;
+  margin-bottom: 6px;
+  letter-spacing: 0.06em;
+}
+.cnc-slider-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 10px;
+  margin-bottom: 2px;
+}
+.cnc-slider-name { color: #d4d4d8; }
+.cnc-slider-val {
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  color: #7effb0;
+  font-weight: 700;
+  font-size: 11px;
+}
+.cnc-range-input {
+  width: 100%;
+  height: 6px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: #3f3f46;
+  border: none;
+  border-radius: 3px;
+  outline: none;
+  margin-bottom: 6px;
+  accent-color: #06b6d4;
+}
+.cnc-range-input::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #06b6d4;
+  cursor: pointer;
+}
+.cnc-range-input::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border: 0;
+  border-radius: 50%;
+  background: #06b6d4;
+  cursor: pointer;
+}
+
+/* Speed Presets */
+.cam-speed-presets {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+}
+.cam-speed-label {
+  color: #a1a1aa;
+  font-size: 10px;
+  font-weight: 700;
+}
+.cam-speed-btn {
+  width: auto;
+  min-width: 38px;
+  padding: 4px 10px;
+  border: 1px solid #52525b;
+  border-radius: 4px;
+  background: #27272a;
+  color: #a1a1aa;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+  text-align: center;
+}
+.cam-speed-btn:hover { background: #3f3f46; color: #d4d4d8; }
+.cam-speed-btn.active {
+  background: #0e7490;
+  color: #ecfeff;
+  border-color: #06b6d4;
+}
+
+/* Progress Bar */
+.cam-progress-row {
+  padding: 0;
+}
+.cam-sim-progress {
+  width: 100%;
+  height: 4px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: #3f3f46;
+  border: none;
+  border-radius: 2px;
+  outline: none;
+  padding: 0;
+  accent-color: #06b6d4;
+}
+.cam-sim-progress::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #06b6d4;
+  cursor: pointer;
+}
+.cam-sim-progress::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border: 0;
+  border-radius: 50%;
+  background: #06b6d4;
+  cursor: pointer;
+}
+
+/* Operation buttons — matches cnc-sim.html */
+.cnc-ops-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 8px;
+  border: 1px solid #52525b;
+  border-radius: 4px;
+  background: rgba(24,24,27,0.6);
+  padding: 8px;
+}
+.cnc-op-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  border-radius: 6px;
+  padding: 10px 6px;
+  font-size: 10px;
+  font-weight: 800;
+  cursor: pointer;
+  border: none;
+  transition: filter .1s;
+}
+.cnc-op-btn:hover { filter: brightness(1.15); }
+.cnc-op-btn:active { transform: translateY(1px); }
+.cnc-op-cycle {
+  background: #16a34a;
+  color: #fff;
+}
+.cnc-op-hold {
+  background: #f59e0b;
+  color: #18181b;
+}
+.cnc-op-stop {
+  background: #3f3f46;
+  color: #d4d4d8;
+}
+.cnc-op-stop:hover { background: #52525b; }
+.cnc-led-dot {
+  display: block;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+}
+.cnc-led-green {
+  background: #86efac;
+  box-shadow: 0 0 6px rgba(120,255,160,.9);
+}
+.cnc-led-amber {
+  background: #fde68a;
+}
+
+/* Confirm/Reject Footer */
+.cam-sim-footer {
+  display: flex;
+  gap: 8px;
+  padding: 0;
+  margin-top: 2px;
+}
+.cam-sim-footer button {
+  flex: 1;
+}
+.cnc-btn-approve {
+  width: auto;
+  padding: 10px 20px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+  transition: all .15s;
+  background: #16a34a;
+  border: 1px solid #22c55e;
+  color: #fff;
+}
+.cnc-btn-approve:hover {
+  background: #15803d;
+  box-shadow: 0 0 14px rgba(34,197,94,.3);
+}
+.cnc-btn-reject {
+  width: auto;
+  padding: 10px 20px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+  transition: all .15s;
+  background: #3f3f46;
+  border: 1px solid #52525b;
+  color: #d4d4d8;
+}
+.cnc-btn-reject:hover {
+  background: #52525b;
+  color: #fff;
+}
+
+/* Inner flex container for aside content */
+.cnc-aside-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  height: 100%;
+}
+
+/* Info grid col-span-2 for REMOVED */
+.cnc-info-full { grid-column: 1 / -1; }
+
+/* 2-column fieldset row */
+.cnc-fieldset-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.cnc-fieldset {
+  border-radius: 4px;
+  border: 1px solid #52525b;
+  background: rgba(24,24,27,0.6);
+  padding: 8px;
+  margin: 0;
+}
+.cnc-fieldset-legend {
+  padding: 0 4px;
+  font-size: 9px;
+  font-weight: 800;
+  text-transform: uppercase;
+  color: #67e8f9;
+}
+.cnc-fieldset-plain {
+  border: 1px solid #52525b;
+  border-radius: 4px;
+  background: rgba(24,24,27,0.6);
+  padding: 8px;
+}
+
+/* MDI Position inputs */
+.cnc-mdi-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 4px;
+  font-size: 10px;
+}
+.cnc-mdi-label-last { margin-bottom: 8px; }
+.cnc-mdi-axis {
+  width: 12px;
+  font-weight: 700;
+  color: #7effb0;
+}
+.cnc-mdi-input {
+  width: 100%;
+  border-radius: 4px;
+  background: #09090b;
+  padding: 2px 6px;
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  font-size: 11px;
+  color: #eaffef;
+  border: none;
+  outline: none;
+  box-shadow: inset 0 0 0 1px #3f3f46;
+}
+.cnc-mdi-input:focus { box-shadow: inset 0 0 0 1px #22d3ee; }
+.cnc-mdi-go {
+  width: 100%;
+  border-radius: 4px;
+  background: #0891b2;
+  padding: 4px 0;
+  font-size: 10px;
+  font-weight: 700;
+  color: #fff;
+  border: none;
+  cursor: pointer;
+}
+.cnc-mdi-go:hover { background: #06b6d4; }
+.cnc-mdi-go:disabled { opacity: .4; cursor: default; }
+
+/* Spindle/Feed rows */
+.cnc-sf-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  margin-bottom: 2px;
+  color: #d4d4d8;
+}
+.cnc-sf-val {
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  color: #7effb0;
+  font-weight: 700;
+}
+.cnc-range-mb { margin-bottom: 8px; }
+
+/* Section title (Mode, Jog) */
+.cnc-section-title {
+  font-size: 9px;
+  font-weight: 800;
+  text-transform: uppercase;
+  color: #67e8f9;
+  margin-bottom: 4px;
+}
+
+/* Mode buttons */
+.cnc-mode-btns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+}
+.cnc-mode-btn {
+  border-radius: 4px;
+  padding: 8px 0;
+  font-size: 10px;
+  font-weight: 700;
+  border: none;
+  cursor: pointer;
+  background: #3f3f46;
+  color: #d4d4d8;
+}
+.cnc-mode-btn:hover { background: #52525b; }
+.cnc-mode-active {
+  background: #fbbf24;
+  color: #18181b;
+}
+.cnc-mode-btn:disabled { opacity: .4; cursor: default; }
+
+/* Tool selector */
+.cnc-tool-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 8px;
+}
+.cnc-tool-label {
+  font-size: 9px;
+  text-transform: uppercase;
+  color: #a1a1aa;
+}
+.cnc-tool-sel {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.cnc-tool-val {
+  width: 32px;
+  text-align: center;
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  font-size: 12px;
+  color: #7effb0;
+}
+.cnc-mdi-key {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 3px;
+  border: 1px solid rgba(9,9,11,.6);
+  background-image: linear-gradient(to bottom, #e4e4e7, #a1a1aa);
+  color: #27272a;
+  font-weight: 700;
+  font-size: 10px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.6), 0 1px 2px rgba(0,0,0,.5);
+  cursor: pointer;
+}
+.cnc-mdi-key:active {
+  transform: translateY(1px);
+  background-image: linear-gradient(to bottom, #d4d4d8, #71717a);
+}
+
+/* Jog Axis grid */
+.cnc-jog-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 4px;
+}
+.cnc-jog-btn {
+  border-radius: 4px;
+  background: #3f3f46;
+  padding: 6px 0;
+  font-size: 10px;
+  font-weight: 700;
+  color: #d4d4d8;
+  border: none;
+  cursor: pointer;
+  text-align: center;
+}
+.cnc-jog-btn:hover { background: #52525b; }
+.cnc-jog-btn:active { background: #059669; }
+.cnc-jog-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #71717a;
+}
+
+/* Spindle op button */
+.cnc-op-spindle {
+  background: #3f3f46;
+  color: #d4d4d8;
+}
+.cnc-op-spindle:hover { background: #52525b; }
+.cnc-op-spindle.cnc-spindle-on {
+  background: #0891b2;
+  color: #fff;
+}
+.cnc-spindle-icon { font-size: 16px; }
+
+/* MDI Keypad */
+.cnc-keypad-wrap {
+  border: 1px solid #52525b;
+  border-radius: 4px;
+  background: rgba(63,63,70,0.4);
+  padding: 8px;
+}
+.cnc-keypad-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 4px;
+}
+.cnc-keypad-grid .cnc-mdi-key {
+  height: 28px;
+  font-size: 10px;
+}
+
+/* Emergency Stop section */
+.cnc-emergency {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid #52525b;
+  border-radius: 4px;
+  background: rgba(24,24,27,0.6);
+  padding: 8px;
+  margin-top: auto;
+}
+.cnc-emg-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: 4px solid #facc15;
+  background: #dc2626;
+  box-shadow: 0 4px 10px rgba(0,0,0,.6);
+  cursor: pointer;
+}
+.cnc-emg-btn:active { transform: translateY(2px); }
+.cnc-emg-inner {
+  display: block;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: #ef4444;
+  box-shadow: inset 0 2px 4px rgba(0,0,0,.3);
+}
+.cnc-emg-side {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  gap: 4px;
+}
+.cnc-emg-title {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: #f87171;
+}
+.cnc-emg-reset {
+  border-radius: 4px;
+  background: #fde047;
+  padding: 6px 0;
+  font-size: 10px;
+  font-weight: 700;
+  color: #18181b;
+  border: none;
+  cursor: pointer;
+}
+.cnc-emg-reset:hover { background: #fef08a; }
+.cnc-emg-new {
+  border-radius: 4px;
+  background: #52525b;
+  padding: 6px 0;
+  font-size: 10px;
+  font-weight: 700;
+  color: #d4d4d8;
+  border: none;
+  cursor: pointer;
+}
+.cnc-emg-new:hover { background: #71717a; }
+
+/* Responsive CAM preview */
+@media (max-width: 520px) {
+  .cnc-ops-row { grid-template-columns: 1fr; }
+  .cam-sim-footer { flex-direction: column; }
+  .cnc-fieldset-row { grid-template-columns: 1fr; }
 }
 
 .sim-downloads {
   display: flex;
   flex-direction: column;
-  gap: 0.6rem;
-  padding-top: 0.75rem;
-  border-top: 1px solid var(--border);
-  margin-top: 0.5rem;
+  gap: 10px;
+  padding: 14px 16px;
+  background: #0d2240;
+  border-top: 1px solid #1a3d66;
 }
 .sim-downloads-title {
   margin: 0;
-  font-size: 0.95rem;
+  font-size: 12px;
+  font-weight: 800;
+  color: #7fbfff;
+  letter-spacing: .06em;
+  text-transform: uppercase;
 }
 .sim-download-parts {
   display: flex;
-  gap: 0.5rem;
+  gap: 8px;
   flex-wrap: wrap;
 }
 .sim-download-parts .sim-part-group {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: calc(var(--radius) - 4px);
-  padding: 0.4rem 0.6rem;
+  gap: 4px;
+  background: #0a1a30;
+  border: 1px solid #1a3d66;
+  border-radius: 8px;
+  padding: 8px 10px;
 }
 .sim-part-group .sim-part-name {
-  font-weight: 600;
-  font-size: 0.8rem;
-  color: var(--text-muted);
+  font-weight: 700;
+  font-size: 10px;
+  color: #5a8ab5;
+  letter-spacing: .04em;
+  text-transform: uppercase;
 }
 .sim-part-group .sim-part-btns {
   display: flex;
-  gap: 0.4rem;
+  gap: 6px;
 }
 .sim-part-group button {
   width: auto;
-  padding: 0.25rem 0.6rem;
-  font-size: 0.78rem;
+  padding: 5px 10px;
+  font-size: 10px;
+  font-weight: 700;
+  border: 1px solid #1e4a78;
+  border-radius: 6px;
+  background: linear-gradient(180deg, #1a3a5e 0%, #122a48 100%);
+  color: #b0d4f1;
+  cursor: pointer;
+}
+.sim-part-group button:hover {
+  background: linear-gradient(180deg, #1e4a78 0%, #163862 100%);
+  color: #fff;
 }
 #sim-download-assembly {
   align-self: flex-start;
+  padding: 8px 16px;
+  border: 1px solid #1e4a78;
+  border-radius: 8px;
+  background: linear-gradient(180deg, #1a3a5e 0%, #122a48 100%);
+  color: #b0d4f1;
+  font-weight: 700;
+}
+#sim-download-assembly:hover {
+  background: linear-gradient(180deg, #1e4a78 0%, #163862 100%);
+  color: #fff;
 }
 
 .sim-prompt-section {
@@ -806,88 +1517,167 @@ button.secondary:hover:not(:disabled) {
 }
 
 main.sim-expanded {
-  max-width: 72rem;
+  max-width: 100%;
   transition: max-width 0.3s ease;
 }
+
+/* --- Full-screen CNC-style simulation layout --- */
 
 .sim-workspace {
   display: block;
 }
 
 .sim-workspace.sim-active {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
   display: flex;
-  gap: 2px;
+  flex-direction: column;
+  background: #18181b;
+  overflow: hidden;
+}
+
+/* Top bar (matches cnc-sim header) */
+.sim-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 12px;
+  background: #27272a;
+  border-radius: 6px;
+  margin: 8px 8px 0;
+  flex-shrink: 0;
+}
+.sim-topbar-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.sim-topbar-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #e4e4e7;
+  letter-spacing: 0.02em;
+}
+.sim-topbar-hint {
+  font-size: 11px;
+  color: #71717a;
+}
+.sim-topbar-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  background: #3f3f46;
+  color: #a1a1aa;
+  border: none;
+  cursor: pointer;
+  transition: background .15s, color .15s;
+}
+.sim-topbar-icon:hover {
+  background: #52525b;
+  color: #fff;
+}
+.sim-topbar-close:hover {
+  background: #dc2626;
+  color: #fff;
+}
+
+/* Content row: viewer + aside */
+.sim-content {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  gap: 8px;
+  padding: 8px;
 }
 
 .sim-viewer-wrap {
   position: relative;
   flex: 1;
   min-width: 0;
+  overflow: hidden;
+  border-radius: 6px;
+  border: 1px solid #3f3f46;
+  background: #000;
 }
 
 .sim-workspace.sim-active .viewer-container {
-  height: 450px;
+  width: 100%;
+  height: 100%;
+  border: none;
+  border-radius: 0;
 }
 
-.coord-display {
+/* Status overlay (top-left) — matches cnc-sim */
+.sim-overlay-status {
   position: absolute;
-  top: 10px;
-  left: 10px;
-  background: rgba(0, 0, 0, 0.82);
-  border: 1px solid rgba(74, 141, 255, 0.25);
-  border-radius: 6px;
-  padding: 8px 12px;
-  font-family: "Courier New", Courier, monospace;
-  font-size: 0.85rem;
+  left: 8px;
+  top: 8px;
   z-index: 10;
   pointer-events: none;
+  background: rgba(0,0,0,0.5);
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-family: "JetBrains Mono", "Fira Code", "Courier New", monospace;
+  font-size: 10px;
+  line-height: 1.5;
+  color: #6ee7b7;
 }
+.sim-overlay-feed { color: #67e8f9; }
 
-.coord-row {
+/* Playback toolbar (top-right) — matches cnc-sim */
+.sim-overlay-toolbar {
+  position: absolute;
+  right: 8px;
+  top: 8px;
+  z-index: 10;
   display: flex;
-  align-items: baseline;
-  gap: 0.6rem;
-  line-height: 1.55;
+  gap: 8px;
 }
-
-.coord-label {
-  color: #8899aa;
-  font-weight: 700;
-  width: 1em;
+.sim-tb-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border: 1px solid #2b6f9c;
+  border-radius: 6px;
+  background: linear-gradient(to bottom, #1f6fa0, #124b70);
+  color: #e6f4ff;
+  font-size: 18px;
+  cursor: pointer;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.25);
 }
+.sim-tb-btn:hover { filter: brightness(1.15); }
+.sim-tb-btn:active { transform: translateY(1px); }
 
-.coord-val {
-  color: #00ff88;
-  font-weight: 600;
-  text-align: right;
-  min-width: 7em;
-}
-
-.coord-feed .coord-val {
-  color: #ffaa00;
-}
-
-.gcode-panel {
-  width: 300px;
-  flex-shrink: 0;
-  background: #0a1018;
-  border: 1px solid var(--border);
-  border-radius: calc(var(--radius) - 4px);
+/* Camera toolbar (left vertical) — matches cnc-sim */
+.sim-overlay-cam {
+  position: absolute;
+  left: 8px;
+  top: 80px;
+  z-index: 10;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  gap: 6px;
 }
-
-.gcode-header {
-  padding: 0.55rem 0.75rem;
-  font-weight: 700;
-  font-size: 0.8rem;
-  color: var(--text-muted);
-  background: rgba(255, 255, 255, 0.03);
-  border-bottom: 1px solid var(--border);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
+.sim-cam-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid #3f5a2f;
+  border-radius: 6px;
+  background: linear-gradient(to bottom, #4a7a2c, #2f5017);
+  color: #eaffd6;
+  font-size: 14px;
+  cursor: pointer;
 }
+.sim-cam-btn:hover { filter: brightness(1.15); }
 
 .gcode-lines {
   flex: 1;
@@ -986,17 +1776,39 @@ main.sim-expanded {
   pointer-events: none !important;
 }
 
-@media (max-width: 760px) {
-  .sim-workspace.sim-active {
+@media (max-width: 900px) {
+  .sim-content {
     flex-direction: column;
   }
 
-  .gcode-panel {
+  .sim-fanuc-aside {
     width: 100%;
+  }
+
+  .sim-viewer-wrap {
+    min-height: 300px;
   }
 
   .gcode-lines {
     max-height: 200px;
+  }
+
+  .tabs {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0;
+    border-bottom: none;
+  }
+
+  .tab {
+    font-size: 0.85rem;
+    padding: 0.6rem 0.4rem;
+    text-align: center;
+    border-bottom: 2px solid var(--border);
+  }
+
+  .tab.active {
+    border-bottom-color: var(--accent);
   }
 }
 
