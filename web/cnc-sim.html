@@ -117,6 +117,7 @@
           <button id="m-stop"  title="Stop"         class="tb-btn h-10 w-10 text-lg">⏹</button>
           <button id="m-new"   title="Yeni Parça"   class="tb-btn h-10 w-10 text-base">⤓</button>
           <button id="m-mute"  title="Ses"          class="tb-btn h-10 w-10 text-base">🔊</button>
+          <button id="mag-edit-open" title="Takım Magazinini Düzenle" class="tb-btn h-10 w-10 text-base">🧰</button>
         </div>
         <!-- yüklenen dosya adı -->
         <div id="m-file-info" class="hidden absolute right-2 top-14 z-10 rounded bg-black/70 px-2 py-1 font-mono text-[10px] text-cyan-300"></div>
@@ -411,6 +412,52 @@
 
   </div>
 </main>
+
+<!-- Takım Magazini Düzenleyici -->
+<div id="mag-edit-overlay" class="hidden fixed inset-0 z-[10010] flex items-center justify-center bg-black/70 p-4">
+  <div class="flex max-h-[88vh] w-full max-w-3xl flex-col overflow-hidden rounded-lg border border-zinc-700 bg-zinc-900 text-zinc-200">
+    <div class="flex items-center justify-between border-b border-zinc-700 px-4 py-3">
+      <h2 class="text-sm font-bold">🧰 Takım Magazini Düzenle</h2>
+      <button id="mag-edit-close" class="rounded px-2 py-1 text-zinc-400 hover:bg-zinc-800 hover:text-white">✕</button>
+    </div>
+    <div id="mag-edit-login-notice" class="hidden px-4 py-3 text-xs text-amber-300">
+      Takım magazinini düzenlemek için giriş yapmalısın. <a href="login.html" class="underline">Giriş yap</a>
+    </div>
+    <div id="mag-edit-body" class="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4 text-xs">
+      <section>
+        <h3 class="mb-2 font-bold text-cyan-300">Takım Tanımla</h3>
+        <div class="grid grid-cols-2 gap-2 sm:grid-cols-6">
+          <input id="mag-t-name" placeholder="İsim (ör. Ø8 Parmak Freze)" class="col-span-2 rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5 sm:col-span-2">
+          <select id="mag-t-type" class="rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5">
+            <option value="endmill">Parmak Freze</option>
+            <option value="roughing">Kaba Freze</option>
+            <option value="drill">Matkap</option>
+            <option value="ballmill">Top Freze</option>
+            <option value="chamfer">Pah Freze</option>
+          </select>
+          <input id="mag-t-dia" type="number" min="0.1" step="0.1" placeholder="Çap mm" class="rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5">
+          <input id="mag-t-flute" type="number" min="0" step="0.5" placeholder="Kesici boy mm" class="rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5">
+          <input id="mag-t-total" type="number" min="0" step="0.5" placeholder="Toplam boy mm" class="rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5">
+          <input id="mag-t-rpm" type="number" min="0" step="100" placeholder="Maks RPM" class="rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5">
+          <button id="mag-t-add" class="rounded bg-cyan-700 px-2 py-1.5 font-bold hover:bg-cyan-600">+ Ekle</button>
+        </div>
+        <div id="mag-t-error" class="hidden mt-1 text-red-400"></div>
+        <div id="mag-tools-list" class="mt-2 grid gap-1"></div>
+      </section>
+      <section>
+        <h3 class="mb-2 font-bold text-cyan-300">Slot Sırası (T01–T40)</h3>
+        <div id="mag-slots-grid" class="grid grid-cols-2 gap-1.5 sm:grid-cols-4"></div>
+      </section>
+    </div>
+    <div class="flex items-center justify-between gap-2 border-t border-zinc-700 px-4 py-3">
+      <span id="mag-edit-status" class="text-xs text-zinc-400"></span>
+      <div class="flex gap-2">
+        <button id="mag-edit-cancel" class="rounded border border-zinc-700 px-3 py-1.5 text-xs hover:bg-zinc-800">Kapat</button>
+        <button id="mag-edit-save" class="rounded bg-emerald-700 px-3 py-1.5 text-xs font-bold hover:bg-emerald-600">Kaydet</button>
+      </div>
+    </div>
+  </div>
+</div>
 
 <!-- Topkapı AI Chat Bot -->
 <button id="tai-toggle" title="Topkapı AI"></button>
@@ -1927,6 +1974,171 @@ function taiExec(raw){
 
 taiMsg("Merhaba! Ben <b>Topkapı AI</b>, CNC asistanın.<br>Doğal dilde komut verebilirsin:<br>• \"<b>12mm çapında 20mm delik aç</b>\"<br>• \"<b>60x40mm 10mm derin cep aç</b>\"<br>• \"<b>Soğutma aç</b>\" / \"<b>Coolant flood</b>\" / \"<b>M8</b>\"<br>• \"<b>Örnek parçaları göster</b>\"<br>• \"<b>Yardım</b>\" yazarak tüm komutları gör.","bot");
 taiRenderChips();
+
+/* ==================================================================== */
+/* ================  TAKIM MAGAZİNİ DÜZENLEYİCİ (kalıcı)  ============= */
+/* ==================================================================== */
+const MAG_API_BASE = location.hostname==="localhost"||location.hostname==="127.0.0.1" ? location.origin : "https://api.topkapikoleji.org";
+const MAG_BUILTIN_COUNT = TOOL_LIBRARY.length; // ilk yükte kaç sabit takım var (12)
+function magToken(){ return localStorage.getItem("rover_session")||""; }
+function magHeaders(){ return {Authorization:`Bearer ${magToken()}`, "Content-Type":"application/json"}; }
+function magRefId(idx){ return idx<MAG_BUILTIN_COUNT ? "builtin:"+(idx+1) : magCustomTools[idx-MAG_BUILTIN_COUNT]?.id; }
+
+let magCustomTools=[]; // backend'den gelen kullanıcı tanımlı takımlar
+let magRefIdToIndex={}; // "builtin:N" | backend uuid -> TOOL_LIBRARY dizin
+
+function magRebuildIndex(){
+  TOOL_LIBRARY.length=MAG_BUILTIN_COUNT; // önceki eklenen özel takımları temizle
+  magRefIdToIndex={};
+  for(let i=0;i<MAG_BUILTIN_COUNT;i++) magRefIdToIndex["builtin:"+(i+1)]=i;
+  magCustomTools.forEach((ct)=>{
+    const idx=TOOL_LIBRARY.length;
+    TOOL_LIBRARY.push({id:idx+1,name:ct.name,type:ct.type,dia:ct.dia,fluteLen:ct.fluteLen,totalLen:ct.totalLen,maxRpm:ct.maxRpm});
+    magRefIdToIndex[ct.id]=idx;
+  });
+}
+
+async function magFetchTools(){
+  if(!magToken()) return [];
+  try{
+    const r=await fetch(`${MAG_API_BASE}/cnc-magazine/tools`,{headers:magHeaders()});
+    if(!r.ok) return [];
+    const d=await r.json();
+    return Array.isArray(d.tools)?d.tools:[];
+  }catch{ return []; }
+}
+async function magFetchLayout(){
+  if(!magToken()) return null;
+  try{
+    const r=await fetch(`${MAG_API_BASE}/cnc-magazine/layout`,{headers:magHeaders()});
+    if(!r.ok) return null;
+    const d=await r.json();
+    return Array.isArray(d.slots)?d.slots:null;
+  }catch{ return null; }
+}
+
+function magApplyLayout(layoutRefIds){
+  for(let s=0;s<magazine.capacity;s++){
+    const ref=layoutRefIds[s];
+    magazine.slots[s]=ref&&magRefIdToIndex[ref]!==undefined?magRefIdToIndex[ref]:null;
+  }
+  const firstFilled=magazine.slots.findIndex((v)=>v!==null);
+  magazine.activeSlot=firstFilled>=0?firstFilled:0;
+  magazine._applyTool();
+}
+
+async function magLoadFromServer(){
+  if(!magToken()) return;
+  magCustomTools=await magFetchTools();
+  magRebuildIndex();
+  const layout=await magFetchLayout();
+  if(layout&&layout.some((v)=>v)) magApplyLayout(layout);
+  buildTool();
+}
+magLoadFromServer();
+
+/* --- editör arayüzü --- */
+function magRenderToolsList(){
+  const el=$("mag-tools-list");
+  if(!magCustomTools.length){ el.innerHTML='<p class="text-zinc-500">Henüz özel takım tanımlamadın.</p>'; return; }
+  el.innerHTML=magCustomTools.map((t)=>`
+    <div class="flex items-center justify-between rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5">
+      <span>${t.name} — Ø${t.dia}mm, boy ${t.fluteLen}mm, ${t.maxRpm} RPM</span>
+      <button data-mag-del="${t.id}" class="rounded px-2 py-0.5 text-red-400 hover:bg-red-950">Sil</button>
+    </div>`).join("");
+}
+function magAllToolOptions(){
+  const opts=[{ref:"",label:"— Boş —"}];
+  for(let i=0;i<TOOL_LIBRARY.length;i++) opts.push({ref:magRefId(i),label:"T"+String(i+1<10?"0"+(i+1):i+1)+" tabanı: "+TOOL_LIBRARY[i].name});
+  return opts;
+}
+// Slot selections are tracked here as stable ref-ids ("builtin:N" or a
+// backend tool uuid) for the currently-open editing session — never as raw
+// TOOL_LIBRARY array indices, which shift whenever a custom tool is deleted
+// and would silently point a saved slot at the wrong tool.
+let magSlotRefs=null;
+function magSlotsToRefs(){
+  return Array.from({length:magazine.capacity},(_,s)=>
+    magazine.slots[s]!==null&&magazine.slots[s]!==undefined?magRefId(magazine.slots[s]):"");
+}
+function magRenderSlotsGrid(){
+  const grid=$("mag-slots-grid");
+  const opts=magAllToolOptions();
+  const optHtml=opts.map((o)=>`<option value="${o.ref}">${o.label}</option>`).join("");
+  let html="";
+  for(let s=0;s<magazine.capacity;s++){
+    html+=`<label class="flex items-center gap-1.5">
+      <span class="w-9 shrink-0 font-mono text-cyan-300">T${String(s+1).padStart(2,"0")}</span>
+      <select data-mag-slot="${s}" class="w-full rounded border border-zinc-700 bg-zinc-800 px-1 py-1">${optHtml}</select>
+    </label>`;
+  }
+  grid.innerHTML=html;
+  grid.querySelectorAll("[data-mag-slot]").forEach((sel)=>{
+    const s=Number(sel.dataset.magSlot);
+    sel.value=magSlotRefs[s]||"";
+    sel.onchange=()=>{ magSlotRefs[s]=sel.value; };
+  });
+}
+function magOpenEditor(){
+  $("mag-edit-overlay").classList.remove("hidden");
+  const loggedIn=Boolean(magToken());
+  $("mag-edit-login-notice").classList.toggle("hidden",loggedIn);
+  $("mag-edit-body").classList.toggle("hidden",!loggedIn);
+  $("mag-edit-save").disabled=!loggedIn;
+  if(loggedIn){ magSlotRefs=magSlotsToRefs(); magRenderToolsList(); magRenderSlotsGrid(); $("mag-edit-status").textContent=""; }
+}
+function magCloseEditor(){ $("mag-edit-overlay").classList.add("hidden"); }
+$("mag-edit-open").onclick=magOpenEditor;
+$("mag-edit-close").onclick=magCloseEditor;
+$("mag-edit-cancel").onclick=magCloseEditor;
+
+$("mag-t-add").onclick=async()=>{
+  const name=$("mag-t-name").value.trim();
+  const dia=parseFloat($("mag-t-dia").value);
+  $("mag-t-error").classList.add("hidden");
+  if(!name||!(dia>0)){ $("mag-t-error").textContent="İsim ve çap (0'dan büyük) zorunludur."; $("mag-t-error").classList.remove("hidden"); return; }
+  const body={
+    name, type:$("mag-t-type").value, dia,
+    fluteLen:parseFloat($("mag-t-flute").value)||0,
+    totalLen:parseFloat($("mag-t-total").value)||0,
+    maxRpm:parseFloat($("mag-t-rpm").value)||10000,
+  };
+  try{
+    const r=await fetch(`${MAG_API_BASE}/cnc-magazine/tools`,{method:"POST",headers:magHeaders(),body:JSON.stringify(body)});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok) throw new Error(d.error||"Takım eklenemedi.");
+    magCustomTools=await magFetchTools();
+    magRebuildIndex();
+    magRenderToolsList();
+    magRenderSlotsGrid();
+    ["mag-t-name","mag-t-dia","mag-t-flute","mag-t-total","mag-t-rpm"].forEach((id)=>{$(id).value="";});
+  }catch(err){ $("mag-t-error").textContent=err.message; $("mag-t-error").classList.remove("hidden"); }
+};
+
+$("mag-tools-list").addEventListener("click",async(e)=>{
+  const id=e.target.dataset.magDel;
+  if(!id) return;
+  try{
+    await fetch(`${MAG_API_BASE}/cnc-magazine/tools/${id}`,{method:"DELETE",headers:magHeaders()});
+    magCustomTools=await magFetchTools();
+    magRebuildIndex();
+    magRenderToolsList();
+    magRenderSlotsGrid();
+  }catch{}
+});
+
+$("mag-edit-save").onclick=async()=>{
+  const slots=magSlotRefs.map((v)=>v||null);
+  $("mag-edit-status").textContent="Kaydediliyor…";
+  try{
+    const r=await fetch(`${MAG_API_BASE}/cnc-magazine/layout`,{method:"PUT",headers:magHeaders(),body:JSON.stringify({slots})});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok) throw new Error(d.error||"Kaydedilemedi.");
+    magApplyLayout(slots);
+    buildTool();
+    $("mag-edit-status").textContent="✓ Kaydedildi.";
+  }catch(err){ $("mag-edit-status").textContent="⛔ "+err.message; }
+};
 
 window._rover = {
   taiUserInput, taiExec, taiGetChips, taiNorm, taiMsg, taiRenderChips,
