@@ -121,7 +121,8 @@ function renderFiles(files = []) {
 
 function render(data, isPreview = false) {
   const { user, usage = [], projects = [], files = [] } = data;
-  const rate = user.monthlyTokens ? Math.min(100, Math.round((user.usedTokens / user.monthlyTokens) * 100)) : 0;
+  const totalLimit = Number(user.monthlyTokens) + Number(user.bonusTokens || 0);
+  const rate = totalLimit ? Math.min(100, Math.round((user.usedTokens / totalLimit) * 100)) : 0;
   const initials = user.name.split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toUpperCase();
   byId("welcome").textContent = `Geleceğe hoş geldiniz, ${user.name.split(" ")[0]}`;
   byId("user-name").textContent = user.name;
@@ -129,7 +130,7 @@ function render(data, isPreview = false) {
   byId("email").textContent = user.email;
   byId("plan").textContent = user.plan === "free" ? "Ücretsiz" : "Pro";
   byId("user-plan").textContent = `${user.plan === "free" ? "Ücretsiz" : "Pro"} plan`;
-  byId("quota").textContent = fmt.format(user.monthlyTokens);
+  byId("quota").textContent = fmt.format(totalLimit);
   byId("used").textContent = fmt.format(user.usedTokens);
   byId("remaining").textContent = fmt.format(user.remainingTokens);
   byId("usage-rate").textContent = `%${rate}`;

@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { runLlm, stripCodeFence } from "./claudeCli.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const TEXT_PROMPT_FILE = path.join(__dirname, "..", "prompts", "freecad-system-prompt.txt");
+export const TEXT_PROMPT_FILE = path.join(__dirname, "..", "prompts", "freecad-system-prompt.txt");
 const IMAGE_PROMPT_FILE = path.join(
   __dirname,
   "..",

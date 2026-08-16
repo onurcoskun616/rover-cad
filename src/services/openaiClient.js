@@ -15,7 +15,7 @@ function guessMime(filePath) {
  *
  * @param {string} input        user prompt text
  * @param {{systemPromptFile: string, imagePath?: string}} opts
- * @returns {Promise<string>}   raw response text, trimmed
+ * @returns {Promise<{text:string, usage:object, provider:string, model:string}>}
  */
 export async function runOpenAI(input, { systemPromptFile, imagePath }) {
   if (!config.openai.apiKey) {
@@ -62,6 +62,7 @@ export async function runOpenAI(input, { systemPromptFile, imagePath }) {
         model: config.openai.model,
         messages,
         temperature: 0.2,
+        max_tokens: config.llmQuota.maxOutputTokens,
       }),
       signal: controller.signal,
     });
@@ -82,7 +83,21 @@ export async function runOpenAI(input, { systemPromptFile, imagePath }) {
       throw new Error("OpenAI API returned empty response");
     }
 
-    return text;
+    return {
+      text,
+      provider: "openai",
+      model: data.model || config.openai.model,
+      providerRequestId: data.id || null,
+      usage: {
+        inputTokens: Number(data.usage?.prompt_tokens || 0),
+        outputTokens: Number(data.usage?.completion_tokens || 0),
+        // OpenAI prompt_tokens already includes cached prompt tokens.
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        totalTokens: Number(data.usage?.total_tokens || 0),
+        measured: Boolean(data.usage),
+      },
+    };
   } finally {
     clearTimeout(timer);
   }

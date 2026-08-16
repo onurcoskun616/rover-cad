@@ -1,0 +1,433 @@
+.cnc-main {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 0 1rem 2rem;
+  flex: 1;
+}
+
+.cnc-simulator {
+  background: #0a0e18;
+  border: 2px solid #1a2a44;
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: 0 12px 48px rgba(0,0,0,.6);
+}
+
+/* Machine tabs */
+.cnc-machine-tabs {
+  display: flex;
+  background: linear-gradient(180deg, #0d1a2e 0%, #0a1424 100%);
+  border-bottom: 2px solid #1a3058;
+}
+.cnc-machine-tab {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 14px 20px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: #5a7a9a;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all .2s;
+}
+.cnc-machine-tab:hover { color: #8ab4e0; background: rgba(255,255,255,.03); }
+.cnc-machine-tab.active {
+  color: #7fbfff;
+  background: rgba(74,141,255,.08);
+  border-bottom: 3px solid #4a8dff;
+  box-shadow: 0 4px 16px rgba(74,141,255,.15);
+}
+.cnc-tab-icon { font-size: 18px; }
+
+/* Body layout */
+.cnc-body {
+  display: grid;
+  grid-template-columns: 1fr 380px;
+  min-height: 600px;
+}
+
+/* Viewport column */
+.cnc-viewport-col {
+  display: flex;
+  flex-direction: column;
+  background: #0c1424;
+  border-right: 1px solid #1a2a44;
+}
+.cnc-viewport-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 14px;
+  background: linear-gradient(180deg, #101e34 0%, #0c1828 100%);
+  border-bottom: 1px solid #1a3058;
+}
+.cnc-machine-label {
+  color: #5a9ad0;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.cnc-camera-btns { display: flex; gap: 4px; }
+.cnc-cam-btn {
+  width: auto;
+  padding: 4px 10px;
+  border: 1px solid #1e3a5e;
+  border-radius: 6px;
+  background: #0e1e34;
+  color: #6a8ab0;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.cnc-cam-btn:hover { background: #142a48; color: #a0c0e0; }
+.cnc-cam-btn.active {
+  background: #1a3a6a;
+  color: #8cc8ff;
+  border-color: #2a5a8a;
+}
+
+.cnc-viewport {
+  flex: 1;
+  width: 100%;
+  min-height: 450px;
+  background: #0a1018;
+}
+
+/* DRO - Digital Readout */
+.cnc-dro {
+  display: flex;
+  gap: 1px;
+  background: #1a2a44;
+  border-top: 1px solid #1a3058;
+}
+.cnc-dro-axis {
+  flex: 1;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 8px 12px;
+  background: #0a1424;
+}
+.cnc-dro-label {
+  color: #5a8ab5;
+  font-size: 11px;
+  font-weight: 800;
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+}
+.cnc-dro-val {
+  color: #00ff88;
+  font-size: 14px;
+  font-weight: 700;
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+}
+.cnc-dro-feed .cnc-dro-val { color: #ffaa00; }
+.cnc-dro-speed .cnc-dro-val { color: #00ccff; }
+.cnc-dro-tool .cnc-dro-val { color: #ff66aa; }
+
+/* Controller column */
+.cnc-controller-col {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  background: #080e1a;
+  overflow-y: auto;
+  max-height: calc(100vh - 180px);
+}
+
+/* LCD display */
+.cnc-lcd {
+  margin: 10px;
+  border: 2px solid #1a3a20;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #0a1a0a;
+  box-shadow: inset 0 0 20px rgba(0,255,80,.05);
+}
+.cnc-lcd-header {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 10px;
+  background: #0d200d;
+  border-bottom: 1px solid #1a3a20;
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  font-size: 10px;
+  font-weight: 800;
+  color: #33ff66;
+}
+.cnc-lcd-lines {
+  min-height: 100px;
+  max-height: 140px;
+  overflow-y: auto;
+  padding: 4px 0;
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  font-size: 11px;
+  line-height: 1.6;
+  color: #22cc44;
+}
+.cnc-lcd-line {
+  padding: 0 10px;
+  white-space: nowrap;
+  transition: background .1s;
+}
+.cnc-lcd-line.active {
+  background: rgba(0,255,80,.12);
+  color: #66ff88;
+  font-weight: 700;
+}
+.cnc-lcd-footer {
+  display: flex;
+  justify-content: space-between;
+  padding: 4px 10px;
+  background: #0d200d;
+  border-top: 1px solid #1a3a20;
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  font-size: 9px;
+  color: #228844;
+}
+.cnc-lcd-lines::-webkit-scrollbar { width: 4px; }
+.cnc-lcd-lines::-webkit-scrollbar-track { background: transparent; }
+.cnc-lcd-lines::-webkit-scrollbar-thumb { background: #1a3a20; border-radius: 2px; }
+
+/* Mode buttons */
+.cnc-mode-row {
+  display: flex;
+  gap: 4px;
+  padding: 0 10px;
+}
+.cnc-mode-btn {
+  flex: 1;
+  padding: 8px;
+  border: 1px solid #1e2e4a;
+  border-radius: 8px;
+  background: #0c1828;
+  color: #5a7a9a;
+  font-size: 11px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.cnc-mode-btn:hover { background: #142438; }
+.cnc-mode-btn.active {
+  background: #1a3058;
+  color: #8cc8ff;
+  border-color: #2a5a8a;
+}
+
+/* Cycle controls */
+.cnc-cycle-row {
+  display: flex;
+  gap: 4px;
+  padding: 8px 10px;
+}
+.cnc-cycle-btn {
+  flex: 1;
+  padding: 10px 6px;
+  border: none;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.cnc-green {
+  background: linear-gradient(180deg, #1a6b3a 0%, #0f4d28 100%);
+  color: #a8f0c6;
+  border: 1px solid #1a7a42;
+}
+.cnc-green:hover { background: linear-gradient(180deg, #1f8248 0%, #146435 100%); color: #fff; }
+.cnc-yellow {
+  background: linear-gradient(180deg, #6b5a1a 0%, #4d3f0f 100%);
+  color: #f0dca8;
+  border: 1px solid #7a6a1a;
+}
+.cnc-yellow:hover { background: linear-gradient(180deg, #827020 0%, #645418 100%); color: #fff; }
+.cnc-red {
+  background: linear-gradient(180deg, #5c2020 0%, #3e1515 100%);
+  color: #f0a8a8;
+  border: 1px solid #8b3030;
+}
+.cnc-red:hover { background: linear-gradient(180deg, #7a2828 0%, #521a1a 100%); color: #fff; }
+
+/* Speed sliders */
+.cnc-slider-group { padding: 6px 10px; }
+.cnc-slider-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+}
+.cnc-slider-row label {
+  color: #5a8ab5;
+  font-size: 10px;
+  font-weight: 700;
+  min-width: 60px;
+}
+.cnc-slider-row input[type="range"] {
+  flex: 1;
+  height: 4px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: #1a3558;
+  border: none;
+  border-radius: 2px;
+  outline: none;
+  padding: 0;
+}
+.cnc-slider-row input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #4a8dff;
+  cursor: pointer;
+}
+.cnc-slider-row input[type="range"]::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border: 0;
+  border-radius: 50%;
+  background: #4a8dff;
+  cursor: pointer;
+}
+.cnc-slider-row span {
+  color: #8cc8ff;
+  font-size: 11px;
+  font-weight: 700;
+  font-family: "JetBrains Mono", monospace;
+  min-width: 38px;
+  text-align: right;
+}
+
+/* E-Stop */
+.cnc-estop {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin: 6px 10px;
+  padding: 12px;
+  border: 2px solid #8b2020;
+  border-radius: 10px;
+  background: linear-gradient(180deg, #6b1818 0%, #3e0c0c 100%);
+  color: #ff6666;
+  font-size: 14px;
+  font-weight: 900;
+  cursor: pointer;
+  text-transform: uppercase;
+}
+.cnc-estop:hover { background: linear-gradient(180deg, #8b2020 0%, #5c1414 100%); color: #ff8888; }
+.cnc-estop.engaged {
+  background: linear-gradient(180deg, #cc2020 0%, #8b1010 100%);
+  color: #fff;
+  animation: estopPulse 1s ease-in-out infinite;
+}
+@keyframes estopPulse {
+  0%,100% { box-shadow: 0 0 10px rgba(255,0,0,.3); }
+  50% { box-shadow: 0 0 20px rgba(255,0,0,.6); }
+}
+.cnc-estop-icon { font-size: 18px; }
+
+/* G-code input */
+.cnc-gcode-input-area {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+}
+.cnc-gcode-label {
+  color: #5a8ab5;
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+}
+.cnc-gcode-textarea {
+  width: 100%;
+  background: #0a1424;
+  color: #b0d4f1;
+  border: 1px solid #1a2a44;
+  border-radius: 6px;
+  padding: 8px;
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  font-size: 11px;
+  resize: vertical;
+  min-height: 60px;
+}
+.cnc-gcode-textarea:focus { border-color: #2a5a8a; outline: none; }
+.cnc-gcode-actions {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.cnc-gcode-actions button {
+  width: auto;
+  padding: 6px 14px;
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 6px;
+}
+
+/* G-code listing */
+.cnc-gcode-listing {
+  margin: 0 10px 10px;
+  border: 1px solid #1a2a44;
+  border-radius: 6px;
+  overflow: hidden;
+}
+.cnc-gcode-listing-header {
+  padding: 6px 10px;
+  background: #0c1828;
+  border-bottom: 1px solid #1a2a44;
+  color: #5a8ab5;
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+}
+.cnc-gcode-listing-lines {
+  max-height: 200px;
+  overflow-y: auto;
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  font-size: 10px;
+  line-height: 1.6;
+  padding: 2px 0;
+}
+.cnc-gcode-listing-lines::-webkit-scrollbar { width: 4px; }
+.cnc-gcode-listing-lines::-webkit-scrollbar-track { background: transparent; }
+.cnc-gcode-listing-lines::-webkit-scrollbar-thumb { background: #1a2a44; border-radius: 2px; }
+.cnc-listing-line {
+  padding: 1px 10px;
+  color: #4a6a8a;
+  white-space: nowrap;
+}
+.cnc-listing-line.active {
+  background: rgba(74,141,255,.12);
+  color: #8cc8ff;
+  font-weight: 700;
+}
+.cnc-listing-line .ln {
+  display: inline-block;
+  width: 3em;
+  text-align: right;
+  margin-right: .8em;
+  color: #2a3a5a;
+}
+
+/* Responsive */
+@media (max-width: 900px) {
+  .cnc-body {
+    grid-template-columns: 1fr;
+  }
+  .cnc-viewport-col { border-right: none; border-bottom: 1px solid #1a2a44; }
+  .cnc-viewport { min-height: 320px; }
+  .cnc-controller-col { max-height: none; }
+}
+@media (max-width: 520px) {
+  .cnc-machine-tab { font-size: 12px; padding: 10px 8px; }
+  .cnc-dro { flex-wrap: wrap; }
+  .cnc-dro-axis { min-width: 30%; }
+}

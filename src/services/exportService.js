@@ -86,7 +86,13 @@ export function sanitizeFreeCADCode(code) {
   // Restore builtins.range if a prior preamble corrupted it
   result = "import builtins as _BI\nif hasattr(_BI, '_ROVER_orig_range'):\n    _BI.range = _BI._ROVER_orig_range\n    del _BI._ROVER_orig_range\nif hasattr(_BI, '_ROVER_PATCHED'):\n    del _BI._ROVER_PATCHED\n\n" + result;
 
-  // range() with float args: range(10.0) → range(10), range(n) → range(int(n))
+  // --- Core fix: convert integer-like float literals to int everywhere ---
+  // FreeCAD float properties accept int (auto-promote), but int properties
+  // reject float. So 1.0 → 1 is always safe. Matches 1.0, 10.0, 100.00 etc.
+  // but NOT 1.5, 0.001, 3.14.
+  result = result.replace(/\b(\d+)\.0+\b/g, "$1");
+
+  // range() with variable args: range(n) → range(int(n))
   result = result.replace(
     /\brange\s*\(([^)]+)\)/g,
     (_match, inner) => {
@@ -95,16 +101,23 @@ export function sanitizeFreeCADCode(code) {
         if (!t) return a;
         if (/^\d+$/.test(t)) return a;
         if (/^int\s*\(/.test(t)) return a;
-        const fm = t.match(/^(\d+)\.0*$/);
-        if (fm) return a.replace(t, fm[1]);
         return a.replace(t, `int(${t})`);
       }).join(",");
       return `range(${args})`;
     },
   );
 
-  // list/group indexing with float literal: Group[0.0] → Group[0]
-  result = result.replace(/\[(\d+)\.0*\]/g, (_m, n) => `[${n}]`);
+  // list/group indexing with variable: Group[i] → Group[int(i)]
+  // Only for patterns like .Group[var] or Tools.Group[expr]
+  result = result.replace(
+    /\.Group\[([^\]]+)\]/g,
+    (_m, idx) => {
+      const t = idx.trim();
+      if (/^\d+$/.test(t)) return `.Group[${t}]`;
+      if (/^int\s*\(/.test(t)) return `.Group[${t}]`;
+      return `.Group[int(${t})]`;
+    },
+  );
 
   return result;
 }

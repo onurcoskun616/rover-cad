@@ -192,11 +192,20 @@ npx netlify deploy --prod --dir=web
 ### Cloudflare Tunnel baglanti kopuyor
 - `cloudflared tunnel run rover-cad` komutunu tekrar calistir
 - Windows'ta servis olarak kur: `cloudflared service install`
-# SaaS environment
+# Supabase Auth, PostgreSQL ve LLM kotası
 
-Set `AUTH_SECRET` to a long random value, `ADMIN_EMAIL` to the first administrator's
-email address, and `FREE_MONTHLY_TOKENS=50000`. The account registered with
-`ADMIN_EMAIL` receives the administrator role automatically.
+1. Supabase projesinde SQL Editor'u açıp
+   `supabase/migrations/202608110001_llm_quota.sql` dosyasını çalıştırın.
+2. Authentication > Providers bölümünde Email ve Google sağlayıcılarını açın.
+3. Google OAuth yönlendirme adreslerine Supabase callback adresini ve
+   `https://topkapikoleji.org/login.html` adresini ekleyin.
+4. Backend `.env` dosyasına `SUPABASE_URL`, `SUPABASE_ANON_KEY` ve doğrudan ya da
+   session-pooler `DATABASE_URL` değerlerini yazın. Transaction pooler kullanmayın;
+   kota rezervasyonu oturum içi transaction kilitleri kullanır.
+5. `ADMIN_EMAIL` ile eşleşen hesap ilk doğrulamada yönetici rolünü alır.
 
-`DATA_DIR` must point to a persistent, backed-up volume. User records, password
-hashes and token usage are stored in `accounts.json` under that directory.
+Her LLM çağrısı öncesinde tahmini üst sınır atomik olarak rezerve edilir. Sağlayıcı
+yanıtındaki gerçek giriş/çıkış tokenları daha sonra kayda geçirilir; hata halinde
+rezervasyon iade edilir. `node-cron` her ayın 1'inde saat 00:00'da (Europe/Istanbul)
+ücretsiz kotaları yeniler. Veritabanı fonksiyonu ayrıca kaçırılan cron çalışmasını
+ilk sonraki istekte güvenli biçimde telafi eder.
