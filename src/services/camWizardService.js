@@ -6,6 +6,7 @@ import {
   listMagazineTools,
   suitableMagazineTools,
   magazineToolLabel,
+  slotNumberForTool,
 } from "./cncMagazineService.js";
 
 // Tool selection is sourced from the CNC Simülatör's magazine — the single
@@ -22,6 +23,10 @@ function effectiveAnswers(answers) {
       a._toolMaterial = tool.material;
       a._toolFlutes = tool.flutes;
       a._toolName = tool.name;
+      // The real magazine slot this tool sits in, if placed — lets code-gen
+      // set the DEFAULT ToolController's ToolNumber to match what the
+      // machinist actually sees on the machine, not FreeCAD's generic "1".
+      a._toolSlot = slotNumberForTool(tool.id);
     }
   }
   return a;
@@ -523,6 +528,7 @@ export function camParamsBlock(answers, geometry) {
     `- Referans/sifir (WCS): ${a.wcs ?? "?"}`,
     `- Calisma duzlemi: ${a.workPlane ?? "G17 / XY"}`,
     a._toolName ? `- Takim profili: ${a._toolName} (${a._toolMaterial ?? ""}, ${a._toolFlutes ?? "?"} agiz)` : null,
+    a._toolName ? `- Bu takimin magazin slotu: ${a._toolSlot ?? "atanmamis"} (Job'un varsayilan ToolController'inin ToolNumber'ini BUNA esitle)` : null,
     `- Ana freze capi: ${a.endmillDiameter ?? "?"} mm`,
     a.faceMillDiameter ? `- Face mill (yuzey tarama) capi: ${a.faceMillDiameter} mm` : null,
     `- Giris yontemi: ${a.entryMethod ?? "Ramp (acili giris)"}`,
@@ -553,10 +559,18 @@ export function camParamsBlock(answers, geometry) {
 function magazineCatalogBlock() {
   const tools = listMagazineTools();
   if (!tools.length) return null;
-  const lines = tools.map(
-    (t) => `  - "${t.name}": ${t.type}, O${t.dia}mm, ${t.flutes ?? 2} agiz, ${t.material || "Karbur"}`,
+  const lines = tools.map((t) => {
+    const slot = slotNumberForTool(t.id);
+    const slotNote = slot ? `slot T${String(slot).padStart(2, "0")}` : "magazine yerlestirilmemis";
+    return `  - "${t.name}": ${t.type}, O${t.dia}mm, ${t.flutes ?? 2} agiz, ${t.material || "Karbur"}, ${slotNote}`;
+  });
+  return (
+    "\n[TAKIM_MAGAZINI] (plan adimlarindaki 'tool' alani SADECE bu listeden, tam isimle secilmeli. " +
+    "Kod uretirken her takimin ToolController'ina, o takimin buradaki slot numarasini ToolNumber olarak ver " +
+    "— boylece G-code'daki T-kodlari makinistin fiziksel magazin slotlarıyla birebir eslesir. " +
+    "'magazine yerlestirilmemis' takimlar icin ToolNumber olarak sirayla 90, 91, 92... kullan " +
+    "ve notes alaninda bu takimin magazine once yerlestirilmesi gerektigini belirt):\n" + lines.join("\n")
   );
-  return "\n[TAKIM_MAGAZINI] (plan adimlarindaki 'tool' alani SADECE bu listeden, tam isimle secilmeli):\n" + lines.join("\n");
 }
 
 // The wizard hits /cam-step once per step, so cache the (immutable) geometry

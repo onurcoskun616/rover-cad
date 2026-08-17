@@ -110,6 +110,17 @@ export function listMagazineLayout() {
   return slots;
 }
 
+// The 1-indexed magazine slot the given tool id currently sits in (matching
+// the T-numbers shown on the CNC Simülatör and physically labeled on the
+// machine's magazine), or null if it isn't placed in any slot. Lets the CAM
+// Assistant emit G-code tool numbers a machinist can act on directly instead
+// of an arbitrary sequential count.
+export function slotNumberForTool(toolId) {
+  if (!toolId) return null;
+  const idx = listMagazineLayout().indexOf(toolId);
+  return idx === -1 ? null : idx + 1;
+}
+
 // The simulator's 12 built-in tools live only in the frontend and are
 // referenced from a saved layout as "builtin:1".."builtin:12" — always
 // considered valid here since the backend has no record of them itself.
