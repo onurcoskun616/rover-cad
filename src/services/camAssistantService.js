@@ -252,6 +252,79 @@ export function parsePlungeViolations(text) {
   }
 }
 
+// Rapid (G0) collision check against the REAL part geometry. The CAM
+// Assistant's FreeCAD script never models the stock as an actual solid (only
+// `base`, the finished-part STEP shape, exists in the document) — unlike the
+// CNC Simülatör's SafetyInterceptor, which validates against a stock
+// heightmap. So this checks the thing that actually IS reliably known: a
+// rapid move's straight-line path must never travel THROUGH the finished
+// part's solid (that only happens if an operation's clearance/retract height
+// is wrong — legitimate rapids stay in open air above/around the part).
+// Samples points along each rapid segment and asks FreeCAD's own geometric
+// kernel whether that point is inside the solid — no stock position/size
+// guessing involved. A cheap bounding-box pre-filter skips the (relatively
+// expensive) exact check for segments that are entirely above the part, which
+// covers the vast majority of ordinary retract-height travel moves.
+function collisionCheckPy() {
+  return [
+    "import json as _json",
+    "_collision_violations = []",
+    "try:",
+    "    _solid = base.Shape",
+    "    _bb = _solid.BoundBox",
+    "except Exception:",
+    "    _solid = None",
+    "if _solid is not None:",
+    "    for _op in _grp:",
+    "        _p = getattr(_op, 'Path', None)",
+    "        if _p is None:",
+    "            continue",
+    "        _lbl = str(getattr(_op, 'Label', _op.Name))",
+    "        _px = _py = _pz = None",
+    "        _hit = False",
+    "        for _c in _p.Commands:",
+    "            if _hit:",
+    "                break",
+    "            _pr = _c.Parameters",
+    "            _rapid = _c.Name in ('G0', 'G00')",
+    "            _nx = float(_pr['X']) if 'X' in _pr else (_px if _px is not None else 0.0)",
+    "            _ny = float(_pr['Y']) if 'Y' in _pr else (_py if _py is not None else 0.0)",
+    "            _nz = float(_pr['Z']) if 'Z' in _pr else (_pz if _pz is not None else 0.0)",
+    "            if _rapid and _px is not None and min(_pz, _nz) <= _bb.ZMax + 0.5:",
+    "                _dist = ((_nx-_px)**2 + (_ny-_py)**2 + (_nz-_pz)**2) ** 0.5",
+    "                if _dist > 0.5:",
+    "                    _steps = min(15, max(3, int(_dist // 3)))",
+    "                    for _s in range(1, _steps):",
+    "                        _t = _s / _steps",
+    "                        _sx = _px + (_nx-_px)*_t",
+    "                        _sy = _py + (_ny-_py)*_t",
+    "                        _sz = _pz + (_nz-_pz)*_t",
+    "                        try:",
+    "                            _inside = _solid.isInside(FreeCAD.Vector(_sx, _sy, _sz), 0.05, True)",
+    "                        except Exception:",
+    "                            _inside = False",
+    "                        if _inside:",
+    "                            _collision_violations.append({'op': _lbl, 'x': round(_sx, 2), 'y': round(_sy, 2), 'z': round(_sz, 2)})",
+    "                            _hit = True",
+    "                            break",
+    "            _px, _py, _pz = _nx, _ny, _nz",
+    'print("COLLISION_VIOLATIONS=" + _json.dumps(_collision_violations))',
+  ].join("\n");
+}
+
+// Read the "COLLISION_VIOLATIONS=[...]" line the trusted epilogue prints (see
+// collisionCheckPy above).
+export function parseCollisionViolations(text) {
+  const match = String(text ?? "").match(/COLLISION_VIOLATIONS=(\[.*\])/);
+  if (!match) return [];
+  try {
+    const parsed = JSON.parse(match[1]);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
 // Candidate FreeCAD post-processor module names for each controller choice, with
 // grbl as the final fallback. Used by the trusted post-processing epilogue.
 function postModuleCandidates(postName) {
@@ -331,6 +404,7 @@ function previewEpiloguePy(previewJsonPath, defaultFeed) {
     "print('EST_MINUTES=' + str(round(_total_min, 2)))",
     "print('PREVIEW_JSON=' + _out)",
     plungeCheckPy(),
+    collisionCheckPy(),
   ].join("\n");
 }
 
@@ -356,6 +430,7 @@ function postEpiloguePy(gcodePath, postName) {
     "    raise RuntimeError('post-processor modulu bulunamadi')",
     "_grp = list(job.Operations.Group)",
     plungeCheckPy(),
+    collisionCheckPy(),
     `_out = ${JSON.stringify(gcodePath)}`,
     "post_mod.export(_grp, _out, '--no-show-editor')",
     "print('GCODE_PATH=' + _out)",
@@ -481,18 +556,35 @@ async function generateAndRunPathCode({ abs, geometry, answers, plan, threadGuid
     }
 
     if (text.includes(successMarker)) {
-      const violations = parsePlungeViolations(text);
-      if (violations.length) {
-        const detail = violations
-          .map((v) => `${v.op}: Z${v.fromZ}->Z${v.toZ} (${v.delta}mm tek pasoda)`)
-          .join("; ");
-        console.warn(`Plunge limit ihlali (attempt ${attempt}): ${detail}`);
-        lastError = `Guvenlik siniri asildi (tek pasoda >10mm dalis): ${detail}`;
+      const plungeViolations = parsePlungeViolations(text);
+      const collisionViolations = parseCollisionViolations(text);
+      if (plungeViolations.length || collisionViolations.length) {
+        const problems = [];
+        if (plungeViolations.length) {
+          const detail = plungeViolations
+            .map((v) => `${v.op}: Z${v.fromZ}->Z${v.toZ} (${v.delta}mm tek pasoda)`)
+            .join("; ");
+          console.warn(`Plunge limit ihlali (attempt ${attempt}): ${detail}`);
+          problems.push(
+            `Su operasyonlarda tek G1 hareketinde ${MAX_PLUNGE_MM}mm'den fazla Z dalisi var: ${detail}. ` +
+            `Her operasyonun StepDown/derinlik parametresini <=${MAX_PLUNGE_MM}mm olacak sekilde ayarla ` +
+            "(ornegin StepDown=5.0 ile 2 kat gec).",
+          );
+        }
+        if (collisionViolations.length) {
+          const detail = collisionViolations
+            .map((v) => `${v.op}: (${v.x}, ${v.y}, ${v.z})`)
+            .join("; ");
+          console.warn(`Carpisma riski (attempt ${attempt}): ${detail}`);
+          problems.push(
+            `Su operasyonlarda hizli (rapid/G0) hareket parcanin icinden geciyor: ${detail}. ` +
+            "Bu genelde yanlis/eksik StartDepth, FinalDepth veya ClearanceHeight/SafeHeight yuzunden olur. " +
+            "Her operasyonun guvenli yukseklikten (parcanin en ust noktasinin uzerinden) yaklasip cekildiginden emin ol.",
+          );
+        }
+        lastError = `Guvenlik kontrolu basarisiz: ${problems.join(" ")}`;
         previousCode = code;
-        problem =
-          `Su operasyonlarda tek G1 hareketinde ${MAX_PLUNGE_MM}mm'den fazla Z dalisi var: ${detail}. ` +
-          `Her operasyonun StepDown/derinlik parametresini <=${MAX_PLUNGE_MM}mm olacak sekilde ayarla ` +
-          "(ornegin StepDown=5.0 ile 2 kat gec) ve kodu bastan yaz.";
+        problem = problems.join(" ") + " Kodu bastan yaz.";
         continue;
       }
       return { code, text };
@@ -622,12 +714,17 @@ export async function generateCamGcodeFromPlan(stepPath, answers, plan, context 
     // Defense in depth: the preview step already checked this, but the stored
     // code is re-run verbatim here, so re-verify before handing out the file.
     const violations = parsePlungeViolations(text);
-    if (violations.length) {
+    const collisions = parseCollisionViolations(text);
+    if (violations.length || collisions.length) {
       try { fs.unlinkSync(gcodePath); } catch { /* not present; fine */ }
-      const detail = violations
-        .map((v) => `${v.op}: Z${v.fromZ}->Z${v.toZ} (${v.delta}mm tek pasoda)`)
-        .join("; ");
-      throw new Error(`Guvenlik siniri asildi (tek pasoda >10mm dalis): ${detail}. Onizlemeyi yeniden olusturun.`);
+      const parts = [];
+      if (violations.length) {
+        parts.push(violations.map((v) => `${v.op}: Z${v.fromZ}->Z${v.toZ} (${v.delta}mm tek pasoda)`).join("; "));
+      }
+      if (collisions.length) {
+        parts.push(collisions.map((v) => `${v.op}: (${v.x}, ${v.y}, ${v.z})`).join("; "));
+      }
+      throw new Error(`Guvenlik kontrolu basarisiz: ${parts.join(" | ")}. Onizlemeyi yeniden olusturun.`);
     }
     applyControllerTransform(gcodePath, postName, abs, answers);
     return { gcodePath };
