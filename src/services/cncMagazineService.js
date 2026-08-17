@@ -43,7 +43,25 @@ function normalizeTool(data) {
     fluteLen: num(data.fluteLen),
     totalLen: num(data.totalLen),
     maxRpm: num(data.maxRpm, 10000),
+    // Used by the CAM Assistant when it sources tool selection from this same
+    // magazine (single shared source across simulator + real production).
+    flutes: num(data.flutes, 2) || 2,
+    material: str(data.material).trim() || "Karbur",
   };
+}
+
+// Human-readable option label — mirrors inventoryService's toolLabel() shape
+// so the CAM Assistant wizard's tool dropdown reads the same either way.
+export function magazineToolLabel(t) {
+  return `${t.name} (O${t.dia}mm, ${t.flutes ?? 2} agiz, ${t.material || "Karbur"})`;
+}
+
+// Magazine tools sorted by how close their diameter is to the recommended one.
+export function suitableMagazineTools(recommendedDiameter) {
+  const rec = num(recommendedDiameter);
+  return listMagazineTools()
+    .slice()
+    .sort((a, b) => Math.abs(a.dia - rec) - Math.abs(b.dia - rec));
 }
 
 export function listMagazineTools() {

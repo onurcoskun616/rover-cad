@@ -1,12 +1,31 @@
 import fs from "node:fs";
 import { describeStepGeometry, resolveStepPath } from "./camService.js";
 import { detectThreads, THREAD_METHOD_QUESTION } from "./threadSpec.js";
+import { listMachines, effectiveAnswers as machineEffectiveAnswers } from "./inventoryService.js";
 import {
-  listMachines,
-  suitableTools,
-  toolLabel,
-  effectiveAnswers,
-} from "./inventoryService.js";
+  listMagazineTools,
+  suitableMagazineTools,
+  magazineToolLabel,
+} from "./cncMagazineService.js";
+
+// Tool selection is sourced from the CNC Simülatör's magazine — the single
+// shared tool inventory across the simulator and real production, so a tool
+// picked here is the exact same tool a machinist sees in the magazine. Layers
+// on top of inventoryService's machine resolution (machines/tools profiles
+// remain a separate, unrelated concept).
+function effectiveAnswers(answers) {
+  const a = machineEffectiveAnswers(answers);
+  if (a.tool) {
+    const tool = listMagazineTools().find((t) => magazineToolLabel(t) === a.tool);
+    if (tool) {
+      a.endmillDiameter = tool.dia;
+      a._toolMaterial = tool.material;
+      a._toolFlutes = tool.flutes;
+      a._toolName = tool.name;
+    }
+  }
+  return a;
+}
 
 // --- Deterministic machining data -------------------------------------------
 // Cutting parameters must be reproducible, so they come from a table + the
@@ -342,19 +361,19 @@ function buildApplicableSteps({ geometry, threads, answers }) {
   //    offered; picking one overrides the manual diameter. Otherwise the
   //    geometry-recommended diameter is used.
   const toolFields = [];
-  const savedTools = suitableTools(endmill);
+  const savedTools = suitableMagazineTools(endmill);
   let toolIntro = holeDiametersNote(geometry);
   if (savedTools.length) {
-    const opts = [...savedTools.map((t) => toolLabel(t)), "Elle gir (yeni takim)"];
+    const opts = [...savedTools.map((t) => magazineToolLabel(t)), "Elle gir (yeni takim)"];
     toolFields.push(
-      selectField("tool", "Kayitli takim", opts, pick(a, "tool", opts[0])),
+      selectField("tool", "Kayitli takim (magazin)", opts, pick(a, "tool", opts[0])),
     );
     const nearest = savedTools[0];
     toolIntro =
-      `${toolIntro} Envanterden en yakin: ${nearest.name} O${nearest.diameter}mm (onerilen O${endmill}mm).`.trim();
+      `${toolIntro} Magazinden en yakin: ${nearest.name} O${nearest.dia}mm (onerilen O${endmill}mm).`.trim();
   } else {
     toolIntro =
-      `${toolIntro} Envanterinizde kayitli takim yok; onerilen O${endmill}mm.`.trim();
+      `${toolIntro} Magazinde kayitli takim yok; onerilen O${endmill}mm. Once CNC Simulator > Magazin'den takim ekleyin.`.trim();
   }
   const faceMillDia = pick(a, "faceMillDiameter", recommendFaceMill(geometry));
   toolIntro += ` Yuzey tarama (face) icin onerilen face mill: O${faceMillDia}mm.`;
