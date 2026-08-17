@@ -439,6 +439,8 @@
           <input id="mag-t-flute" type="number" min="0" step="0.5" placeholder="Kesici boy mm" class="rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5">
           <input id="mag-t-total" type="number" min="0" step="0.5" placeholder="Toplam boy mm" class="rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5">
           <input id="mag-t-rpm" type="number" min="0" step="100" placeholder="Maks RPM" class="rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5">
+          <input id="mag-t-flutes" type="number" min="1" step="1" placeholder="Ağız sayısı" class="rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5">
+          <input id="mag-t-material" placeholder="Malzeme (ör. Karbur)" class="rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5">
           <button id="mag-t-add" class="rounded bg-cyan-700 px-2 py-1.5 font-bold hover:bg-cyan-600">+ Ekle</button>
         </div>
         <div id="mag-t-error" class="hidden mt-1 text-red-400"></div>
@@ -2090,7 +2092,7 @@ function magRenderToolsList(){
   if(!magCustomTools.length){ el.innerHTML='<p class="text-zinc-500">Henüz özel takım tanımlamadın.</p>'; return; }
   el.innerHTML=magCustomTools.map((t)=>`
     <div class="flex items-center justify-between rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5">
-      <span>${t.name} — Ø${t.dia}mm, boy ${t.fluteLen}mm, ${t.maxRpm} RPM</span>
+      <span>${t.name} — Ø${t.dia}mm, boy ${t.fluteLen}mm, ${t.maxRpm} RPM, ${t.flutes||2} ağız, ${t.material||"Karbur"}</span>
       <button data-mag-del="${t.id}" class="rounded px-2 py-0.5 text-red-400 hover:bg-red-950">Sil</button>
     </div>`).join("");
 }
@@ -2149,6 +2151,8 @@ $("mag-t-add").onclick=async()=>{
     fluteLen:parseFloat($("mag-t-flute").value)||0,
     totalLen:parseFloat($("mag-t-total").value)||0,
     maxRpm:parseFloat($("mag-t-rpm").value)||10000,
+    flutes:parseFloat($("mag-t-flutes").value)||2,
+    material:$("mag-t-material").value.trim()||"Karbur",
   };
   try{
     const r=await fetch(`${MAG_API_BASE}/cnc-magazine/tools`,{method:"POST",headers:magHeaders(),body:JSON.stringify(body)});
@@ -2158,7 +2162,7 @@ $("mag-t-add").onclick=async()=>{
     magRebuildIndex();
     magRenderToolsList();
     magRenderSlotsGrid();
-    ["mag-t-name","mag-t-dia","mag-t-flute","mag-t-total","mag-t-rpm"].forEach((id)=>{$(id).value="";});
+    ["mag-t-name","mag-t-dia","mag-t-flute","mag-t-total","mag-t-rpm","mag-t-flutes","mag-t-material"].forEach((id)=>{$(id).value="";});
   }catch(err){ $("mag-t-error").textContent=err.message; $("mag-t-error").classList.remove("hidden"); }
 };
 
