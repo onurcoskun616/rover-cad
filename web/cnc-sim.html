@@ -725,6 +725,7 @@ function initMill(){
   camera=new THREE.PerspectiveCamera(45,1,1,3000);
   controls=new OrbitControls(camera,renderer.domElement);
   controls.enableDamping=true;controls.target.set(0,20,0);
+  controls.minDistance=60;controls.maxDistance=1200;
   setView("iso");
 
   scene.add(new THREE.HemisphereLight(0xffffff,0x556070,0.85));
