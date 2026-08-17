@@ -538,9 +538,25 @@ export function camParamsBlock(answers, geometry) {
     `- Kesme yonu: ${a.millingDirection ?? "Climb"}`,
     a.stepStrategy ? `- Kademe stratejisi: ${a.stepStrategy}` : null,
     repeatNote ? `- Tekrarlayan ozellikler (${a.groupRepeated ?? "grupla"}): ${repeatNote}` : null,
+    magazineCatalogBlock(),
   ]
     .filter(Boolean)
     .join("\n");
+}
+
+// Full magazine tool catalog (not just the single default selected above) so
+// the plan can assign a DIFFERENT, specific tool per operation (drill for
+// holes, endmill for pockets, ...) and the code-gen step can look up its exact
+// diameter/type when building a matching ToolController. Every "tool" a plan
+// step names must come from this list — it is the single tool source shared
+// with the CNC Simülatör's magazine and real production.
+function magazineCatalogBlock() {
+  const tools = listMagazineTools();
+  if (!tools.length) return null;
+  const lines = tools.map(
+    (t) => `  - "${t.name}": ${t.type}, O${t.dia}mm, ${t.flutes ?? 2} agiz, ${t.material || "Karbur"}`,
+  );
+  return "\n[TAKIM_MAGAZINI] (plan adimlarindaki 'tool' alani SADECE bu listeden, tam isimle secilmeli):\n" + lines.join("\n");
 }
 
 // The wizard hits /cam-step once per step, so cache the (immutable) geometry

@@ -11,6 +11,7 @@ Rules:
 - Split ROUGHING (stock-to-leave > 0) and FINISHING (stock-to-leave = 0) as separate operations.
 - Face first if requested, roughing before finishing, drilling/holes, contour last.
 - Face mill: use the face mill diameter from [CAM_PARAMETRELERI] (not the endmill) for Face ops.
+- TOOL SELECTION: every step's "tool" field must be the EXACT name (verbatim, quotes included in the source list but not in your output) of one tool from [TAKIM_MAGAZINI] — never invent a tool or describe one freehand. Pick the tool whose type/diameter actually fits the operation (drill-type for Drilling, endmill/roughing-type for Pocket/Contour/Face unless a dedicated face mill is listed, ballmill for 3D freeform, chamfer-type for 2D Chamfer). Reuse the SAME tool across consecutive steps of the same kind — only switch tools when the operation genuinely needs a different one (fewer tool changes is better).
 - Entry method: follow [CAM_PARAMETRELERI] "Giris yontemi" — ramp for aluminum, helix for pockets/holes, plunge only for drilling. State entry type in each step description.
 - Machine class: if "Hobi", use stepover 15-20% of tool diameter. If "Endustriyel", 40% is OK.
 - Threads ([DIS_ISLEME]): drill at EXACT pilot diameters, then tap or thread-mill as stated.
