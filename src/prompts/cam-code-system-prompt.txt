@@ -44,7 +44,7 @@ Yeni takim ekleme sablonu (magazindeki O8mm matkap icin, toolNumber HER YENI TAK
     drill_tool.ToolType = 'Drill'      # freze icin 'EndMill', pah icin 'Chamfer', top freze icin 'BallEndMill'
     drill_tool.Name = 'O8mm Matkap'    # [TAKIM_MAGAZINI]'ndeki tam isim
     tc_drill = PathToolController.Create('TC_Drill', tool=drill_tool, toolNumber=2)
-    job.Tools.addObject(tc_drill)
+    job.Proxy.addToolController(tc_drill)   # NOT job.Tools.addObject — this is the real API
     tc_drill.HorizFeed = '200 mm/min'
     tc_drill.VertFeed = '80 mm/min'
     tc_drill.SpindleSpeed = 3000.0
