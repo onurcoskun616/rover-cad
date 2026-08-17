@@ -543,6 +543,20 @@ function buildTechDrawCode(pdfPath, bbox, dimensions) {
     'front = group.getItemByLabel("Front")',
     'top = group.getItemByLabel("Top")',
     "",
+    "# Verify First Angle actually placed Top below Front (page Y increases",
+    "# upward, so Top must end up at a SMALLER Y than Front). FreeCAD's",
+    "# ProjectionType handling has had reported bugs, so check the real",
+    "# computed positions instead of trusting the property blindly, and flip",
+    "# to Third Angle + recompute if it came out backwards.",
+    "try:",
+    "    if front is not None and top is not None and top.Y >= front.Y:",
+    '        print("VIEW_DEBUG: Top not below Front (top.Y=" + str(top.Y) + " front.Y=" + str(front.Y) + "), flipping ProjectionType")',
+    '        group.ProjectionType = "Third Angle"',
+    "        doc.recompute()",
+    '        print("VIEW_DEBUG: after flip top.Y=" + str(top.Y) + " front.Y=" + str(front.Y))',
+    "except Exception as pt_err:",
+    '    print("VIEW_WARN: " + str(pt_err))',
+    "",
     "# Isometric render, shaded like the on-screen 3D preview, placed directly",
     "# above the title block.",
     "iso_ok = False",
@@ -786,7 +800,7 @@ export async function exportTechDrawPdfFromStep(stepPath, bbox, dimensions = [])
       [config.freecadMcp.toolParam]: code,
     });
     const text = extractResultText(result);
-    const dimDebug = text.split("\n").filter(l => l.startsWith("DIM_") || l.startsWith("ISO_")).join(" | ");
+    const dimDebug = text.split("\n").filter(l => l.startsWith("DIM_") || l.startsWith("ISO_") || l.startsWith("VIEW_")).join(" | ");
     if (dimDebug) console.log("[TechDraw]", dimDebug);
     const match = text.match(/PDF_PATH=(.+)/);
     if (result?.isError || !match) {
