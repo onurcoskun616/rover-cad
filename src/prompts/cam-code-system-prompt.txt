@@ -13,6 +13,10 @@ Setup template:
         import Path.Op.MillFace as PathMillFace
     except Exception:
         from PathScripts import PathJob, PathProfile, PathPocket, PathDrilling
+    try:
+        from Path.Main.Tool import Controller as PathToolController
+    except Exception:
+        from PathScripts import PathToolController
 
     doc = App.newDocument()
     shape = Part.Shape()
@@ -29,6 +33,33 @@ Setup template:
     tc.VertFeed = '180 mm/min'
     tc.SpindleSpeed = 4244.0
     tc.Tool.Diameter = 6.0
+
+=== MULTI-TOOL SUPPORT (real T-code tool changes) ===
+
+[ONAYLANAN_PLAN]'daki her adimin "tool" alani [TAKIM_MAGAZINI]'ndeki bir takima karsilik gelir. `tc` (job.Tools.Group[0]) o listedeki İLK adimin takimi icin zaten kurulmus varsayilan takimdir — DIGER adimlar farkli bir takim istiyorsa (ör. delik icin matkap, cep icin freze), o takim icin YENI bir ToolController olustur ve SADECE o operasyona ata. Ayni takimi kullanan ardisik adimlar icin tekrar ToolController olusturma — mevcut olani (job'un varsayilani ya da daha once olusturdugun) yeniden kullan.
+
+Yeni takim ekleme sablonu (magazindeki O8mm matkap icin, toolNumber HER YENI TAKIM ICIN +1 artmali):
+    drill_tool = Path.Tool()
+    drill_tool.Diameter = 8.0          # [TAKIM_MAGAZINI]'ndeki gercek cap
+    drill_tool.ToolType = 'Drill'      # freze icin 'EndMill', pah icin 'Chamfer', top freze icin 'BallEndMill'
+    drill_tool.Name = 'O8mm Matkap'    # [TAKIM_MAGAZINI]'ndeki tam isim
+    tc_drill = PathToolController.Create('TC_Drill', tool=drill_tool, toolNumber=2)
+    job.Tools.addObject(tc_drill)
+    tc_drill.HorizFeed = '200 mm/min'
+    tc_drill.VertFeed = '80 mm/min'
+    tc_drill.SpindleSpeed = 3000.0
+    doc.recompute()
+
+O takimla calisan operasyona atama (baska hicbir op icin ToolController set ETME — onlar Job'un varsayilanini kullanir):
+    drill = PathDrilling.Create('Drilling_D8')
+    drill.Base = [(base, face_list)]
+    drill.ToolController = tc_drill
+    doc.recompute()
+
+- toolNumber her farkli takim icin BENZERSIZ ve artan olmali (ilk/varsayilan takim zaten 1'dir — job.Tools.Group[0].ToolNumber degistirme, yeni takimlara 2, 3, 4... ver).
+- ToolType degerleri: 'EndMill', 'Drill', 'BallEndMill', 'ChamferMill', 'SlotCutter'. Bilmiyorsan 'EndMill' kullan (script'i durdurmaz).
+- Eger plan TEK bir takim adi kullaniyorsa (butun adimlar ayni tool), YENI ToolController OLUSTURMA — sadece varsayilan `tc`'yi ayarla, hicbir op icin op.ToolController set etme (eski, tek-takimli davranis).
+- Face mill icin: eger [TAKIM_MAGAZINI]'nda ayri bir face mill takimi varsa, yukaridaki sablonla ONA OZEL bir ToolController olustur (ToolType='EndMill', Diameter=face mill capi) ve face_op.ToolController = tc_face ata — capi gecici degistirip geri alma hilesine GEREK YOK.
 
 === MANDATORY FACE CLASSIFICATION (run this BEFORE creating any operation) ===
 
@@ -136,9 +167,7 @@ Now use these classified faces for each operation:
         pass
 - Set Side per [CAM_PARAMETRELERI] where applicable (Profile: Side = 'Outside'/'Inside').
 - Prefer Pocket and Profile over Adaptive/Surface (slow).
-- Do NOT set op.ToolController — ops inherit the Job's default.
-- Do NOT create new ToolControllers.
-- For Face Mill: temporarily set tc.Tool.Diameter to face mill size, create op, restore original.
+- Tool controllers: follow === MULTI-TOOL SUPPORT === above. Only create a new ToolController when the plan actually names a different tool than the job default; otherwise leave every op's ToolController unset (inherits the Job's default) exactly like before.
 - Call doc.recompute() after EACH operation creation.
 - If an op's toolpath is empty after recompute, set StartDepth/FinalDepth from bounding box.
 - For stepped parts: one op per level with StartDepth/FinalDepth.
