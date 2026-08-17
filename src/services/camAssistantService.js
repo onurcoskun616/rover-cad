@@ -205,6 +205,53 @@ export function validateCamCode(code) {
   return null;
 }
 
+// Max single-move Z descent (mm) allowed in generated Path operations — matches
+// the CNC Simülatör's SafetyInterceptor.maxPlunge. This walks the ACTUAL
+// FreeCAD-computed Path.Commands (trusted epilogue, not the model), so it
+// catches a violation regardless of what StepDown/depth the LLM used, and does
+// so at full resolution (before any downsampling for the preview JSON).
+// Helical G2/G3 dives are exempt, matching server/llm_system_prompt.txt.
+const MAX_PLUNGE_MM = 10;
+
+function plungeCheckPy() {
+  return [
+    "import json as _json",
+    "_plunge_violations = []",
+    "for _op in _grp:",
+    "    _p = getattr(_op, 'Path', None)",
+    "    if _p is None:",
+    "        continue",
+    "    _lbl = str(getattr(_op, 'Label', _op.Name))",
+    "    _pz = None",
+    "    for _c in _p.Commands:",
+    "        _pr = _c.Parameters",
+    "        if 'Z' not in _pr:",
+    "            continue",
+    "        _nz = float(_pr['Z'])",
+    "        _rapid = _c.Name in ('G0', 'G00')",
+    "        _arc = _c.Name in ('G2', 'G3', 'G02', 'G03')",
+    "        if _pz is not None and not _rapid and not _arc:",
+    "            _delta = _pz - _nz",
+    `            if _delta > ${MAX_PLUNGE_MM} + 1e-6:`,
+    "                _plunge_violations.append({'op': _lbl, 'fromZ': round(_pz, 3), 'toZ': round(_nz, 3), 'delta': round(_delta, 3)})",
+    "        _pz = _nz",
+    'print("PLUNGE_VIOLATIONS=" + _json.dumps(_plunge_violations))',
+  ].join("\n");
+}
+
+// Read the "PLUNGE_VIOLATIONS=[...]" line the trusted epilogue prints (see
+// plungeCheckPy above) out of the FreeCAD tool's combined stdout text.
+export function parsePlungeViolations(text) {
+  const match = String(text ?? "").match(/PLUNGE_VIOLATIONS=(\[.*\])/);
+  if (!match) return [];
+  try {
+    const parsed = JSON.parse(match[1]);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
 // Candidate FreeCAD post-processor module names for each controller choice, with
 // grbl as the final fallback. Used by the trusted post-processing epilogue.
 function postModuleCandidates(postName) {
@@ -283,6 +330,7 @@ function previewEpiloguePy(previewJsonPath, defaultFeed) {
     "    _json.dump({'toolpaths': _paths, 'estimatedMinutes': round(_total_min, 2), 'opMinutes': _op_minutes}, _f)",
     "print('EST_MINUTES=' + str(round(_total_min, 2)))",
     "print('PREVIEW_JSON=' + _out)",
+    plungeCheckPy(),
   ].join("\n");
 }
 
@@ -307,6 +355,7 @@ function postEpiloguePy(gcodePath, postName) {
     "if post_mod is None:",
     "    raise RuntimeError('post-processor modulu bulunamadi')",
     "_grp = list(job.Operations.Group)",
+    plungeCheckPy(),
     `_out = ${JSON.stringify(gcodePath)}`,
     "post_mod.export(_grp, _out, '--no-show-editor')",
     "print('GCODE_PATH=' + _out)",
@@ -432,6 +481,20 @@ async function generateAndRunPathCode({ abs, geometry, answers, plan, threadGuid
     }
 
     if (text.includes(successMarker)) {
+      const violations = parsePlungeViolations(text);
+      if (violations.length) {
+        const detail = violations
+          .map((v) => `${v.op}: Z${v.fromZ}->Z${v.toZ} (${v.delta}mm tek pasoda)`)
+          .join("; ");
+        console.warn(`Plunge limit ihlali (attempt ${attempt}): ${detail}`);
+        lastError = `Guvenlik siniri asildi (tek pasoda >10mm dalis): ${detail}`;
+        previousCode = code;
+        problem =
+          `Su operasyonlarda tek G1 hareketinde ${MAX_PLUNGE_MM}mm'den fazla Z dalisi var: ${detail}. ` +
+          `Her operasyonun StepDown/derinlik parametresini <=${MAX_PLUNGE_MM}mm olacak sekilde ayarla ` +
+          "(ornegin StepDown=5.0 ile 2 kat gec) ve kodu bastan yaz.";
+        continue;
+      }
       return { code, text };
     }
     lastError = `Beklenen cikti (${successMarker}) uretilmedi`;
@@ -495,15 +558,25 @@ export async function generateCamPreview(stepPath, answers, plan, context = "") 
     // not present; fine
   }
 
-  const { code, text } = await generateAndRunPathCode({
-    abs,
-    geometry,
-    answers,
-    plan,
-    threadGuidance: threadGuidanceFor(answers, context),
-    epiloguePy: previewEpiloguePy(previewPath, answers?.horizFeed),
-    successMarker: "PREVIEW_JSON=",
-  });
+  let code;
+  let text;
+  try {
+    ({ code, text } = await generateAndRunPathCode({
+      abs,
+      geometry,
+      answers,
+      plan,
+      threadGuidance: threadGuidanceFor(answers, context),
+      epiloguePy: previewEpiloguePy(previewPath, answers?.horizFeed),
+      successMarker: "PREVIEW_JSON=",
+    }));
+  } catch (err) {
+    // A failed attempt (e.g. a plunge-limit violation on the last retry) may
+    // have left a stale preview file on disk from an earlier attempt in the
+    // loop — don't leave unsafe/invalid toolpath data lying around.
+    try { fs.unlinkSync(previewPath); } catch { /* not present; fine */ }
+    throw err;
+  }
 
   if (!fs.existsSync(previewPath)) {
     throw new Error("Takim yolu onizlemesi uretilemedi");
@@ -546,21 +619,36 @@ export async function generateCamGcodeFromPlan(stepPath, answers, plan, context 
       throw new Error("G-code uretilemedi: " + (text || "bilinmeyen hata"));
     }
     if (!fs.existsSync(gcodePath)) throw new Error("G-code dosyasi olusmadi");
+    // Defense in depth: the preview step already checked this, but the stored
+    // code is re-run verbatim here, so re-verify before handing out the file.
+    const violations = parsePlungeViolations(text);
+    if (violations.length) {
+      try { fs.unlinkSync(gcodePath); } catch { /* not present; fine */ }
+      const detail = violations
+        .map((v) => `${v.op}: Z${v.fromZ}->Z${v.toZ} (${v.delta}mm tek pasoda)`)
+        .join("; ");
+      throw new Error(`Guvenlik siniri asildi (tek pasoda >10mm dalis): ${detail}. Onizlemeyi yeniden olusturun.`);
+    }
     applyControllerTransform(gcodePath, postName, abs, answers);
     return { gcodePath };
   }
 
   // No approved preview to reuse → generate the Path code and post-process it.
-  const geometry = await describeStepGeometry(stepPath);
-  await generateAndRunPathCode({
-    abs,
-    geometry,
-    answers,
-    plan,
-    threadGuidance: threadGuidanceFor(answers, context),
-    epiloguePy,
-    successMarker: "GCODE_PATH=",
-  });
+  try {
+    const geometry = await describeStepGeometry(stepPath);
+    await generateAndRunPathCode({
+      abs,
+      geometry,
+      answers,
+      plan,
+      threadGuidance: threadGuidanceFor(answers, context),
+      epiloguePy,
+      successMarker: "GCODE_PATH=",
+    });
+  } catch (err) {
+    try { fs.unlinkSync(gcodePath); } catch { /* not present; fine */ }
+    throw err;
+  }
   if (!fs.existsSync(gcodePath)) throw new Error("G-code dosyasi olusmadi");
   applyControllerTransform(gcodePath, postName, abs, answers);
   return { gcodePath };
