@@ -126,7 +126,15 @@ Now use these classified faces for each operation:
 
 === KEY RULES ===
 - Separate ROUGHING (stock-to-leave > 0) and FINISHING (stock-to-leave = 0) operations.
-- Set Direction/Side for climb/conventional per [CAM_PARAMETRELERI].
+- Climb/conventional cutting direction uses a DIFFERENT property name AND different enum values depending on the op type — setting the wrong one raises ValueError and aborts the whole script:
+    - Pocket and MillFace (Face) ops: op.CutMode = 'Climb' or 'Conventional'
+    - Profile ops: op.Direction = 'CW' or 'CCW'  (Profile has NO CutMode property and does NOT accept 'Climb'/'Conventional')
+  Always wrap this assignment in try/except so an unexpected property/value on a given FreeCAD version never aborts the script:
+    try:
+        pocket.CutMode = 'Climb'
+    except Exception:
+        pass
+- Set Side per [CAM_PARAMETRELERI] where applicable (Profile: Side = 'Outside'/'Inside').
 - Prefer Pocket and Profile over Adaptive/Surface (slow).
 - Do NOT set op.ToolController — ops inherit the Job's default.
 - Do NOT create new ToolControllers.
