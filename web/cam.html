@@ -52,7 +52,24 @@
 
           <div id="cam-plan-view" class="cam-plan" hidden>
             <h4>Önerilen İşleme Planı</h4>
-            <pre id="cam-plan-text"></pre>
+            <p id="cam-plan-summary" class="cam-plan-summary"></p>
+            <div class="cam-plan-table-wrap">
+              <table class="cam-plan-table">
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>Operasyon / Takım</th>
+                    <th>StepDown (mm)</th>
+                    <th>İlerleme (mm/dk)</th>
+                    <th>Başlangıç Z (mm)</th>
+                    <th>Bitiş Z (mm)</th>
+                  </tr>
+                </thead>
+                <tbody id="cam-plan-tbody"></tbody>
+              </table>
+            </div>
+            <p class="cam-plan-hint">Kritik parametreleri (StepDown, ilerleme, derinlik) G-code üretmeden önce gerekirse düzenleyebilirsiniz. StepDown güvenlik nedeniyle 10mm'i geçemez.</p>
+            <p id="cam-plan-notes" class="cam-plan-notes"></p>
             <div class="cam-plan-actions">
               <button id="cam-generate-btn" type="button">G-code Üret</button>
               <button id="cam-revise-btn" type="button" class="secondary">Planı Değiştir</button>
@@ -67,6 +84,10 @@
         <!-- G-code çıktı alanı -->
         <div id="gcode-output" class="cam-gcode-output" hidden>
           <h4 class="cam-gcode-output-title">G-code Hazır</h4>
+          <div id="cam-safety-summary" class="cam-safety-summary" hidden>
+            <h5>Güvenlik Kontrolleri</h5>
+            <ul id="cam-safety-list" class="cam-safety-list"></ul>
+          </div>
           <div id="gcode-preview" class="cam-gcode-preview"></div>
           <div class="cam-gcode-actions">
             <a id="gcode-link" class="cam-gcode-download" href="#" target="_blank" rel="noopener">

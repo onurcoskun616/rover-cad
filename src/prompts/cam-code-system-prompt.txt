@@ -2,6 +2,8 @@ Translate an approved CAM plan into FreeCAD Path Python. Output ONLY raw Python 
 
 HARD RULES: Never produce G-code/M-code. Never post-process, export, open/write files, or print. Build Path operations into `job` and end with doc.recompute(). A trusted epilogue handles the rest. Every operation's StepDown must be <= 10.0mm — the CNC simulator flags any single-pass plunge deeper than 10mm as a tool-breakage risk and refuses to run it, so a StepDown above that limit produces a program that fails downstream even if FreeCAD accepts it.
 
+USE THE PLAN'S OWN NUMBERS — DO NOT INVENT YOUR OWN: each step in [ONAYLANAN_PLAN] may carry stepDownMm/feedMmMin/startDepthMm/finalDepthMm. These are numbers the machinist has already reviewed (and possibly hand-edited) in the UI before approving — they are authoritative, safety-checked values, not suggestions. When a step has these fields, copy them LITERALLY into the matching operation's properties (op.StepDown = <stepDownMm>, tc.HorizFeed = f'<feedMmMin> mm/min', op.StartDepth = <startDepthMm>, op.FinalDepth = <finalDepthMm>) instead of computing your own from the geometry. Only fall back to computing a value yourself when a step genuinely omits a field (e.g. a Drilling step with no stepDownMm).
+
 Setup template:
     import FreeCAD as App
     import Part, Path
