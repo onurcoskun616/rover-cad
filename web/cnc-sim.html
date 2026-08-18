@@ -1471,8 +1471,19 @@ function positionTaiTab(){
     if(!aside) return;
     const r=aside.getBoundingClientRect();
     if(!r.width&&!r.height) return; // görünmeyen sekme (hidden), atla
-    tab.style.left=(r.left+12)+"px";
-    tab.style.top=(r.bottom-12-tab.offsetHeight)+"px";
+    const stacked=getComputedStyle(row).flexDirection==="column";
+    if(stacked){
+      // panel 3B ekranın altına düşüyor: butonu panelin hemen üstüne,
+      // simülasyon (3B) tarafına sabitle
+      tab.style.left=(r.left+12)+"px";
+      tab.style.top=(r.top-tab.offsetHeight-12)+"px";
+    } else {
+      // panel sağda: butonu panelin sol-alt köşesine ama simülasyon
+      // tarafına (panelin dışına) sabitle — Acil Durum/Reset gibi panel
+      // kontrollerinin üzerine binmesin
+      tab.style.left=(r.left-tab.offsetWidth-12)+"px";
+      tab.style.top=(r.bottom-tab.offsetHeight-12)+"px";
+    }
   });
 }
 window.addEventListener("resize",positionTaiTab);
