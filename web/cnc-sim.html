@@ -742,7 +742,7 @@ function initMill(){
   camera=new THREE.PerspectiveCamera(45,1,1,3000);
   controls=new OrbitControls(camera,renderer.domElement);
   controls.enableDamping=true;controls.target.set(0,20,0);
-  controls.minDistance=60;controls.maxDistance=1200;
+  applyStockZoomLimits();
   setView("iso");
 
   scene.add(new THREE.HemisphereLight(0xffffff,0x556070,0.85));
@@ -861,6 +861,7 @@ function resizeMillStock(newW, newD, newTop){
   mill.x=0; mill.y=TOP+30; mill.z=0;
   mill.running=false; mill.queue=[]; mill.moveActive=null; mill.removed=0;
   controls.target.set(0,TOP*0.3,0);
+  applyStockZoomLimits();
   setView("iso");
 }
 
@@ -904,7 +905,20 @@ function resizeLatheStock(newLen, newR){
 }
 
 function millResize(){if(!renderer)return;const wrap=$("mill-canvas-wrap"),w=wrap.clientWidth||1,h=wrap.clientHeight||1;renderer.setSize(w,h,false);camera.aspect=w/h;camera.updateProjectionMatrix();}
-function setView(v){const d=360;const map={iso:[d*.9,d*.7,d*.9],top:[0,d*1.2,1],front:[0,d*.4,d*1.1],right:[d*1.1,d*.4,0]};const p=map[v]||map.iso;camera.position.set(p[0],p[1],p[2]);controls&&controls.update();}
+// Kamera mesafesi/zoom sınırları stok boyutuyla orantılı — sabit değerler
+// (eskiden d=360, minDistance=60, maxDistance=1200) sadece varsayılan
+// 200x140x60mm stok için doğruydu; çok daha küçük/büyük bir stokla
+// (örn. 40x40x110mm) zoom min/max aralığı parçaya hiç uymuyor, "zoom
+// bozuk" gibi görünüyordu. Oranlar varsayılan stok boyutunda AYNI
+// sonucu verecek şekilde seçildi (200 -> d=360, min=60, max=1200).
+function stockCameraScale(){return Math.max(W||0,D||0,TOP||0,40);}
+function applyStockZoomLimits(){
+  if(!controls)return;
+  const s=stockCameraScale();
+  controls.minDistance=Math.max(20,s*0.3);
+  controls.maxDistance=Math.max(600,s*6);
+}
+function setView(v){const s=stockCameraScale();const d=Math.max(140,s*1.8);const map={iso:[d*.9,d*.7,d*.9],top:[0,d*1.2,1],front:[0,d*.4,d*1.1],right:[d*1.1,d*.4,0]};const p=map[v]||map.iso;camera.position.set(p[0],p[1],p[2]);controls&&controls.update();}
 
 /* --- freze fiziği --- */
 function colX(ix){return -W/2+ix*dx;} function colZ(iy){return -D/2+iy*dz;}
