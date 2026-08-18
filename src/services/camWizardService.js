@@ -276,6 +276,7 @@ function buildApplicableSteps({ geometry, threads, answers }) {
   const is2D = isTwoDGeometry(geometry);
   const repeats = repeatedFeatures(geometry);
   const opSuggestion = suggestOperations(geometry);
+  const isTorna = String(a.machineType || "").toLowerCase().includes("torna");
 
   const steps = [];
 
@@ -293,6 +294,9 @@ function buildApplicableSteps({ geometry, threads, answers }) {
   steps.push({
     id: "material",
     title: "2. Malzeme secimi",
+    intro: isTorna
+      ? "⚠️ CAM Assistant su anda torna (lathe) icin gercek takim yolu uretmiyor — FreeCAD'in torna operasyonlari resmi olarak deneysel bir eklentiye bagli, bu yuzden henuz eklenmedi. Torna parcalari icin CNC Simulator'deki torna modunu veya CNC sohbet asistanini kullanin; onlar dogru eksen kurallarina (X=cap, Z=boy) gore dogrudan G-code uretiyor. Buradan devam ederseniz sonuc yanlis/kullanilamaz olabilir."
+      : null,
     fields: [
       selectField("material", "Malzeme", MATERIAL_OPTIONS, pick(a, "material", MATERIAL_OPTIONS[0])),
     ],
