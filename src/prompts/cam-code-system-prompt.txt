@@ -47,11 +47,32 @@ KRITIK SIRALAMA KURALI (uyulmazsa script FreeCAD GUI'sinde SONSUZA KADAR askida 
     2. Ancak BUNDAN SONRA job.Proxy.addToolController(...) ile ek takim(lar) ekle.
     3. Sonraki her operasyonun ToolController'ini asagidaki gibi ACIKCA set et (hicbir opun ToolController'ini set etmeden birakma — otomatik devralma davranisina guvenme).
 
+YENI TAKIM NESNESI OLUSTURMA — Path.Tool() KULLANMA, ARTIK GECERSIZ (yeni FreeCAD surumlerinde Path.Tool bir sinif degil bir modul: Path.Tool() cagirmak "TypeError: 'module' object is not callable" ile scripti aninda patlatir). Bunun yerine, hem yeni hem eski FreeCAD surumlerinde calisan su yardimci fonksiyonu BIR KEZ tanimla (birden fazla yeni takim gerekiyorsa hepsi icin tekrar tekrar cagir):
+    def _rover_make_tool(tool_type, diameter, label):
+        _shape_ids = {'EndMill': 'endmill.fcstd', 'Drill': 'drill.fcstd',
+                      'BallEndMill': 'ballend.fcstd', 'ChamferMill': 'chamfer.fcstd',
+                      'SlotCutter': 'slittingsaw.fcstd'}
+        try:
+            from Path.Tool.toolbit import ToolBit
+            t = ToolBit.from_shape_id(_shape_ids.get(tool_type, 'endmill.fcstd')).attach_to_doc(doc=doc)
+            t.Diameter = float(diameter)
+            try:
+                t.Label = label
+            except Exception:
+                pass
+            return t
+        except Exception:
+            t = Path.Tool()
+            t.Diameter = float(diameter)
+            t.ToolType = tool_type
+            try:
+                t.Name = label
+            except Exception:
+                pass
+            return t
+
 Yeni takim ekleme sablonu (magazindeki, "slot T05" olan bir O8mm matkap icin — ilk operasyon zaten olusturulduktan SONRA calistir):
-    drill_tool = Path.Tool()
-    drill_tool.Diameter = 8.0          # [TAKIM_MAGAZINI]'ndeki gercek cap
-    drill_tool.ToolType = 'Drill'      # freze icin 'EndMill', pah icin 'Chamfer', top freze icin 'BallEndMill'
-    drill_tool.Name = 'O8mm Matkap'    # [TAKIM_MAGAZINI]'ndeki tam isim
+    drill_tool = _rover_make_tool('Drill', 8.0, 'O8mm Matkap')   # 8.0 = [TAKIM_MAGAZINI]'ndeki gercek cap, 'O8mm Matkap' = tam isim
     tc_drill = PathToolController.Create('TC_Drill', tool=drill_tool, toolNumber=5)   # [TAKIM_MAGAZINI]'ndeki "slot T05" -> 5
     job.Proxy.addToolController(tc_drill)   # NOT job.Tools.addObject — this is the real API
     tc_drill.HorizFeed = '200 mm/min'
