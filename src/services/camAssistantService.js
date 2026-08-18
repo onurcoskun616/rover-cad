@@ -223,6 +223,42 @@ export function isTornaMachine(answers) {
   return String(answers?.machineType || "").toLowerCase().includes("torna");
 }
 
+// Trusted PRELUDE (runs BEFORE the model's code, never after): FreeCAD's Path
+// workbench resolves an operation's ToolController automatically when the
+// model's code leaves it unset — but only if the job still has exactly ONE
+// ToolController at that point. Once the multi-tool magazine feature lets a
+// job carry several, that auto-resolution can no longer stay silent: inside
+// a live FreeCAD GUI session (not headless), it opens an interactive "Takım
+// Denetleyicisi Seçimi" dialog and blocks forever waiting for a human to
+// click it — which never happens here, so the whole CAM Assistant request
+// just hangs. The generator prompt now tells the model how to avoid ever
+// triggering this (create the first operation before adding extra
+// ToolControllers, then set every operation's ToolController explicitly),
+// but that's a prompt-compliance guarantee, not a code one. This neutralizes
+// the interactive picker unconditionally as a deterministic safety net: with
+// it disabled, an operation that still ends up ambiguous fails immediately
+// with a catchable Python error our retry loop can feed back to the model,
+// instead of hanging the FreeCAD session with no way to recover.
+function disableInteractiveToolControllerPy() {
+  return [
+    "try:",
+    "    from PathScripts import PathUtils as _PathUtils",
+    "    class _NoInteractiveToolController:",
+    "        def selectedToolController(self):",
+    "            return None",
+    "        def chooseToolController(self, controllers):",
+    "            raise RuntimeError(",
+    "                'Bir operasyon ToolController\\'i acikca atanmadan olusturuldu ve job\\'da '",
+    "                'birden fazla ToolController var, bu yuzden FreeCAD interaktif secim istedi. '",
+    "                'Cozum: job.Proxy.addToolController(...) ile ek takim eklemeden ONCE ilk '",
+    "                'operasyonu olustur, VE her operasyonun .ToolController ozelligini acikca ata.'",
+    "            )",
+    "    _PathUtils.UserInput = _NoInteractiveToolController()",
+    "except Exception:",
+    "    pass",
+  ].join("\n");
+}
+
 function plungeCheckPy(isTorna) {
   if (isTorna) {
     return 'print("PLUNGE_VIOLATIONS=[]")  # torna: Z ekseni eksenel ilerleme, plunge kontrolu uygulanmiyor';
@@ -551,7 +587,8 @@ async function generateAndRunPathCode({ abs, geometry, answers, plan, threadGuid
     let text = "";
     try {
       const result = await callFreecadTool(config.freecadMcp.toolName, {
-        [config.freecadMcp.toolParam]: sanitizeFreeCADCode(code) + "\n" + epiloguePy,
+        [config.freecadMcp.toolParam]:
+          disableInteractiveToolControllerPy() + "\n" + sanitizeFreeCADCode(code) + "\n" + epiloguePy,
       });
       text = extractResultText(result);
       if (result?.isError || text.startsWith("Failed to execute code")) {
@@ -717,7 +754,8 @@ export async function generateCamGcodeFromPlan(stepPath, answers, plan, context 
   if (stored) {
     // Reuse the approved toolpaths verbatim: run the stored code + post epilogue.
     const result = await callFreecadTool(config.freecadMcp.toolName, {
-      [config.freecadMcp.toolParam]: sanitizeFreeCADCode(stored) + "\n" + epiloguePy,
+      [config.freecadMcp.toolParam]:
+        disableInteractiveToolControllerPy() + "\n" + sanitizeFreeCADCode(stored) + "\n" + epiloguePy,
     });
     const text = extractResultText(result);
     if ((result?.isError || !text.includes("GCODE_PATH=")) && !fs.existsSync(gcodePath)) {
