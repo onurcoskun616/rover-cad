@@ -259,6 +259,25 @@ function disableInteractiveToolControllerPy() {
   ].join("\n");
 }
 
+// The FreeCAD MCP tool only ever reports "Failed to execute code: <type>:
+// <message>" on failure — no traceback, no line number. For a one-line
+// exception like "TypeError: 'module' object is not callable" that's nowhere
+// near enough to know WHICH line/call is wrong, for us or for the retry
+// loop's self-correction feedback. This runs the model's code through our
+// OWN exec() (as a string, so no reindentation of the model's code is
+// needed) inside a try/except that captures a full traceback.format_exc()
+// and folds it into the exception message — so whatever terse wrapper the
+// MCP tool applies on top, the message now contains the real traceback.
+function wrapWithTracebackPy(code) {
+  return [
+    "try:",
+    `    exec(${JSON.stringify(code)}, globals())`,
+    "except Exception:",
+    "    import traceback as _tb",
+    "    raise RuntimeError('MODEL KODU HATASI:\\n' + _tb.format_exc())",
+  ].join("\n");
+}
+
 function plungeCheckPy(isTorna) {
   if (isTorna) {
     return 'print("PLUNGE_VIOLATIONS=[]")  # torna: Z ekseni eksenel ilerleme, plunge kontrolu uygulanmiyor';
@@ -588,7 +607,8 @@ async function generateAndRunPathCode({ abs, geometry, answers, plan, threadGuid
     try {
       const result = await callFreecadTool(config.freecadMcp.toolName, {
         [config.freecadMcp.toolParam]:
-          disableInteractiveToolControllerPy() + "\n" + sanitizeFreeCADCode(code) + "\n" + epiloguePy,
+          disableInteractiveToolControllerPy() + "\n" +
+          wrapWithTracebackPy(sanitizeFreeCADCode(code)) + "\n" + epiloguePy,
       });
       text = extractResultText(result);
       if (result?.isError || text.startsWith("Failed to execute code")) {
@@ -755,7 +775,8 @@ export async function generateCamGcodeFromPlan(stepPath, answers, plan, context 
     // Reuse the approved toolpaths verbatim: run the stored code + post epilogue.
     const result = await callFreecadTool(config.freecadMcp.toolName, {
       [config.freecadMcp.toolParam]:
-        disableInteractiveToolControllerPy() + "\n" + sanitizeFreeCADCode(stored) + "\n" + epiloguePy,
+        disableInteractiveToolControllerPy() + "\n" +
+        wrapWithTracebackPy(sanitizeFreeCADCode(stored)) + "\n" + epiloguePy,
     });
     const text = extractResultText(result);
     if ((result?.isError || !text.includes("GCODE_PATH=")) && !fs.existsSync(gcodePath)) {
