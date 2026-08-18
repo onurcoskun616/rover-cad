@@ -213,7 +213,20 @@ export function validateCamCode(code) {
 // Helical G2/G3 dives are exempt, matching server/llm_system_prompt.txt.
 const MAX_PLUNGE_MM = 10;
 
-function plungeCheckPy() {
+// The plunge check assumes Z is height (mill convention: Z-descent = plunging
+// deeper into material). On a lathe, Z is axial travel along the workpiece
+// length, not depth — a normal longitudinal turning pass moves Z by tens of
+// mm in one command, which the mill-style check would misread as a dangerous
+// single-pass plunge. So it's skipped entirely for torna jobs; the collision
+// check (a pure 3D geometry check, axis-convention-independent) still runs.
+export function isTornaMachine(answers) {
+  return String(answers?.machineType || "").toLowerCase().includes("torna");
+}
+
+function plungeCheckPy(isTorna) {
+  if (isTorna) {
+    return 'print("PLUNGE_VIOLATIONS=[]")  # torna: Z ekseni eksenel ilerleme, plunge kontrolu uygulanmiyor';
+  }
   return [
     "import json as _json",
     "_plunge_violations = []",
@@ -350,7 +363,7 @@ function postModuleCandidates(postName) {
 // computed for each operation in `job`, estimate machining time from the move
 // lengths and feed rates, and write it all as JSON for the viewer + quote.
 // Rapids are flagged so the preview can distinguish them from cutting moves.
-function previewEpiloguePy(previewJsonPath, defaultFeed) {
+function previewEpiloguePy(previewJsonPath, defaultFeed, isTorna) {
   const feed = Number(defaultFeed) > 0 ? Number(defaultFeed) : 500;
   return [
     "",
@@ -403,14 +416,14 @@ function previewEpiloguePy(previewJsonPath, defaultFeed) {
     "    _json.dump({'toolpaths': _paths, 'estimatedMinutes': round(_total_min, 2), 'opMinutes': _op_minutes}, _f)",
     "print('EST_MINUTES=' + str(round(_total_min, 2)))",
     "print('PREVIEW_JSON=' + _out)",
-    plungeCheckPy(),
+    plungeCheckPy(isTorna),
     collisionCheckPy(),
   ].join("\n");
 }
 
 // Trusted epilogue (NOT model output): post-process the operations FreeCAD built
 // in `job` into G-code with the chosen controller's post-processor.
-function postEpiloguePy(gcodePath, postName) {
+function postEpiloguePy(gcodePath, postName, isTorna) {
   const candidates = postModuleCandidates(postName);
   return [
     "",
@@ -429,7 +442,7 @@ function postEpiloguePy(gcodePath, postName) {
     "if post_mod is None:",
     "    raise RuntimeError('post-processor modulu bulunamadi')",
     "_grp = list(job.Operations.Group)",
-    plungeCheckPy(),
+    plungeCheckPy(isTorna),
     collisionCheckPy(),
     `_out = ${JSON.stringify(gcodePath)}`,
     "post_mod.export(_grp, _out, '--no-show-editor')",
@@ -659,7 +672,7 @@ export async function generateCamPreview(stepPath, answers, plan, context = "") 
       answers,
       plan,
       threadGuidance: threadGuidanceFor(answers, context),
-      epiloguePy: previewEpiloguePy(previewPath, answers?.horizFeed),
+      epiloguePy: previewEpiloguePy(previewPath, answers?.horizFeed, isTornaMachine(answers)),
       successMarker: "PREVIEW_JSON=",
     }));
   } catch (err) {
@@ -698,7 +711,7 @@ export async function generateCamGcodeFromPlan(stepPath, answers, plan, context 
     // not present; fine
   }
   const postName = answers?.postProcessor;
-  const epiloguePy = postEpiloguePy(gcodePath, postName);
+  const epiloguePy = postEpiloguePy(gcodePath, postName, isTornaMachine(answers));
 
   const stored = reuseToken ? takePathCode(reuseToken) : null;
   if (stored) {
