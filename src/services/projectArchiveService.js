@@ -10,22 +10,6 @@ function sha256(value) {
   return createHash("sha256").update(value).digest("hex");
 }
 
-function sha256File(filePath) {
-  const hash = createHash("sha256");
-  const buffer = Buffer.allocUnsafe(1024 * 1024);
-  const fd = fs.openSync(filePath, "r");
-  try {
-    let bytesRead;
-    do {
-      bytesRead = fs.readSync(fd, buffer, 0, buffer.length, null);
-      if (bytesRead) hash.update(buffer.subarray(0, bytesRead));
-    } while (bytesRead);
-  } finally {
-    fs.closeSync(fd);
-  }
-  return hash.digest("hex");
-}
-
 function atomicWriteJson(filePath, value) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   const temporary = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
@@ -131,15 +115,20 @@ function nextVersionNumber(manifest) {
   return versions.reduce((max, item) => Math.max(max, Number(item.number) || 0), 0) + 1;
 }
 
-function fileRecord(sourcePath, destinationPath, projectDir) {
+async function sha256FileAsync(filePath) {
+  const buffer = await fs.promises.readFile(filePath);
+  return createHash("sha256").update(buffer).digest("hex");
+}
+
+async function fileRecordAsync(sourcePath, destinationPath, projectDir) {
   if (!sourcePath || !fs.existsSync(sourcePath)) return null;
-  fs.copyFileSync(sourcePath, destinationPath);
-  const stat = fs.statSync(destinationPath);
+  await fs.promises.copyFile(sourcePath, destinationPath);
+  const stat = await fs.promises.stat(destinationPath);
   return {
     name: path.basename(destinationPath),
     path: path.relative(projectDir, destinationPath).split(path.sep).join("/"),
     size: stat.size,
-    sha256: sha256File(destinationPath),
+    sha256: await sha256FileAsync(destinationPath),
   };
 }
 
@@ -147,8 +136,13 @@ function fileRecord(sourcePath, destinationPath, projectDir) {
  * Copy a successful build into private user/project/version storage. The
  * original output files remain untouched so current previews and downloads keep
  * working. Throws internally, but the fail-open wrapper below protects requests.
+ * Runs entirely off the request/job critical path (see archiveProjectBuildFailOpen)
+ * — copying and hashing a multi-MB STEP/STL file used to run synchronously right
+ * before a job was marked "done", which stalled that job's own response (and, for
+ * exclusive FreeCAD jobs, delayed the next queued job too) for as long as the copy
+ * + hash took.
  */
-export function archiveProjectBuild({
+async function archiveProjectBuild({
   userId,
   projectId: requestedProjectId,
   projectName,
@@ -173,20 +167,20 @@ export function archiveProjectBuild({
   fs.mkdirSync(versionDir, { recursive: true });
 
   const files = [];
-  const step = fileRecord(stepPath, path.join(versionDir, "model.step"), projectDir);
-  const stl = fileRecord(stlPath, path.join(versionDir, "preview.stl"), projectDir);
+  const step = await fileRecordAsync(stepPath, path.join(versionDir, "model.step"), projectDir);
+  const stl = await fileRecordAsync(stlPath, path.join(versionDir, "preview.stl"), projectDir);
   if (step) files.push({ ...step, type: "step" });
   if (stl) files.push({ ...stl, type: "stl" });
   if (typeof generatedCode === "string" && generatedCode.trim()) {
     const codePath = path.join(versionDir, "model.py");
-    fs.writeFileSync(codePath, generatedCode, "utf8");
-    const codeStat = fs.statSync(codePath);
+    await fs.promises.writeFile(codePath, generatedCode, "utf8");
+    const codeStat = await fs.promises.stat(codePath);
     files.push({
       name: "model.py",
       path: path.relative(projectDir, codePath).split(path.sep).join("/"),
       type: "source",
       size: codeStat.size,
-      sha256: sha256File(codePath),
+      sha256: await sha256FileAsync(codePath),
     });
   }
 
@@ -230,16 +224,33 @@ export function archiveProjectBuild({
   return { projectId, projectName: manifest.name, versionId, files };
 }
 
-// Archiving is an additive durability feature. Disk/index failures are logged
-// but never allowed to break a successful CAD result.
+// archiveProjectBuild's own async work (per project) must still happen in
+// submission order, or two builds for the same project racing in the
+// background could both read the manifest before either has written its
+// version, land on the same version number, and clobber each other. This
+// chain serializes just the archiving work — never the caller.
+let archiveChain = Promise.resolve();
+
+// Archiving is an additive durability feature: nothing in the live preview
+// (STL/STEP URLs, bbox, etc.) depends on it, only the private project
+// history does. So it must never sit between a successful FreeCAD build and
+// the response the browser/poller is waiting on — only projectId is needed
+// synchronously (so a follow-up revise/param-edit call can keep versioning
+// the same project); the actual file copy + hash + manifest write runs in
+// the background afterwards. Disk/index failures there are logged but never
+// allowed to break a successful CAD result.
 export function archiveProjectBuildFailOpen(options) {
   if (config.projectArchive?.enabled === false) return null;
-  try {
-    return archiveProjectBuild(options);
-  } catch (error) {
-    console.warn("[project-archive] proje kaydedilemedi:", error.message);
-    return null;
-  }
+  if (!options?.userId) return null;
+
+  const projectId = normalizeProjectId(options.projectId);
+  archiveChain = archiveChain.then(
+    () => archiveProjectBuild({ ...options, projectId }).catch((error) => {
+      console.warn("[project-archive] proje kaydedilemedi:", error.message);
+    }),
+    () => {}, // a previous archive failure must not stall later ones
+  );
+  return { projectId };
 }
 
 export function listUserProjects(userId, limit = 30) {
