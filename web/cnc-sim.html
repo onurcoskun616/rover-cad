@@ -33,15 +33,18 @@
 
   /* Topkapı AI Chat Bot */
   #tai-toggle{display:none;}
-  .tai-open-btn{display:flex;align-items:center;gap:10px;width:100%;padding:10px 12px;border-radius:8px;border:1px solid rgba(6,182,212,.3);
-    background:linear-gradient(135deg,#0c1a24 0%,#18181b 100%);cursor:pointer;transition:border-color .2s,box-shadow .2s;}
-  .tai-open-btn:hover{border-color:#06b6d4;box-shadow:0 0 12px rgba(6,182,212,.2);}
-  .tai-open-btn .tai-robot{width:36px;height:36px;border-radius:8px;background:#083344;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
-  .tai-open-btn .tai-info{flex:1;text-align:left;}
-  .tai-open-btn .tai-label{font-size:12px;font-weight:700;color:#67e8f9;letter-spacing:.02em;}
-  .tai-open-btn .tai-sub{font-size:9px;color:#a1a1aa;margin-top:1px;}
-  .tai-open-btn .tai-sub .tai-mode-tag{display:inline-block;background:#06b6d4;color:#fff;font-size:8px;font-weight:800;
-    padding:1px 6px;border-radius:8px;margin-left:4px;letter-spacing:.04em;vertical-align:middle;}
+  /* panel-dışı açılır/kapanır dock tab — 3B/2B ekranı ile sağ panelin
+     birleştiği kenara (seam) tutturulur, panel akışından bağımsız. Tam
+     konum (yan/üst) gerçek panel geometrisine göre JS'te hesaplanır
+     (positionTaiTab), çünkü panel yüksekliği/genişliği duyarlı ve sabit
+     bir px değeriyle güvenilir şekilde tutturulamaz. */
+  .tai-dock-tab{position:absolute;z-index:20;display:flex;align-items:center;justify-content:center;gap:6px;
+    cursor:pointer;border:1px solid #06b6d4;background:linear-gradient(135deg,#0c1a24 0%,#18181b 100%);
+    color:#67e8f9;font-size:11px;font-weight:700;letter-spacing:.02em;white-space:nowrap;
+    box-shadow:0 4px 14px rgba(0,0,0,.5);transition:box-shadow .2s,background .2s;}
+  .tai-dock-tab:hover{box-shadow:0 4px 20px rgba(6,182,212,.45);background:linear-gradient(135deg,#0e2430 0%,#1c1c1f 100%);}
+  .tai-dock-tab.tai-dock-side{flex-direction:column;padding:14px 6px;border-radius:8px 0 0 8px;writing-mode:vertical-rl;}
+  .tai-dock-tab.tai-dock-top{padding:6px 16px;border-radius:8px 8px 0 0;writing-mode:horizontal-tb;}
   #tai-panel{position:fixed;right:20px;bottom:20px;z-index:10001;width:360px;max-height:520px;
     border-radius:14px;background:#18181b;border:1px solid #3f3f46;box-shadow:0 12px 40px rgba(0,0,0,.6);
     display:none;flex-direction:column;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;}
@@ -100,7 +103,7 @@
     <!-- ==================================================================== -->
     <!-- ============================  FREZE (3B)  ========================== -->
     <!-- ==================================================================== -->
-    <div id="view-mill" class="flex h-full w-full flex-col gap-2 lg:flex-row">
+    <div id="view-mill" class="relative flex h-full w-full flex-col gap-2 lg:flex-row">
       <section class="relative flex-1 overflow-hidden rounded-md border border-zinc-700 bg-black">
         <div id="mill-canvas-wrap" class="absolute inset-0"></div>
 
@@ -138,6 +141,9 @@
           <button id="m-wire"       title="Tel kafes" class="tb-icn h-9 w-9 text-sm">◇</button>
         </div>
       </section>
+
+      <!-- Topkapı AI — panel dışı açılır/kapanır dock tab (3B ekran ile panelin birleştiği kenarda) -->
+      <button id="tai-tab-mill" class="tai-dock-tab" type="button" title="Topkapı AI Asistanı">🤖 Topkapı AI</button>
 
       <!-- FREZE PANELİ -->
       <aside class="w-full shrink-0 overflow-y-auto lg:w-[380px]">
@@ -246,12 +252,6 @@
             <div id="mmdi" class="grid grid-cols-6 gap-1"></div>
           </div>
 
-          <!-- Topkapı AI chatbot -->
-          <button class="tai-open-btn" id="mtai-btn" type="button">
-            <div class="tai-robot"><svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#67e8f9" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="9" width="18" height="12" rx="3"/><circle cx="9" cy="15" r="1.5" fill="#67e8f9"/><circle cx="15" cy="15" r="1.5" fill="#67e8f9"/><line x1="9" y1="18" x2="15" y2="18"/><line x1="12" y1="3" x2="12" y2="9"/><circle cx="12" cy="3" r="2"/><line x1="1" y1="13" x2="3" y2="13"/><line x1="21" y1="13" x2="23" y2="13"/></svg></div>
-            <div class="tai-info"><div class="tai-label">Topkapi AI</div><div class="tai-sub">CNC Asistan <span class="tai-mode-tag" id="mtai-mode">FREZE</span></div></div>
-          </button>
-
           <!-- malzeme seçimi -->
           <div class="rounded border border-zinc-600 bg-zinc-900/60 p-2">
             <div class="mb-1 text-[9px] font-bold uppercase text-cyan-300">Malzeme / Material</div>
@@ -286,7 +286,7 @@
     <!-- ==================================================================== -->
     <!-- ============================  TORNA (2B)  ========================== -->
     <!-- ==================================================================== -->
-    <div id="view-lathe" class="hidden h-full w-full flex-col gap-2 lg:flex-row">
+    <div id="view-lathe" class="relative hidden h-full w-full flex-col gap-2 lg:flex-row">
       <section class="relative flex-1 overflow-hidden rounded-md border border-zinc-700 bg-black">
         <div class="pointer-events-none absolute left-2 top-2 z-10 rounded bg-black/40 px-2 py-1 font-mono text-[11px] text-cyan-300">Topkapı AI · FANUC 0i-T · Turning</div>
         <div class="absolute right-2 top-2 z-10 flex gap-2">
@@ -299,6 +299,10 @@
         <canvas id="lathe-canvas" class="block h-full w-full"></canvas>
         <div id="hud" class="pointer-events-none absolute bottom-2 left-2 z-10 rounded bg-black/50 px-2 py-1 font-mono text-[11px] text-emerald-300"></div>
       </section>
+
+      <!-- Topkapı AI — panel dışı açılır/kapanır dock tab (2B ekran ile panelin birleştiği kenarda) -->
+      <button id="tai-tab-lathe" class="tai-dock-tab" type="button" title="Topkapı AI Asistanı">🤖 Topkapı AI</button>
+
       <aside class="w-full shrink-0 overflow-y-auto lg:w-[380px]">
         <div class="flex h-full flex-col gap-1.5 rounded-md bg-zinc-800 p-2 text-zinc-200">
           <div class="rounded-sm border-4 border-zinc-500 bg-zinc-900 p-1.5">
@@ -383,12 +387,6 @@
             <div class="text-[9px] text-zinc-400 leading-tight text-center">M8 Flood<br>M7 Mist<br>M9 Off</div>
           </div>
           <div class="rounded border border-zinc-600 bg-zinc-700/40 p-2"><div id="mdi-rows" class="grid grid-cols-6 gap-1"></div><div id="mdi-fn" class="mt-1 grid grid-cols-6 gap-1"></div></div>
-
-          <!-- Topkapı AI chatbot -->
-          <button class="tai-open-btn" id="ltai-btn" type="button">
-            <div class="tai-robot"><svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#67e8f9" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="9" width="18" height="12" rx="3"/><circle cx="9" cy="15" r="1.5" fill="#67e8f9"/><circle cx="15" cy="15" r="1.5" fill="#67e8f9"/><line x1="9" y1="18" x2="15" y2="18"/><line x1="12" y1="3" x2="12" y2="9"/><circle cx="12" cy="3" r="2"/><line x1="1" y1="13" x2="3" y2="13"/><line x1="21" y1="13" x2="23" y2="13"/></svg></div>
-            <div class="tai-info"><div class="tai-label">Topkapi AI</div><div class="tai-sub">CNC Asistan <span class="tai-mode-tag" id="ltai-mode">TORNA</span></div></div>
-          </button>
 
           <!-- malzeme seçimi -->
           <div class="rounded border border-zinc-600 bg-zinc-900/60 p-2">
@@ -1435,8 +1433,7 @@ function setTab(t){
   if(t==="mill"){millResize();} else {latheResize();}
   const modeLabel=t==="mill"?"FREZE":"TORNA";
   const mb=$("tai-mode-badge");if(mb)mb.textContent=modeLabel;
-  const mm=$("mtai-mode");if(mm)mm.textContent=modeLabel;
-  const lm=$("ltai-mode");if(lm)lm.textContent=modeLabel;
+  positionTaiTab();
 }
 $("tab-mill").onclick=()=>setTab("mill");
 $("tab-lathe").onclick=()=>setTab("lathe");
@@ -1466,9 +1463,32 @@ let taiLastOp=null;
 
 function taiOpen(){taiPanel.classList.toggle("open");if(taiPanel.classList.contains("open")){taiInput.focus();taiRenderChips();}}
 taiToggle.onclick=taiOpen;
-$("mtai-btn").onclick=taiOpen;
-$("ltai-btn").onclick=taiOpen;
+$("tai-tab-mill").onclick=taiOpen;
+$("tai-tab-lathe").onclick=taiOpen;
 taiClose.onclick=()=>taiPanel.classList.remove("open");
+
+function positionTaiTab(){
+  [["tai-tab-mill","view-mill"],["tai-tab-lathe","view-lathe"]].forEach(([tabId,rowId])=>{
+    const tab=$(tabId), row=$(rowId);
+    if(!tab||!row) return;
+    const aside=row.querySelector("aside");
+    if(!aside) return;
+    const stacked=getComputedStyle(row).flexDirection==="column";
+    tab.classList.toggle("tai-dock-side",!stacked);
+    tab.classList.toggle("tai-dock-top",stacked);
+    if(stacked){
+      tab.style.left="50%";tab.style.right="";tab.style.bottom="";
+      tab.style.top=Math.max(0,aside.offsetTop-tab.offsetHeight+6)+"px";
+      tab.style.transform="translateX(-50%)";
+    } else {
+      tab.style.top="50%";tab.style.right="";tab.style.bottom="";
+      tab.style.left=Math.max(0,aside.offsetLeft-tab.offsetWidth+8)+"px";
+      tab.style.transform="translateY(-50%)";
+    }
+  });
+}
+window.addEventListener("resize",positionTaiTab);
+positionTaiTab();
 
 function taiMsg(text,who){const d=document.createElement("div");d.className="tai-msg "+(who==="bot"?"tai-msg-bot":"tai-msg-user");d.innerHTML=text;taiMessages.appendChild(d);taiMessages.scrollTop=taiMessages.scrollHeight;return d;}
 const A=s=>`<span class="tai-msg-action">${s}</span>`;
