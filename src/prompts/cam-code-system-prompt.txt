@@ -144,10 +144,12 @@ Now use these classified faces for each operation:
 
 === OPERATION PATTERNS ===
 
-1. FACE (MillFace):
+1. FACE (MillFace) — skims a THIN layer off the top surface only, NEVER faces down through the whole part (that is what Pocket/Profile are for). Setting FinalDepth anywhere near the part's overall bottom (e.g. bb.ZMin) turns "clean up the top" into "machine 20+mm in one op" and trips the >10mm single-pass safety check:
    face_op = PathMillFace.Create('FaceMill')
    face_op.Base = [(base, top_faces)]   # all top planar faces
    face_op.StepDown = 1.0
+   face_op.StartDepth = float(bb.ZMax)
+   face_op.FinalDepth = float(bb.ZMax) - 1.0   # shallow facing allowance (0.5-2mm), NOT bb.ZMin
    doc.recompute()
 
 2. POCKET (material removal around a profile):
@@ -187,7 +189,7 @@ Now use these classified faces for each operation:
 - Array/list indexing must use int: job.Tools.Group[0] NOT job.Tools.Group[0.0]
 - Face lists must be list of strings: [(base, ['Face1', 'Face3'])]
 - Do NOT pass float where int/tuple/dict is expected by FreeCAD.
-- For StartDepth/FinalDepth use float: op.StartDepth = float(bb.ZMax), op.FinalDepth = float(bb.ZMin)
+- For StartDepth/FinalDepth use float — but the VALUES depend on the operation's actual purpose, never copy bb.ZMax/bb.ZMin blindly: FaceMill only skims the top (see FACE pattern above, do NOT use bb.ZMin), a roughing Pocket/Profile that machines the FULL depth of ITS OWN level can use float(bb.ZMax)/float(bb.ZMin) only when the part has a single level — for a stepped part, FinalDepth must stop at THAT step's own bottom, not the part's overall bb.ZMin (see "stepped parts" below).
 - PathJob.Create takes (str, list, None): PathJob.Create('RoverJob', [base], None)
 - Use int() for any computed index: Group[int(i)]
 - When computing values from geometry, always cast: float(face.BoundBox.ZMax), int(count)
@@ -206,7 +208,7 @@ Now use these classified faces for each operation:
 - Prefer Pocket and Profile over Adaptive/Surface (slow).
 - Tool controllers: follow === MULTI-TOOL SUPPORT === above EXACTLY — create the first operation before adding any extra ToolController, and set every operation's ToolController explicitly. Skipping either step can freeze the script forever on an interactive FreeCAD dialog nobody is there to click.
 - Call doc.recompute() after EACH operation creation.
-- If an op's toolpath is empty after recompute, set StartDepth/FinalDepth from bounding box.
-- For stepped parts: one op per level with StartDepth/FinalDepth.
+- If an op's toolpath is empty after recompute, set StartDepth/FinalDepth from the RELEVANT bounding box for that op's own purpose (its own level for a stepped part, a shallow skim for FaceMill) — never blindly from the part's overall bb.ZMax/bb.ZMin.
+- For stepped parts (multiple diameters/levels at different Z, e.g. a shaft with two cylinder radii): create ONE SEPARATE Profile/Pocket op PER LEVEL, each with StartDepth/FinalDepth confined to THAT level's own Z range (from its top down to where the next step begins — never down to the part's overall bottom). Even if [ONAYLANAN_PLAN] describes it as a single combined operation ("tek kontur operasyonunda", "tek pasoda" or similar wording) — a real Path Profile op cannot safely follow a Z-varying compound radius as one op, so split it into per-level ops regardless of how the plan worded it. Each level's own StepDown still applies within that op (<=10.0mm per pass), so a level's total depth still needs multiple passes if it's deeper than 10mm.
 - For threads ([DIS_ISLEME]): drill at EXACT pilot diameters.
 - Use the EXACT given STEP path.
