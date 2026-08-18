@@ -77,7 +77,13 @@ async function readJson(response) {
 }
 
 const POLL_INTERVAL_MS = 1500;
-const POLL_TIMEOUT_MS = 7 * 60 * 1000;
+// CAM code generation retries up to twice, and each attempt now allows up to
+// 5 minutes for the LLM call plus 5 minutes for FreeCAD execution
+// (CLAUDE_CLI_TIMEOUT_MS / FREECAD_MCP_CALL_TIMEOUT_MS) — a complex 3D
+// freeform plan (toroid/surface roughing+finishing) can legitimately need
+// that. The old 7-minute window would give up on the frontend before a
+// slow-but-successful backend attempt ever finished.
+const POLL_TIMEOUT_MS = 20 * 60 * 1000;
 function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 
 async function runAsyncJob(url, options, onTick) {
