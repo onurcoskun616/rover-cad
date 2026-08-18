@@ -33,18 +33,14 @@
 
   /* Topkapı AI Chat Bot */
   #tai-toggle{display:none;}
-  /* panel-dışı açılır/kapanır dock tab — 3B/2B ekranı ile sağ panelin
-     birleştiği kenara (seam) tutturulur, panel akışından bağımsız. Tam
-     konum (yan/üst) gerçek panel geometrisine göre JS'te hesaplanır
-     (positionTaiTab), çünkü panel yüksekliği/genişliği duyarlı ve sabit
-     bir px değeriyle güvenilir şekilde tutturulamaz. */
-  .tai-dock-tab{position:absolute;z-index:20;display:flex;align-items:center;justify-content:center;gap:6px;
-    cursor:pointer;border:1px solid #06b6d4;background:linear-gradient(135deg,#0c1a24 0%,#18181b 100%);
-    color:#67e8f9;font-size:11px;font-weight:700;letter-spacing:.02em;white-space:nowrap;
-    box-shadow:0 4px 14px rgba(0,0,0,.5);transition:box-shadow .2s,background .2s;}
-  .tai-dock-tab:hover{box-shadow:0 4px 20px rgba(6,182,212,.45);background:linear-gradient(135deg,#0e2430 0%,#1c1c1f 100%);}
-  .tai-dock-tab.tai-dock-side{flex-direction:column;padding:14px 6px;border-radius:8px 0 0 8px;writing-mode:vertical-rl;}
-  .tai-dock-tab.tai-dock-top{padding:6px 16px;border-radius:8px 8px 0 0;writing-mode:horizontal-tb;}
+  /* klasik sohbet asistanı stili yuvarlak buton — panelin sol alt köşesine
+     sabitlenir (position:fixed), gerçek panel konumuna göre JS'te
+     hesaplanır (positionTaiTab), panel akışından ve kaydırmasından bağımsız */
+  .tai-dock-tab{position:fixed;z-index:20;display:flex;align-items:center;justify-content:center;
+    width:52px;height:52px;border-radius:50%;cursor:pointer;border:1px solid #06b6d4;
+    background:linear-gradient(135deg,#0c1a24 0%,#18181b 100%);color:#67e8f9;font-size:24px;
+    box-shadow:0 4px 14px rgba(0,0,0,.5);transition:box-shadow .2s,background .2s,transform .15s;}
+  .tai-dock-tab:hover{box-shadow:0 4px 20px rgba(6,182,212,.45);background:linear-gradient(135deg,#0e2430 0%,#1c1c1f 100%);transform:scale(1.06);}
   #tai-panel{position:fixed;right:20px;bottom:20px;z-index:10001;width:360px;max-height:520px;
     border-radius:14px;background:#18181b;border:1px solid #3f3f46;box-shadow:0 12px 40px rgba(0,0,0,.6);
     display:none;flex-direction:column;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;}
@@ -103,7 +99,7 @@
     <!-- ==================================================================== -->
     <!-- ============================  FREZE (3B)  ========================== -->
     <!-- ==================================================================== -->
-    <div id="view-mill" class="relative flex h-full w-full flex-col gap-2 lg:flex-row">
+    <div id="view-mill" class="flex h-full w-full flex-col gap-2 lg:flex-row">
       <section class="relative flex-1 overflow-hidden rounded-md border border-zinc-700 bg-black">
         <div id="mill-canvas-wrap" class="absolute inset-0"></div>
 
@@ -142,8 +138,8 @@
         </div>
       </section>
 
-      <!-- Topkapı AI — panel dışı açılır/kapanır dock tab (3B ekran ile panelin birleştiği kenarda) -->
-      <button id="tai-tab-mill" class="tai-dock-tab" type="button" title="Topkapı AI Asistanı">🤖 Topkapı AI</button>
+      <!-- Topkapı AI — panelin sol alt köşesine sabitlenmiş klasik sohbet asistanı butonu -->
+      <button id="tai-tab-mill" class="tai-dock-tab" type="button" title="Topkapı AI Asistanı">🤖</button>
 
       <!-- FREZE PANELİ -->
       <aside class="w-full shrink-0 overflow-y-auto lg:w-[380px]">
@@ -286,7 +282,7 @@
     <!-- ==================================================================== -->
     <!-- ============================  TORNA (2B)  ========================== -->
     <!-- ==================================================================== -->
-    <div id="view-lathe" class="relative hidden h-full w-full flex-col gap-2 lg:flex-row">
+    <div id="view-lathe" class="hidden h-full w-full flex-col gap-2 lg:flex-row">
       <section class="relative flex-1 overflow-hidden rounded-md border border-zinc-700 bg-black">
         <div class="pointer-events-none absolute left-2 top-2 z-10 rounded bg-black/40 px-2 py-1 font-mono text-[11px] text-cyan-300">Topkapı AI · FANUC 0i-T · Turning</div>
         <div class="absolute right-2 top-2 z-10 flex gap-2">
@@ -300,8 +296,8 @@
         <div id="hud" class="pointer-events-none absolute bottom-2 left-2 z-10 rounded bg-black/50 px-2 py-1 font-mono text-[11px] text-emerald-300"></div>
       </section>
 
-      <!-- Topkapı AI — panel dışı açılır/kapanır dock tab (2B ekran ile panelin birleştiği kenarda) -->
-      <button id="tai-tab-lathe" class="tai-dock-tab" type="button" title="Topkapı AI Asistanı">🤖 Topkapı AI</button>
+      <!-- Topkapı AI — panelin sol alt köşesine sabitlenmiş klasik sohbet asistanı butonu -->
+      <button id="tai-tab-lathe" class="tai-dock-tab" type="button" title="Topkapı AI Asistanı">🤖</button>
 
       <aside class="w-full shrink-0 overflow-y-auto lg:w-[380px]">
         <div class="flex h-full flex-col gap-1.5 rounded-md bg-zinc-800 p-2 text-zinc-200">
@@ -1473,18 +1469,10 @@ function positionTaiTab(){
     if(!tab||!row) return;
     const aside=row.querySelector("aside");
     if(!aside) return;
-    const stacked=getComputedStyle(row).flexDirection==="column";
-    tab.classList.toggle("tai-dock-side",!stacked);
-    tab.classList.toggle("tai-dock-top",stacked);
-    if(stacked){
-      tab.style.left="50%";tab.style.right="";tab.style.bottom="";
-      tab.style.top=Math.max(0,aside.offsetTop-tab.offsetHeight+6)+"px";
-      tab.style.transform="translateX(-50%)";
-    } else {
-      tab.style.top="50%";tab.style.right="";tab.style.bottom="";
-      tab.style.left=Math.max(0,aside.offsetLeft-tab.offsetWidth+8)+"px";
-      tab.style.transform="translateY(-50%)";
-    }
+    const r=aside.getBoundingClientRect();
+    if(!r.width&&!r.height) return; // görünmeyen sekme (hidden), atla
+    tab.style.left=(r.left+12)+"px";
+    tab.style.top=(r.bottom-12-tab.offsetHeight)+"px";
   });
 }
 window.addEventListener("resize",positionTaiTab);
