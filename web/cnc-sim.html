@@ -2390,12 +2390,25 @@ function sheetCostInputs(){
     profitPct:parseFloat($("sheet-profit")?.value)||0,
   };
 }
-function renderSheet(){
+function updateSheetCost(){
   const summary=lastProgramSummary;
   const type=summary?summary.type:active;
   const minutes=estimateCycleMinutes(summary);
   const volumeCm3=stockVolumeCm3(type);
   const cost=computeSimCost(minutes,volumeCm3,sheetCostInputs());
+  $("sheet-cost-mat").textContent=cost.matCost.toFixed(2)+" TL";
+  $("sheet-cost-machine").textContent=cost.machineCost.toFixed(2)+" TL";
+  $("sheet-cost-profit").textContent=cost.profit.toFixed(2)+" TL";
+  $("sheet-cost-total").textContent=cost.total.toFixed(2)+" TL";
+}
+function renderSheet(){
+  // önceki girilen maliyet değerlerini koru — modal her açıldığında sıfırlanmasın
+  const inputs=sheetCostInputs();
+  const summary=lastProgramSummary;
+  const type=summary?summary.type:active;
+  const minutes=estimateCycleMinutes(summary);
+  const volumeCm3=stockVolumeCm3(type);
+  const cost=computeSimCost(minutes,volumeCm3,inputs);
   const md=MAT_DB[curMat]||MAT_DB.steel;
   const stockLine=type==="mill"
     ? `${Math.round(W)} × ${Math.round(D)} × ${Math.round(TOP)} mm`
@@ -2430,30 +2443,26 @@ function renderSheet(){
     <div class="mt-3 print:hidden">
       <div class="mb-1 font-bold text-cyan-300">Maliyet Tahmini</div>
       <div class="grid grid-cols-3 gap-2">
-        <label class="flex flex-col gap-0.5">Malzeme (TL/cm³)<input id="sheet-mat-price" type="number" min="0" step="0.1" class="rounded border border-zinc-700 bg-zinc-800 px-2 py-1"></label>
-        <label class="flex flex-col gap-0.5">Makine (TL/saat)<input id="sheet-hourly" type="number" min="0" step="10" class="rounded border border-zinc-700 bg-zinc-800 px-2 py-1"></label>
-        <label class="flex flex-col gap-0.5">Kâr marjı (%)<input id="sheet-profit" type="number" min="0" step="1" class="rounded border border-zinc-700 bg-zinc-800 px-2 py-1"></label>
+        <label class="flex flex-col gap-0.5">Malzeme (TL/cm³)<input id="sheet-mat-price" type="number" min="0" step="0.1" value="${inputs.matPrice||""}" class="rounded border border-zinc-700 bg-zinc-800 px-2 py-1"></label>
+        <label class="flex flex-col gap-0.5">Makine (TL/saat)<input id="sheet-hourly" type="number" min="0" step="10" value="${inputs.hourlyRate||""}" class="rounded border border-zinc-700 bg-zinc-800 px-2 py-1"></label>
+        <label class="flex flex-col gap-0.5">Kâr marjı (%)<input id="sheet-profit" type="number" min="0" step="1" value="${inputs.profitPct||""}" class="rounded border border-zinc-700 bg-zinc-800 px-2 py-1"></label>
       </div>
     </div>
     <div class="mt-3 rounded border border-zinc-700 p-2 print:border-black">
-      <div class="flex justify-between"><span>Malzeme maliyeti</span><span>${cost.matCost.toFixed(2)} TL</span></div>
-      <div class="flex justify-between"><span>Makine süresi (${minutes.toFixed(1)} dk)</span><span>${cost.machineCost.toFixed(2)} TL</span></div>
-      <div class="flex justify-between print:hidden"><span>Kâr marjı</span><span>${cost.profit.toFixed(2)} TL</span></div>
-      <div class="mt-1 flex justify-between border-t border-zinc-600 pt-1 text-sm font-bold print:border-black"><span>TOPLAM</span><span>${cost.total.toFixed(2)} TL</span></div>
+      <div class="flex justify-between"><span>Malzeme maliyeti</span><span id="sheet-cost-mat">${cost.matCost.toFixed(2)} TL</span></div>
+      <div class="flex justify-between"><span>Makine süresi (${minutes.toFixed(1)} dk)</span><span id="sheet-cost-machine">${cost.machineCost.toFixed(2)} TL</span></div>
+      <div class="flex justify-between print:hidden"><span>Kâr marjı</span><span id="sheet-cost-profit">${cost.profit.toFixed(2)} TL</span></div>
+      <div class="mt-1 flex justify-between border-t border-zinc-600 pt-1 text-sm font-bold print:border-black"><span>TOPLAM</span><span id="sheet-cost-total">${cost.total.toFixed(2)} TL</span></div>
     </div>
     <div class="mt-3 text-[9px] text-zinc-500 print:text-[10px]">Bu föy simülatörün tahmini hesaplarına dayanır; bağlayıcı bir teklif değildir. Gerçek çevrim süresi ve maliyet malzeme/takım/tezgah farklarına göre değişebilir.</div>
   `;
-  $("sheet-mat-price").oninput=renderSheet;
-  $("sheet-hourly").oninput=renderSheet;
-  $("sheet-profit").oninput=renderSheet;
+  $("sheet-mat-price").oninput=updateSheetCost;
+  $("sheet-hourly").oninput=updateSheetCost;
+  $("sheet-profit").oninput=updateSheetCost;
 }
 function openSheet(){
-  const prev=sheetCostInputs();
   $("sheet-overlay").classList.remove("hidden");
   renderSheet();
-  if(prev.matPrice)$("sheet-mat-price").value=prev.matPrice;
-  if(prev.hourlyRate)$("sheet-hourly").value=prev.hourlyRate;
-  if(prev.profitPct)$("sheet-profit").value=prev.profitPct;
 }
 $("sheet-open-mill").onclick=openSheet;
 $("sheet-open-lathe").onclick=openSheet;
