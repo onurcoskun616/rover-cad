@@ -540,7 +540,7 @@ class LatheEngine{
   update(dt){const tr=this.s.spindleOn?this.s.spindleRpm:0;this.s.actualRpm+=(tr-this.s.actualRpm)*Math.min(1,dt*3);if(this.s.actualRpm<1)this.s.actualRpm=tr===0?0:this.s.actualRpm;this.angle+=(this.s.actualRpm/60)*dt*Math.PI*2;
     if(this.s.emergency)return;const feedRate=(this.s.feed/60)*this.s.feedOverride,rapid=220;
     if(this.s.mode==="MANUAL"&&!this.moveActive&&(this.jogX||this.jogZ)){const rate=this.s.spindleOn?feedRate:rapid*.35;this.s.x=clamp(this.s.x+this.jogX*rate*dt,0,STOCK_R+12);this.s.z=clamp(this.s.z+this.jogZ*rate*dt,-20,STOCK_LEN);this.s.targetX=this.s.x;this.s.targetZ=this.s.z;}
-    if(this.moveActive){const m=this.moveActive,rate=m.type==="feed"?feedRate:rapid,dx=m.x-this.s.x,dz=m.z-this.s.z,dist=Math.hypot(dx,dz),step=rate*dt;
+    if(this.moveActive){const m=this.moveActive,rate=m.type==="feed"?(m.threadFeed?(m.threadFeed/60)*this.s.feedOverride:feedRate):rapid,dx=m.x-this.s.x,dz=m.z-this.s.z,dist=Math.hypot(dx,dz),step=rate*dt;
       if(dist<=step||dist<1e-4){this.s.x=m.x;this.s.z=m.z;this.moveActive=this.queue.shift()||null;if(!this.moveActive&&this.s.running)this.s.running=false;}else{this.s.x+=(dx/dist)*step;this.s.z+=(dz/dist)*step;}}
     const cutting=this.s.actualRpm>30&&this.s.z>=-1&&this.s.z<=STOCK_LEN&&this.s.x<STOCK_R+.5;
     if(cutting){const agg=Math.max(.4,(this.s.actualRpm/1200)*1.2);if(this.cutAt(this.s.z,this.s.x,agg))this.spawnChips(this.s.z,this.s.x,3);}
@@ -1092,6 +1092,47 @@ function parseGcode(text, type){
         q.push({type:lastG===0?"rapid":"feed",x:nx,z:nz});
         cur={x:nx,z:nz};
       }
+    } else if(type==="lathe"&&lastG===33){
+      // Thread cutting (single synchronized pass, as written — real G33
+      // programs already have their own approach/retract rapids around it).
+      // Approximate simulation: motion/feed/pass-count are simulated
+      // correctly, but the stock is a per-Z radius profile (no per-angle
+      // data), so this cannot carve a true helical groove — it cuts like a
+      // normal turning pass at the commanded depth.
+      const nx="X" in p?p.X/2:cur.x, nz="Z" in p?p.Z:cur.z;
+      const pitch=p.K||p.F||1.5;
+      const threadFeed=Math.max(20,pitch*(lathe.s.spindleRpm||500));
+      bounds.xMin=Math.min(bounds.xMin,nx);bounds.xMax=Math.max(bounds.xMax,nx);bounds.zMin=Math.min(bounds.zMin,nz);bounds.zMax=Math.max(bounds.zMax,nz);
+      q.push({type:"feed",x:nx,z:nz,threadFeed});
+      cur={x:nx,z:nz};
+    } else if(type==="lathe"&&lastG===76){
+      // Simplified single-line threading canned cycle — NOT the real 2-line
+      // Fanuc G76 syntax (this simulator's own convenience form, consistent
+      // with the plain-mm convention used everywhere else here instead of
+      // Fanuc's micron P/Q values). X=final diameter (the sole authority on
+      // depth — no separate P total-depth input, so it can never disagree
+      // with X), Z=thread end, Q=first-pass depth mm, F/K=pitch mm/rev.
+      // Expands into degressive-depth passes with safe (X-then-Z) rapid
+      // retracts so the SafetyInterceptor doesn't flag the auto-generated
+      // moves, and the final pass always lands exactly on the commanded X.
+      const finalX="X" in p?p.X/2:cur.x, endZ="Z" in p?p.Z:cur.z;
+      const startX=cur.x, startZ=cur.z;
+      const totalDepth=Math.max(0.02,startX-finalX), firstCut=Math.max(0.02,p.Q||0.2);
+      const pitch=p.K||p.F||1.5;
+      const threadFeed=Math.max(20,pitch*(lathe.s.spindleRpm||500));
+      const clearX=startX+2;
+      const nPasses=Math.max(1,Math.ceil(totalDepth/firstCut));
+      for(let i=1;i<=nPasses;i++){
+        const passX=i===nPasses?finalX:(startX-totalDepth*(i/nPasses));
+        q.push({type:"rapid",x:clearX,z:startZ});
+        q.push({type:"feed",x:passX,z:startZ});
+        q.push({type:"feed",x:passX,z:endZ,threadFeed});
+        q.push({type:"rapid",x:clearX,z:endZ});
+        bounds.xMin=Math.min(bounds.xMin,passX);bounds.xMax=Math.max(bounds.xMax,passX);
+        bounds.zMin=Math.min(bounds.zMin,Math.min(startZ,endZ));bounds.zMax=Math.max(bounds.zMax,Math.max(startZ,endZ));
+      }
+      q.push({type:"rapid",x:clearX,z:startZ});
+      cur={x:finalX,z:startZ};
     }
   }
   return {q, bounds, approachZ};
@@ -1135,7 +1176,12 @@ class SafetyInterceptor {
     let px=cx, py=cy, pz=cz;
     for(let i=0;i<queue.length;i++){
       const m=queue[i];
-      if(m.type==="tc"){const tl=magazine.getToolInSlot(m.targetSlot);if(tl)toolR=tl.dia/2;continue;}
+      if(m.type==="tc"){
+        const tl=magazine.getToolInSlot(m.targetSlot);
+        if(tl)toolR=tl.dia/2;
+        else errs.push(`Satır ${i+1}: T${String(m.targetSlot+1).padStart(2,"0")} slotunda takım yok — program bu slottaki bir takımı bekliyor, magazine önce yerleştirin`);
+        continue;
+      }
       const nx=m.x, ny=m.y, nz=m.z;
       if(Math.abs(nx)>xLim)
         errs.push(`Satır ${i+1}: X soft limit aşımı (${nx.toFixed(1)}mm, limit ±${xLim.toFixed(0)}mm) — takım tezgah dışına çıkar`);
