@@ -555,7 +555,7 @@ class LatheEngine{
   update(dt){const tr=this.s.spindleOn?this.s.spindleRpm:0;this.s.actualRpm+=(tr-this.s.actualRpm)*Math.min(1,dt*3);if(this.s.actualRpm<1)this.s.actualRpm=tr===0?0:this.s.actualRpm;this.angle+=(this.s.actualRpm/60)*dt*Math.PI*2;
     if(this.s.emergency)return;const feedRate=(this.s.feed/60)*this.s.feedOverride,rapid=220;
     if(this.s.mode==="MANUAL"&&!this.moveActive&&(this.jogX||this.jogZ)){const rate=this.s.spindleOn?feedRate:rapid*.35;this.s.x=clamp(this.s.x+this.jogX*rate*dt,0,STOCK_R+12);this.s.z=clamp(this.s.z+this.jogZ*rate*dt,-20,STOCK_LEN);this.s.targetX=this.s.x;this.s.targetZ=this.s.z;}
-    if(this.moveActive){const m=this.moveActive,rate=m.type==="feed"?(m.threadFeed?(m.threadFeed/60)*this.s.feedOverride:feedRate):rapid,dx=m.x-this.s.x,dz=m.z-this.s.z,dist=Math.hypot(dx,dz),step=rate*dt;
+    if(this.moveActive){const m=this.moveActive,rate=m.type==="feed"?(m.threadFeed?(m.threadFeed/60)*this.s.feedOverride:(m.gcodeFeed?(m.gcodeFeed/60)*this.s.feedOverride:feedRate)):rapid,dx=m.x-this.s.x,dz=m.z-this.s.z,dist=Math.hypot(dx,dz),step=rate*dt;
       if(dist<=step||dist<1e-4){this.s.x=m.x;this.s.z=m.z;this.moveActive=this.queue.shift()||null;if(!this.moveActive&&this.s.running)this.s.running=false;}else{this.s.x+=(dx/dist)*step;this.s.z+=(dz/dist)*step;}}
     const cutting=this.s.actualRpm>30&&this.s.z>=-1&&this.s.z<=STOCK_LEN&&this.s.x<STOCK_R+.5;
     if(cutting){const agg=Math.max(.4,(this.s.actualRpm/1200)*1.2);if(this.cutAt(this.s.z,this.s.x,agg))this.spawnChips(this.s.z,this.s.x,3);}
@@ -981,7 +981,7 @@ function updateMill(dt){
         else if(m._ph===1){const p=Math.min((m._t-0.3)/0.6,1);const e=p<.5?2*p*p:-1+(4-2*p)*p;magGroup.rotation.y=m._rotStart+(m._rotEnd-m._rotStart)*e;if(m._t>=0.9){m._ph=2;magazine.requestChange(m.targetSlot);buildTool();toolGroup.visible=false;}}
         else if(m._ph===2){toolGroup.visible=true;const p=Math.min((m._t-0.9)/0.3,1);toolYOff=80*(1-p);if(m._t>=1.2){m._ph=3;}}
         else{toolYOff=0;magGroup.visible=false;mill.spindleOn=true;mill.coolantMode="flood";mill.moveActive=mill.queue.shift()||null;if(!mill.moveActive&&mill.running)mill.running=false;}
-      }else{const rate=m.type==="feed"?feedRate:rapid;
+      }else{const rate=m.type==="feed"?(m.gcodeFeed?(m.gcodeFeed/60)*mill.feedOverride:feedRate):rapid;
       const ex=m.x-mill.x,ey=m.y-mill.y,ez=m.z-mill.z,dist=Math.hypot(ex,ey,ez),stepv=rate*dt;
       if(dist<=stepv||dist<1e-4){mill.x=m.x;mill.y=m.y;mill.z=m.z;mill.moveActive=mill.queue.shift()||null;if(!mill.moveActive&&mill.running)mill.running=false;}
       else{mill.x+=ex/dist*stepv;mill.y+=ey/dist*stepv;mill.z+=ez/dist*stepv;}}}
@@ -1102,7 +1102,7 @@ function parseGcode(text, type){
   function pushMillPoint(isRapid,nx,ny,nz){
     if(!isRapid&&prevWasRapid) approachZ=Math.min(approachZ,cur.z);
     if(!isRapid){bounds.xMin=Math.min(bounds.xMin,nx);bounds.xMax=Math.max(bounds.xMax,nx);bounds.yMin=Math.min(bounds.yMin,ny);bounds.yMax=Math.max(bounds.yMax,ny);bounds.zMin=Math.min(bounds.zMin,nz);bounds.zMax=Math.max(bounds.zMax,nz);}
-    q.push({type:isRapid?"rapid":"feed",x:nx,y:ny,z:nz});
+    q.push(isRapid?{type:"rapid",x:nx,y:ny,z:nz}:{type:"feed",x:nx,y:ny,z:nz,gcodeFeed:feed});
     cur={x:nx,y:ny,z:nz};
     prevWasRapid=isRapid;
   }
@@ -1147,7 +1147,7 @@ function parseGcode(text, type){
       } else {
         const nx="X" in p?p.X/2:cur.x, nz="Z" in p?p.Z:cur.z;
         if(lastG!==0){bounds.xMin=Math.min(bounds.xMin,nx);bounds.xMax=Math.max(bounds.xMax,nx);bounds.zMin=Math.min(bounds.zMin,nz);bounds.zMax=Math.max(bounds.zMax,nz);}
-        q.push({type:lastG===0?"rapid":"feed",x:nx,z:nz});
+        q.push(lastG===0?{type:"rapid",x:nx,z:nz}:{type:"feed",x:nx,z:nz,gcodeFeed:feed});
         cur={x:nx,z:nz};
       }
     } else if(type==="lathe"&&lastG===33){
@@ -2369,7 +2369,7 @@ function estimateCycleMinutes(summary){
     const mx=m.x,my=type==="mill"?(m.y??py??0):0,mz=m.z;
     if(px!==null){
       const dist=type==="mill"?Math.hypot(mx-px,my-py,mz-pz):Math.hypot(mx-px,mz-pz);
-      const rate=m.type==="rapid"?rapidSec:(m.threadFeed?m.threadFeed/60:feedRateSec);
+      const rate=m.type==="rapid"?rapidSec:(m.threadFeed?m.threadFeed/60:(m.gcodeFeed?m.gcodeFeed/60:feedRateSec));
       if(rate>0) totalSec+=dist/rate;
     }
     px=mx;py=my;pz=mz;
