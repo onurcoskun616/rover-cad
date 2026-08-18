@@ -268,10 +268,23 @@ function disableInteractiveToolControllerPy() {
 // needed) inside a try/except that captures a full traceback.format_exc()
 // and folds it into the exception message — so whatever terse wrapper the
 // MCP tool applies on top, the message now contains the real traceback.
+//
+// A plain exec(source, globals()) reports frame locations as "File
+// <string>, line N" with NO source text under them — Python's traceback
+// formatter can only print a frame's source line if it can find that file,
+// and an exec'd string was never written to a file it can look up. So
+// registering the source under a fake filename in linecache BEFORE exec'ing
+// it (and compiling with that same filename) makes the traceback print the
+// actual failing statement, not just its line number — confirmed by a
+// direct before/after test.
 function wrapWithTracebackPy(code) {
   return [
     "try:",
-    `    exec(${JSON.stringify(code)}, globals())`,
+    "    import linecache as _lc",
+    `    _src = ${JSON.stringify(code)}`,
+    '    _fn = "<model_code>"',
+    "    _lc.cache[_fn] = (len(_src), None, _src.splitlines(keepends=True), _fn)",
+    "    exec(compile(_src, _fn, 'exec'), globals())",
     "except Exception:",
     "    import traceback as _tb",
     "    raise RuntimeError('MODEL KODU HATASI:\\n' + _tb.format_exc())",
