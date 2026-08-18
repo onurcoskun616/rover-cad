@@ -14,9 +14,12 @@ Setup template:
     except Exception:
         from PathScripts import PathJob, PathProfile, PathPocket, PathDrilling
     try:
-        from Path.Main.Tool import Controller as PathToolController
+        import Path.Tool.Controller as PathToolController
     except Exception:
-        from PathScripts import PathToolController
+        try:
+            from Path.Main.Tool import Controller as PathToolController
+        except Exception:
+            from PathScripts import PathToolController
 
     doc = App.newDocument()
     shape = Part.Shape()
