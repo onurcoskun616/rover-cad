@@ -145,6 +145,14 @@ export async function generateCamPlan(stepPath, answers, opts = {}) {
         operation: String(s.operation ?? ""),
         tool: String(s.tool ?? ""),
         description: String(s.description ?? ""),
+        // Numeric machining parameters the wizard UI shows for review/edit
+        // before code generation. stepDownMm is hard-clamped here (not just
+        // trusted from the LLM) so an over-limit value can never reach the
+        // UI as a pre-filled "safe-looking" default in the first place.
+        stepDownMm: clampStepDownMm(s.stepDownMm),
+        feedMmMin: positiveNumberOrNull(s.feedMmMin),
+        startDepthMm: finiteNumberOrNull(s.startDepthMm),
+        finalDepthMm: finiteNumberOrNull(s.finalDepthMm),
       })),
       notes: typeof parsed.notes === "string" ? parsed.notes : "",
     };
@@ -212,6 +220,24 @@ export function validateCamCode(code) {
 // so at full resolution (before any downsampling for the preview JSON).
 // Helical G2/G3 dives are exempt, matching server/llm_system_prompt.txt.
 const MAX_PLUNGE_MM = 10;
+
+// Normalise the plan's numeric machining fields (see generateCamPlan): never
+// trust the LLM's raw number as-is, and never let a non-finite/garbage value
+// through as if it were a real, reviewable figure.
+function clampStepDownMm(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return Math.min(n, MAX_PLUNGE_MM);
+}
+function positiveNumberOrNull(v) {
+  const n = Number(v);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+function finiteNumberOrNull(v) {
+  if (v === null || v === undefined) return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
 
 // The plunge check assumes Z is height (mill convention: Z-descent = plunging
 // deeper into material). On a lathe, Z is axial travel along the workpiece
@@ -404,6 +430,34 @@ export function parseCollisionViolations(text) {
   } catch {
     return [];
   }
+}
+
+// A human-readable summary of the deterministic safety checks a successful
+// G-code export already passed — shown to the machinist as reassurance
+// alongside the download, not re-derived speculatively: every check listed
+// here already ran (in generateAndRunPathCode's retry loop, or the re-check
+// below for a reused preview) and can only reach this point if it passed,
+// so `ok` is always true by construction at the call site.
+function buildSafetyChecks(isTorna) {
+  const checks = [];
+  if (!isTorna) {
+    checks.push({
+      key: "plunge",
+      label: `Tek pasoda ${MAX_PLUNGE_MM}mm'den fazla Z dalisi yok (takim kirilma riski kontrolu)`,
+      ok: true,
+    });
+  }
+  checks.push({
+    key: "collision",
+    label: "Hizli (rapid/G0) hareketler parca govdesinin icinden gecmiyor",
+    ok: true,
+  });
+  checks.push({
+    key: "toolController",
+    label: "Takim kontrolcusu atamalari dogrulandi (interaktif secim beklemesi yok)",
+    ok: true,
+  });
+  return checks;
 }
 
 // Candidate FreeCAD post-processor module names for each controller choice, with
@@ -767,7 +821,7 @@ export async function generateCamPreview(stepPath, answers, plan, context = "") 
  * Post-process the approved toolpaths into G-code. When `reuseToken` refers to a
  * stored preview, the exact same Path code is reused so the exported G-code
  * matches what the user approved; otherwise the code is generated fresh.
- * @returns {Promise<{gcodePath: string}>}
+ * @returns {Promise<{gcodePath: string, safetyChecks: {key:string,label:string,ok:boolean}[]}>}
  */
 export async function generateCamGcodeFromPlan(stepPath, answers, plan, context = "", reuseToken = null) {
   const abs = resolveStepPath(stepPath);
@@ -812,7 +866,7 @@ export async function generateCamGcodeFromPlan(stepPath, answers, plan, context 
       throw new Error(`Guvenlik kontrolu basarisiz: ${parts.join(" | ")}. Onizlemeyi yeniden olusturun.`);
     }
     applyControllerTransform(gcodePath, postName, abs, answers);
-    return { gcodePath };
+    return { gcodePath, safetyChecks: buildSafetyChecks(isTornaMachine(answers)) };
   }
 
   // No approved preview to reuse → generate the Path code and post-process it.
@@ -833,5 +887,5 @@ export async function generateCamGcodeFromPlan(stepPath, answers, plan, context 
   }
   if (!fs.existsSync(gcodePath)) throw new Error("G-code dosyasi olusmadi");
   applyControllerTransform(gcodePath, postName, abs, answers);
-  return { gcodePath };
+  return { gcodePath, safetyChecks: buildSafetyChecks(isTornaMachine(answers)) };
 }
