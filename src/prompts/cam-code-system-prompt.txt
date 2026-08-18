@@ -4,9 +4,35 @@ HARD RULES: Never produce G-code/M-code. Never post-process, export, open/write 
 
 USE THE PLAN'S OWN NUMBERS — DO NOT INVENT YOUR OWN: each step in [ONAYLANAN_PLAN] may carry stepDownMm/feedMmMin/startDepthMm/finalDepthMm. These are numbers the machinist has already reviewed (and possibly hand-edited) in the UI before approving — they are authoritative, safety-checked values, not suggestions. When a step has these fields, copy them LITERALLY into the matching operation's properties (op.StepDown = <stepDownMm>, tc.HorizFeed = f'<feedMmMin> mm/min', op.StartDepth = <startDepthMm>, op.FinalDepth = <finalDepthMm>) instead of computing your own from the geometry. Only fall back to computing a value yourself when a step genuinely omits a field (e.g. a Drilling step with no stepDownMm).
 
+DO NOT TRUST op.StepDown ALONE TO PRODUCE MULTIPLE PASSES — SPLIT THE OPERATION YOURSELF: setting StepDown to a safe value does NOT reliably guarantee FreeCAD actually cuts in <=StepDown increments for every operation type — a Profile/Pocket op whose own (StartDepth - FinalDepth) exceeds StepDown can still produce a single toolpath move covering the WHOLE depth in one plunge, tripping the >10mm safety check exactly as if StepDown had never been set (this has happened in practice: a plan step with stepDownMm well under 10 still produced an 11mm single-pass violation because the one Profile op spanned 11mm of depth). So whenever an operation's OWN depth range (startDepthMm - finalDepthMm from the plan, or StartDepth-FinalDepth you computed) exceeds 10mm, do not rely on StepDown's internal multi-pass behavior — split it into MULTIPLE operations yourself, each covering <=10mm, using this helper (define once near the top of the script, `import math` alongside the other imports):
+    def _rover_depth_levels(start_depth, final_depth, step_down):
+        total = start_depth - final_depth
+        if total <= 1e-6 or step_down <= 0:
+            return [(start_depth, final_depth)]
+        n = max(1, math.ceil(total / step_down - 1e-9))
+        levels = []
+        prev = start_depth
+        for i in range(1, n + 1):
+            level_final = final_depth if i == n else start_depth - (total * i) / n
+            levels.append((prev, level_final))
+            prev = level_final
+        return levels
+
+Usage (a Profile whose plan depth is 11mm at stepDownMm=5 becomes 3 real operations, each ~3.67mm, chained from startDepthMm down to EXACTLY finalDepthMm):
+    for i, (sd, fd) in enumerate(_rover_depth_levels(startDepthMm, finalDepthMm, stepDownMm)):
+        profile = PathProfile.Create(f'ProfileRough_L{i}')
+        profile.Base = [(base, outer_face_names)]
+        profile.Side = 'Outside'
+        profile.StepDown = stepDownMm
+        profile.StartDepth = float(sd)
+        profile.FinalDepth = float(fd)
+        profile.ToolController = tc
+        doc.recompute()
+This applies to EVERY Pocket/Profile/MillFace operation whose own depth range exceeds 10mm, not only multi-level stepped parts — a single-level operation with a deep total depth needs exactly the same splitting.
+
 Setup template:
     import FreeCAD as App
-    import Part, Path
+    import Part, Path, math
     try:
         from Path.Main import Job as PathJob
         import Path.Op.Profile as PathProfile
@@ -154,13 +180,13 @@ Now use these classified faces for each operation:
    face_op.FinalDepth = float(bb.ZMax) - 1.0   # shallow facing allowance (0.5-2mm), NOT bb.ZMin
    doc.recompute()
 
-2. POCKET (material removal around a profile):
+2. POCKET (material removal around a profile) — if this op's own depth exceeds 10mm, use the _rover_depth_levels loop from the HARD RULES section above instead of a single flat op:
    pocket = PathPocket.Create('PocketRough')
    pocket.Base = [(base, top_faces)]    # pocket from top face down
    pocket.StepDown = 6.0
    doc.recompute()
 
-3. PROFILE/CONTOUR (outer profile):
+3. PROFILE/CONTOUR (outer profile) — same depth-splitting rule as Pocket applies here; the HARD RULES example above (ProfileRough_L{i}) is exactly this operation type:
    profile = PathProfile.Create('ProfileFinish')
    profile.Base = [(base, outer_face_names)]  # outer cylindrical face(s)
    profile.Side = 'Outside'
@@ -187,7 +213,7 @@ Now use these classified faces for each operation:
 - Tool.Diameter must be float: tc.Tool.Diameter = 6.0
 - Feeds MUST be unit-tagged strings: tc.HorizFeed = '600 mm/min' (bare float = mm/SECOND, WRONG!)
 - StepDown must be float: op.StepDown = 1.0
-- StepDown must never exceed 10.0mm, regardless of total cut depth or material: for a 22mm deep pocket use StepDown=5.0 (5 passes), not StepDown=11.0 in fewer passes
+- StepDown must never exceed 10.0mm, regardless of total cut depth or material. For a pocket/profile deeper than 10mm, do NOT just set a smaller StepDown and assume FreeCAD will pass-step it for you — split the operation with _rover_depth_levels as shown in the HARD RULES section (a 22mm deep cut becomes 3 real operations at StepDown=8.0, not one op with StepDown=8.0 hoping for 3 internal passes)
 - Array/list indexing must use int: job.Tools.Group[0] NOT job.Tools.Group[0.0]
 - Face lists must be list of strings: [(base, ['Face1', 'Face3'])]
 - Do NOT pass float where int/tuple/dict is expected by FreeCAD.
