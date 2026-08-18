@@ -61,6 +61,14 @@ router.post("/cam-plan", apiKeyAuth, (req, res) => {
 
   const jobId = createJob();
 
+  // generateCamPlan -> describeStepGeometry talks to the SAME shared FreeCAD
+  // MCP connection every other route uses, and its setup code force-closes
+  // whatever document is currently open before opening its own (camService.js
+  // stepInsertPy). Without `exclusive: true` this could run concurrently with
+  // another in-progress FreeCAD job (a model build, a CAM simulate/confirm)
+  // and yank the document out from under it mid-operation — every other
+  // FreeCAD-touching route in this codebase already runs exclusive; this one
+  // was the sole exception.
   runJob(jobId, async () => {
     const plan = await generateCamPlan(stepPath, answers ?? {}, {
       previousPlan,
@@ -68,7 +76,7 @@ router.post("/cam-plan", apiKeyAuth, (req, res) => {
       context: typeof prompt === "string" ? prompt : "",
     });
     return { ok: true, body: { plan } };
-  });
+  }, { exclusive: true });
 
   res.status(202).json({ jobId });
 });
