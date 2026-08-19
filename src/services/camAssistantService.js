@@ -221,6 +221,26 @@ export function validateCamCode(code) {
 // Helical G2/G3 dives are exempt, matching server/llm_system_prompt.txt.
 const MAX_PLUNGE_MM = 10;
 
+// A tell-tale signature of a recurring model mistake: multiple differently
+// -named split operations (e.g. ProfileRough_L0, _L1, ...) that ALL report
+// the EXACT SAME fromZ->toZ range. A correctly split operation (created via
+// the cam-code-system-prompt.txt `_rover_make_leveled_ops` helper) never
+// repeats the same range across levels — each level gets its own slice of
+// the total depth — so seeing the same range 2+ times means the model
+// bypassed the helper and hand-wrote its own (broken) splitting loop, or
+// "fixed" an empty toolpath by recomputing every level from the same
+// bounding box instead of translating the plan's own numbers. Detecting
+// this lets the retry prompt name the exact mistake instead of repeating
+// the generic depth-limit rule the model already ignored once.
+function detectDuplicateDepthSplit(violations) {
+  const seen = new Map();
+  for (const v of violations) {
+    const key = `${v.fromZ}->${v.toZ}`;
+    seen.set(key, (seen.get(key) || 0) + 1);
+  }
+  return [...seen.values()].some((n) => n >= 2);
+}
+
 // Normalise the plan's numeric machining fields (see generateCamPlan): never
 // trust the LLM's raw number as-is, and never let a non-finite/garbage value
 // through as if it were a real, reviewable figure.
@@ -702,11 +722,24 @@ async function generateAndRunPathCode({ abs, geometry, answers, plan, threadGuid
             .map((v) => `${v.op}: Z${v.fromZ}->Z${v.toZ} (${v.delta}mm tek pasoda)`)
             .join("; ");
           console.warn(`Plunge limit ihlali (attempt ${attempt}): ${detail}`);
-          problems.push(
+          let plungeHint =
             `Su operasyonlarda tek G1 hareketinde ${MAX_PLUNGE_MM}mm'den fazla Z dalisi var: ${detail}. ` +
             `Her operasyonun StepDown/derinlik parametresini <=${MAX_PLUNGE_MM}mm olacak sekilde ayarla ` +
-            "(ornegin StepDown=5.0 ile 2 kat gec).",
-          );
+            "(ornegin StepDown=5.0 ile 2 kat gec).";
+          if (detectDuplicateDepthSplit(plungeViolations)) {
+            plungeHint +=
+              " ONEMLI: Birden fazla operasyon (farkli isimli _L0, _L1, ... gibi) AYNI Z araligini raporluyor " +
+              "— bu, boleme dongusunu ELLE yazdigin ve her operasyona AYNI StartDepth/FinalDepth'i atadigin " +
+              "anlamina gelir (_rover_make_leveled_ops yardimci fonksiyonunu KULLANMADIN ya da yanlis kullandin, " +
+              "veya bos toolpath'i duzeltirken plan degerlerini atip hepsine ayni bounding-box degerini verdin). " +
+              "KESIN COZUM: rough_ops = _rover_make_leveled_ops(OpModule, name_prefix, base, face_names, " +
+              "start_depth, final_depth, step_down, tc, side=...) cagir ve StartDepth/FinalDepth'e SONRADAN ELLE " +
+              "DOKUNMA — fonksiyon her seviyeye kendi (sd, fd) degerini otomatik atar. Plan'in Z degerleri bu STEP " +
+              "dosyasinin koordinat sistemiyle uyusmuyorsa (bos yol olustuysa), degerleri sifirdan bounding box'tan " +
+              "hesaplama — offset = float(bb.ZMax) - <plan'in referans noktasi> ile OTELE (start_depth+offset, " +
+              "final_depth+offset), sonra bu OTELENMIS degerleri _rover_make_leveled_ops'a ver.";
+          }
+          problems.push(plungeHint);
         }
         if (collisionViolations.length) {
           const detail = collisionViolations
