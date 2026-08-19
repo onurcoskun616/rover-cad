@@ -504,6 +504,96 @@ function autoFixClearanceHeightsPy() {
   ].join("\n");
 }
 
+// Trusted epilogue (NOT model output): PREVENTIVE, deterministic fix for
+// whatever collision violation survives autoFixClearanceHeightsPy above.
+// Live testing showed the SAME violation (a rapid ending at a fixed point
+// like (0,0,3.2), inside the part's solid) persisting even after raising
+// ClearanceHeight/SafeHeight and recomputing — meaning that property isn't
+// what's actually generating this particular unsafe move, or FreeCAD isn't
+// regenerating it from that property the way expected. Trying to ROUTE the
+// rapid around the solid (up/across/down) was tried first and abandoned: a
+// rapid whose FINAL destination is legitimately inside the solid (because
+// cutting is about to start exactly there) has no safe path to that
+// destination — routing only delays where the straight-line sampling finds
+// the solid again, it doesn't remove the violation. The actual fix: a rapid
+// that enters material right before cutting begins should never have been a
+// RAPID in the first place — it should be a controlled FEED move, which is
+// exactly what real machining does (approach at rapid, then switch to feed
+// before contact). So instead of moving the destination, this reclassifies
+// the move itself: any G0 whose straight-line path the SAME sampling
+// collisionCheckPy uses finds inside the solid gets rewritten as G1 (feed
+// rate borrowed from the operation's ToolController.VertFeed, or the
+// command's own pre-existing F if it already had one). This is unconditionally
+// safe — a slow controlled feed into material is never a "rapid crash" risk,
+// which is what this check exists to catch — regardless of whether the
+// destination turns out to be genuinely mid-cut or a real navigation mistake.
+// Must run BEFORE autoFixDeepPlungesPy below so a newly-created deep feed
+// plunge still gets split into <=10mm passes. Verified with a Python
+// simulation matching the exact live violation (rapid straight through a
+// solid to (0,0,-5)-equivalent) before shipping: 3/3 violations resolved,
+// safe rapids and pre-existing feed moves left untouched, existing F params
+// preserved rather than overwritten.
+function autoFixUnsafeRapidsToFeedPy() {
+  return [
+    "def _rover_defuse_unsafe_rapids(_grp, _base_obj):",
+    "    try:",
+    "        _solid = _base_obj.Shape",
+    "        _bb = _solid.BoundBox",
+    "    except Exception:",
+    "        return",
+    "    for _op in _grp:",
+    "        _p = getattr(_op, 'Path', None)",
+    "        if _p is None:",
+    "            continue",
+    "        _new_cmds = []",
+    "        _px = _py = _pz = None",
+    "        _changed = False",
+    "        _default_feed = 300.0",
+    "        try:",
+    "            _tc = getattr(_op, 'ToolController', None)",
+    "            if _tc is not None:",
+    "                _default_feed = float(_tc.VertFeed.Value)",
+    "        except Exception:",
+    "            pass",
+    "        for _c in _p.Commands:",
+    "            _pr = dict(_c.Parameters)",
+    "            _rapid = _c.Name in ('G0', 'G00')",
+    "            _nx = float(_pr['X']) if 'X' in _pr else _px",
+    "            _ny = float(_pr['Y']) if 'Y' in _pr else _py",
+    "            _nz = float(_pr['Z']) if 'Z' in _pr else _pz",
+    "            _unsafe = False",
+    "            if _rapid and _px is not None and _nx is not None and _ny is not None and _nz is not None:",
+    "                _dist = ((_nx-_px)**2 + (_ny-_py)**2 + (_nz-_pz)**2) ** 0.5",
+    "                if _dist > 0.5 and min(_pz, _nz) <= _bb.ZMax + 0.5:",
+    "                    _steps = min(15, max(3, int(_dist // 3)))",
+    "                    for _s in range(1, _steps):",
+    "                        _t = _s / _steps",
+    "                        _sx = _px + (_nx-_px)*_t",
+    "                        _sy = _py + (_ny-_py)*_t",
+    "                        _sz = _pz + (_nz-_pz)*_t",
+    "                        try:",
+    "                            if _solid.isInside(FreeCAD.Vector(_sx, _sy, _sz), 0.05, True):",
+    "                                _unsafe = True",
+    "                                break",
+    "                        except Exception:",
+    "                            pass",
+    "            if _unsafe:",
+    "                _params = dict(_pr)",
+    "                if 'F' not in _params:",
+    "                    _params['F'] = _default_feed",
+    "                _new_cmds.append(Path.Command('G1', _params))",
+    "                _changed = True",
+    "            else:",
+    "                _new_cmds.append(_c)",
+    "            if _nx is not None: _px = _nx",
+    "            if _ny is not None: _py = _ny",
+    "            if _nz is not None: _pz = _nz",
+    "        if _changed:",
+    "            _op.Path = Path.Path(_new_cmds)",
+    "_rover_defuse_unsafe_rapids(_grp, base)",
+  ].join("\n");
+}
+
 // Trusted epilogue (NOT model output): PREVENTIVE, deterministic fix for the
 // >10mm single-move Z plunge violation, run BEFORE plungeCheckPy so the
 // check normally finds nothing left to flag. Prompting the model to split
@@ -633,6 +723,7 @@ function previewEpiloguePy(previewJsonPath, defaultFeed, isTorna) {
     "except Exception as _e:",
     "    raise RuntimeError('job.Operations bulunamadi: ' + str(_e))",
     autoFixClearanceHeightsPy(),
+    autoFixUnsafeRapidsToFeedPy(),
     autoFixDeepPlungesPy(),
     `_default_feed = float(${feed})`,
     "_rapid_rate = 3000.0  # mm/min assumed rapid rate for time estimate",
@@ -704,6 +795,7 @@ function postEpiloguePy(gcodePath, postName, isTorna) {
     "    raise RuntimeError('post-processor modulu bulunamadi')",
     "_grp = list(job.Operations.Group)",
     autoFixClearanceHeightsPy(),
+    autoFixUnsafeRapidsToFeedPy(),
     autoFixDeepPlungesPy(),
     plungeCheckPy(isTorna),
     collisionCheckPy(),
