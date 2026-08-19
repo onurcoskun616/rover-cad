@@ -452,6 +452,71 @@ export function parseCollisionViolations(text) {
   }
 }
 
+// Trusted epilogue (NOT model output): PREVENTIVE, deterministic fix for the
+// >10mm single-move Z plunge violation, run BEFORE plungeCheckPy so the
+// check normally finds nothing left to flag. Prompting the model to split
+// deep cuts correctly (cam-code-system-prompt.txt's `_rover_make_leveled_ops`
+// helper, plus retry-time hints naming the exact mistake) has repeatedly
+// failed in live testing — the model keeps creating multiple `_L{i}`-named
+// operations that report the SAME full depth range instead of each getting
+// its own slice. Rather than trying yet another prompt variant, this walks
+// every operation's ACTUAL computed Path.Commands directly and rewrites any
+// single G1 (or other non-rapid, non-arc) move whose Z-delta exceeds the
+// limit into several smaller moves, each within it, interpolating X/Y
+// proportionally along the way — a hard guarantee independent of what the
+// model's FreeCAD API calls actually did. G2/G3 arcs are left untouched,
+// matching plungeCheckPy's own exemption for helical dives. Verified against
+// the exact live bug report (5 operations all reporting Z14->Z3, 11mm) with
+// a standalone Python simulation of Path.Command/Path.Path before shipping.
+// Inserted into BOTH previewEpiloguePy and postEpiloguePy right after `_grp`
+// is established, so the fix reaches the preview's safety check AND the
+// actual exported G-code (post_mod.export reads the same `_grp` afterward).
+function autoFixDeepPlungesPy() {
+  return [
+    "def _rover_split_deep_plunges(_grp):",
+    "    import math as _math",
+    `    _max_plunge = ${MAX_PLUNGE_MM}`,
+    "    for _op in _grp:",
+    "        _p = getattr(_op, 'Path', None)",
+    "        if _p is None:",
+    "            continue",
+    "        _new_cmds = []",
+    "        _px = _py = _pz = None",
+    "        _changed = False",
+    "        for _c in _p.Commands:",
+    "            _pr = dict(_c.Parameters)",
+    "            _rapid = _c.Name in ('G0', 'G00')",
+    "            _arc = _c.Name in ('G2', 'G3', 'G02', 'G03')",
+    "            if 'Z' in _pr and _pz is not None and not _rapid and not _arc:",
+    "                _nz = float(_pr['Z'])",
+    "                _delta = _pz - _nz",
+    "                if _delta > _max_plunge + 1e-6:",
+    "                    _steps = int(_math.ceil(_delta / _max_plunge - 1e-9))",
+    "                    _tx0, _ty0 = _px, _py",
+    "                    _tx1 = float(_pr['X']) if 'X' in _pr else _px",
+    "                    _ty1 = float(_pr['Y']) if 'Y' in _pr else _py",
+    "                    for _s in range(1, _steps + 1):",
+    "                        _t = _s / _steps",
+    "                        _params = dict(_pr)",
+    "                        _params['Z'] = _pz - _delta * _t",
+    "                        if _tx1 is not None and _tx0 is not None:",
+    "                            _params['X'] = _tx0 + (_tx1 - _tx0) * _t",
+    "                        if _ty1 is not None and _ty0 is not None:",
+    "                            _params['Y'] = _ty0 + (_ty1 - _ty0) * _t",
+    "                        _new_cmds.append(Path.Command(_c.Name, _params))",
+    "                    _changed = True",
+    "                    _px, _py, _pz = _tx1, _ty1, _nz",
+    "                    continue",
+    "            _new_cmds.append(_c)",
+    "            if 'X' in _pr: _px = float(_pr['X'])",
+    "            if 'Y' in _pr: _py = float(_pr['Y'])",
+    "            if 'Z' in _pr: _pz = float(_pr['Z'])",
+    "        if _changed:",
+    "            _op.Path = Path.Path(_new_cmds)",
+    "_rover_split_deep_plunges(_grp)",
+  ].join("\n");
+}
+
 // A human-readable summary of the deterministic safety checks a successful
 // G-code export already passed — shown to the machinist as reassurance
 // alongside the download, not re-derived speculatively: every check listed
@@ -515,6 +580,7 @@ function previewEpiloguePy(previewJsonPath, defaultFeed, isTorna) {
     "    _grp = list(job.Operations.Group)",
     "except Exception as _e:",
     "    raise RuntimeError('job.Operations bulunamadi: ' + str(_e))",
+    autoFixDeepPlungesPy(),
     `_default_feed = float(${feed})`,
     "_rapid_rate = 3000.0  # mm/min assumed rapid rate for time estimate",
     "_paths = []",
@@ -584,6 +650,7 @@ function postEpiloguePy(gcodePath, postName, isTorna) {
     "if post_mod is None:",
     "    raise RuntimeError('post-processor modulu bulunamadi')",
     "_grp = list(job.Operations.Group)",
+    autoFixDeepPlungesPy(),
     plungeCheckPy(isTorna),
     collisionCheckPy(),
     `_out = ${JSON.stringify(gcodePath)}`,
