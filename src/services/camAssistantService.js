@@ -536,62 +536,98 @@ function autoFixClearanceHeightsPy() {
 function autoFixUnsafeRapidsToFeedPy() {
   return [
     "def _rover_defuse_unsafe_rapids(_grp, _base_obj):",
+    "    import json as _json3",
+    "    _report = {'bbOk': False, 'ops': 0, 'rapids': 0, 'unsafe': 0, 'converted': 0, 'assignErrors': [], 'otherErrors': []}",
     "    try:",
     "        _solid = _base_obj.Shape",
     "        _bb = _solid.BoundBox",
-    "    except Exception:",
+    "        _report['bbOk'] = True",
+    "        _report['bbZMax'] = round(float(_bb.ZMax), 3)",
+    "    except Exception as _e:",
+    "        _report['otherErrors'].append('boundbox: ' + str(_e))",
+    "        print('RAPID_DEFUSE_REPORT=' + _json3.dumps(_report))",
     "        return",
     "    for _op in _grp:",
-    "        _p = getattr(_op, 'Path', None)",
-    "        if _p is None:",
-    "            continue",
-    "        _new_cmds = []",
-    "        _px = _py = _pz = None",
-    "        _changed = False",
-    "        _default_feed = 300.0",
+    "        _report['ops'] += 1",
     "        try:",
-    "            _tc = getattr(_op, 'ToolController', None)",
-    "            if _tc is not None:",
-    "                _default_feed = float(_tc.VertFeed.Value)",
-    "        except Exception:",
-    "            pass",
-    "        for _c in _p.Commands:",
-    "            _pr = dict(_c.Parameters)",
-    "            _rapid = _c.Name in ('G0', 'G00')",
-    "            _nx = float(_pr['X']) if 'X' in _pr else _px",
-    "            _ny = float(_pr['Y']) if 'Y' in _pr else _py",
-    "            _nz = float(_pr['Z']) if 'Z' in _pr else _pz",
-    "            _unsafe = False",
-    "            if _rapid and _px is not None and _nx is not None and _ny is not None and _nz is not None:",
-    "                _dist = ((_nx-_px)**2 + (_ny-_py)**2 + (_nz-_pz)**2) ** 0.5",
-    "                if _dist > 0.5 and min(_pz, _nz) <= _bb.ZMax + 0.5:",
-    "                    _steps = min(15, max(3, int(_dist // 3)))",
-    "                    for _s in range(1, _steps):",
-    "                        _t = _s / _steps",
-    "                        _sx = _px + (_nx-_px)*_t",
-    "                        _sy = _py + (_ny-_py)*_t",
-    "                        _sz = _pz + (_nz-_pz)*_t",
-    "                        try:",
-    "                            if _solid.isInside(FreeCAD.Vector(_sx, _sy, _sz), 0.05, True):",
-    "                                _unsafe = True",
-    "                                break",
-    "                        except Exception:",
-    "                            pass",
-    "            if _unsafe:",
-    "                _params = dict(_pr)",
-    "                if 'F' not in _params:",
-    "                    _params['F'] = _default_feed",
-    "                _new_cmds.append(Path.Command('G1', _params))",
-    "                _changed = True",
-    "            else:",
-    "                _new_cmds.append(_c)",
-    "            if _nx is not None: _px = _nx",
-    "            if _ny is not None: _py = _ny",
-    "            if _nz is not None: _pz = _nz",
-    "        if _changed:",
-    "            _op.Path = Path.Path(_new_cmds)",
+    "            _p = getattr(_op, 'Path', None)",
+    "            if _p is None:",
+    "                continue",
+    "            _new_cmds = []",
+    "            _px = _py = _pz = None",
+    "            _changed = False",
+    "            _default_feed = 300.0",
+    "            try:",
+    "                _tc = getattr(_op, 'ToolController', None)",
+    "                if _tc is not None:",
+    "                    _default_feed = float(_tc.VertFeed.Value)",
+    "            except Exception:",
+    "                pass",
+    "            for _c in _p.Commands:",
+    "                _pr = dict(_c.Parameters)",
+    "                _rapid = _c.Name in ('G0', 'G00')",
+    "                if _rapid:",
+    "                    _report['rapids'] += 1",
+    "                _nx = float(_pr['X']) if 'X' in _pr else _px",
+    "                _ny = float(_pr['Y']) if 'Y' in _pr else _py",
+    "                _nz = float(_pr['Z']) if 'Z' in _pr else _pz",
+    "                _unsafe = False",
+    "                if _rapid and _px is not None and _nx is not None and _ny is not None and _nz is not None:",
+    "                    _dist = ((_nx-_px)**2 + (_ny-_py)**2 + (_nz-_pz)**2) ** 0.5",
+    "                    if _dist > 0.5 and min(_pz, _nz) <= _bb.ZMax + 0.5:",
+    "                        _steps = min(15, max(3, int(_dist // 3)))",
+    "                        for _s in range(1, _steps):",
+    "                            _t = _s / _steps",
+    "                            _sx = _px + (_nx-_px)*_t",
+    "                            _sy = _py + (_ny-_py)*_t",
+    "                            _sz = _pz + (_nz-_pz)*_t",
+    "                            try:",
+    "                                if _solid.isInside(FreeCAD.Vector(_sx, _sy, _sz), 0.05, True):",
+    "                                    _unsafe = True",
+    "                                    break",
+    "                            except Exception as _e:",
+    "                                _report['otherErrors'].append('isInside: ' + str(_e))",
+    "                if _unsafe:",
+    "                    _report['unsafe'] += 1",
+    "                    _params = dict(_pr)",
+    "                    if 'F' not in _params:",
+    "                        _params['F'] = _default_feed",
+    "                    _new_cmds.append(Path.Command('G1', _params))",
+    "                    _changed = True",
+    "                else:",
+    "                    _new_cmds.append(_c)",
+    "                if _nx is not None: _px = _nx",
+    "                if _ny is not None: _py = _ny",
+    "                if _nz is not None: _pz = _nz",
+    "            if _changed:",
+    "                try:",
+    "                    _op.Path = Path.Path(_new_cmds)",
+    "                    _report['converted'] += 1",
+    "                except Exception as _e:",
+    "                    _report['assignErrors'].append(str(getattr(_op, 'Label', _op.Name)) + ': ' + str(_e))",
+    "        except Exception as _e:",
+    "            _report['otherErrors'].append(str(getattr(_op, 'Label', _op.Name)) + ' (op loop): ' + str(_e))",
+    "    print('RAPID_DEFUSE_REPORT=' + _json3.dumps(_report))",
     "_rover_defuse_unsafe_rapids(_grp, base)",
   ].join("\n");
+}
+
+// Read the "RAPID_DEFUSE_REPORT={...}" line autoFixUnsafeRapidsToFeedPy above
+// prints out of the FreeCAD tool's combined stdout text. Diagnostic only (NOT
+// used to gate success/failure) — folded into the collision-violation error
+// message so a STILL-failing collision check surfaces exactly what the fix
+// function saw and did (ops examined, rapids seen, how many were judged
+// unsafe, how many conversions actually stuck, any caught exceptions) instead
+// of requiring another guess at why a verified-in-simulation fix isn't taking
+// effect live.
+export function parseRapidDefuseReport(text) {
+  const match = String(text ?? "").match(/RAPID_DEFUSE_REPORT=(\{.*\})/);
+  if (!match) return null;
+  try {
+    return JSON.parse(match[1]);
+  } catch {
+    return null;
+  }
 }
 
 // Trusted epilogue (NOT model output): PREVENTIVE, deterministic fix for the
@@ -954,6 +990,7 @@ async function generateAndRunPathCode({ abs, geometry, answers, plan, threadGuid
           }
           problems.push(plungeHint);
         }
+        let rapidDefuseDiag = "";
         if (collisionViolations.length) {
           const detail = collisionViolations
             .map((v) => `${v.op}: (${v.x}, ${v.y}, ${v.z})`)
@@ -964,8 +1001,24 @@ async function generateAndRunPathCode({ abs, geometry, answers, plan, threadGuid
             "Bu genelde yanlis/eksik StartDepth, FinalDepth veya ClearanceHeight/SafeHeight yuzunden olur. " +
             "Her operasyonun guvenli yukseklikten (parcanin en ust noktasinin uzerinden) yaklasip cekildiginden emin ol.",
           );
+          // autoFixUnsafeRapidsToFeedPy is supposed to have already converted
+          // every one of these into a safe feed move BEFORE this check ran —
+          // if a collision violation still made it here, that preventive fix
+          // either didn't run, didn't judge the move unsafe, or converted it
+          // but the assignment didn't stick. Rather than guess again, surface
+          // exactly what it saw so the next failure report carries real data.
+          const report = parseRapidDefuseReport(text);
+          console.warn(`RAPID_DEFUSE_REPORT (attempt ${attempt}):`, report);
+          rapidDefuseDiag = report
+            ? ` [Teshis: autoFixUnsafeRapidsToFeedPy calisti mi=${report.bbOk}, bb.ZMax=${report.bbZMax}, ` +
+              `${report.ops} op tarandi, ${report.rapids} rapid komut goruldu, ${report.unsafe} tanesi guvensiz ` +
+              `bulundu, ${report.converted} operasyonda G1'e cevrildi.` +
+              (report.assignErrors?.length ? ` Atama hatalari: ${report.assignErrors.join(" | ")}.` : "") +
+              (report.otherErrors?.length ? ` Diger hatalar: ${report.otherErrors.join(" | ")}.` : "") +
+              "]"
+            : " [Teshis: RAPID_DEFUSE_REPORT ciktisi bulunamadi — fonksiyon hic calismamis olabilir.]";
         }
-        lastError = `Guvenlik kontrolu basarisiz: ${problems.join(" ")}`;
+        lastError = `Guvenlik kontrolu basarisiz: ${problems.join(" ")}${rapidDefuseDiag}`;
         previousCode = code;
         problem = problems.join(" ") + " Kodu bastan yaz.";
         continue;
