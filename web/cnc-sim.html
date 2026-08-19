@@ -741,7 +741,15 @@ function initMill(){
 
   camera=new THREE.PerspectiveCamera(45,1,1,3000);
   controls=new OrbitControls(camera,renderer.domElement);
-  controls.enableDamping=true;controls.target.set(0,20,0);
+  // Damping'in "momentum/glide" davranışı fare tekerleğinde her scroll'un
+  // birkaç kare boyunca sönümlenerek devam etmesine yol açıyordu — hızlı
+  // art arda scroll'da kamera hedeften geçip geri sekiyor gibi hissettiriyor
+  // ("gidip gelme"). Damping kapatılınca zoom her tekerlek hareketine 1:1,
+  // anında karşılık veriyor; zoomSpeed düşürülerek de her "tık" daha ince
+  // bir adım oluyor (hassas ayar).
+  controls.enableDamping=false;
+  controls.zoomSpeed=0.6;
+  controls.target.set(0,20,0);
   applyStockZoomLimits();
   setView("iso");
 
