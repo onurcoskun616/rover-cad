@@ -905,18 +905,22 @@ function resizeLatheStock(newLen, newR){
 }
 
 function millResize(){if(!renderer)return;const wrap=$("mill-canvas-wrap"),w=wrap.clientWidth||1,h=wrap.clientHeight||1;renderer.setSize(w,h,false);camera.aspect=w/h;camera.updateProjectionMatrix();}
-// Kamera mesafesi/zoom sınırları stok boyutuyla orantılı — sabit değerler
-// (eskiden d=360, minDistance=60, maxDistance=1200) sadece varsayılan
-// 200x140x60mm stok için doğruydu; çok daha küçük/büyük bir stokla
-// (örn. 40x40x110mm) zoom min/max aralığı parçaya hiç uymuyor, "zoom
-// bozuk" gibi görünüyordu. Oranlar varsayılan stok boyutunda AYNI
-// sonucu verecek şekilde seçildi (200 -> d=360, min=60, max=1200).
+// Kamera mesafesi/zoom sınırları stok boyutuyla orantılı, sabit değerler
+// değil — böylece çok küçük/büyük bir stokla zoom aralığı parçaya uymama
+// sorunu yaşanmıyor.
 function stockCameraScale(){return Math.max(W||0,D||0,TOP||0,40);}
+// minDistance eskiden s*0.3 idi (varsayılan stokta 60mm) — tekerlekle içeri
+// zoom yapılınca kamerayı parçanın/tablanın neredeyse üstüne getiriyor,
+// ekranı tek bir gri yüzeyle dolduruyordu ("zoom bozuk" hissi). s*0.8 parçayı
+// hâlâ kadrajda tutacak kadar mesafe bırakıyor. maxDistance ise sahne
+// sisiyle (scene.fog) birlikte ayarlanıyor ki en uzak zoom da tamamen sise
+// gömülüp görünmez hale gelmesin.
 function applyStockZoomLimits(){
   if(!controls)return;
   const s=stockCameraScale();
-  controls.minDistance=Math.max(20,s*0.3);
+  controls.minDistance=Math.max(40,s*0.8);
   controls.maxDistance=Math.max(600,s*6);
+  if(scene&&scene.fog){scene.fog.near=controls.maxDistance*0.75;scene.fog.far=controls.maxDistance*1.6;}
 }
 function setView(v){const s=stockCameraScale();const d=Math.max(140,s*1.8);const map={iso:[d*.9,d*.7,d*.9],top:[0,d*1.2,1],front:[0,d*.4,d*1.1],right:[d*1.1,d*.4,0]};const p=map[v]||map.iso;camera.position.set(p[0],p[1],p[2]);controls&&controls.update();}
 
