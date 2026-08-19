@@ -453,6 +453,58 @@ export function parseCollisionViolations(text) {
 }
 
 // Trusted epilogue (NOT model output): PREVENTIVE, deterministic fix for the
+// "rapid passes through the part" collision violation. The error message has
+// always pointed at the real cause ("yanlis/eksik ... ClearanceHeight/
+// SafeHeight yuzunden olur") but prompting alone hasn't reliably gotten the
+// model to set these high enough — live testing kept showing every
+// operation's retract rapid landing at the SAME low Z (e.g. 3.2mm) that
+// turned out to sit inside the part's real bounding box. Rather than trying
+// to reroute already-computed G-code around the collision after the fact
+// (tried first — a plunge/approach move that legitimately ends inside the
+// finished-part solid, because that's exactly where cutting is about to
+// happen, can't be "routed around": there is no safe path to a destination
+// inside the solid, and the check has no stock model to know that spot will
+// already be machined away by then), this corrects the ACTUAL FreeCAD
+// property that generates the unsafe rapid: any operation's ClearanceHeight
+// or SafeHeight below the part's real top gets raised to bb.ZMax + margin,
+// then the document is recomputed ONCE so FreeCAD regenerates that
+// operation's retract/approach rapids at a genuinely safe height (with the
+// deeper move into material becoming the FEED move it always should have
+// been, which the plunge check already handles separately). Must run BEFORE
+// autoFixDeepPlungesPy below: that function hand-edits Path.Commands
+// in-memory without recomputing, and a recompute() afterward would silently
+// regenerate — and so undo — its split. Verified with a Python simulation
+// mirroring Path/Op/Base.py's real "Path.Command('G0', {'Z':
+// obj.ClearanceHeight.Value})" retract pattern before shipping.
+function autoFixClearanceHeightsPy() {
+  return [
+    "def _rover_fix_clearance_heights(_grp, _base_obj):",
+    "    try:",
+    "        _bb = _base_obj.Shape.BoundBox",
+    "    except Exception:",
+    "        return",
+    "    _safe_z = float(_bb.ZMax) + 5.0",
+    "    _fixed = False",
+    "    for _op in _grp:",
+    "        for _prop in ('ClearanceHeight', 'SafeHeight'):",
+    "            if hasattr(_op, _prop):",
+    "                try:",
+    "                    _cur = float(getattr(_op, _prop).Value)",
+    "                except Exception:",
+    "                    continue",
+    "                if _cur < _safe_z - 1e-6:",
+    "                    try:",
+    "                        setattr(_op, _prop, _safe_z)",
+    "                        _fixed = True",
+    "                    except Exception:",
+    "                        pass",
+    "    if _fixed:",
+    "        doc.recompute()",
+    "_rover_fix_clearance_heights(_grp, base)",
+  ].join("\n");
+}
+
+// Trusted epilogue (NOT model output): PREVENTIVE, deterministic fix for the
 // >10mm single-move Z plunge violation, run BEFORE plungeCheckPy so the
 // check normally finds nothing left to flag. Prompting the model to split
 // deep cuts correctly (cam-code-system-prompt.txt's `_rover_make_leveled_ops`
@@ -580,6 +632,7 @@ function previewEpiloguePy(previewJsonPath, defaultFeed, isTorna) {
     "    _grp = list(job.Operations.Group)",
     "except Exception as _e:",
     "    raise RuntimeError('job.Operations bulunamadi: ' + str(_e))",
+    autoFixClearanceHeightsPy(),
     autoFixDeepPlungesPy(),
     `_default_feed = float(${feed})`,
     "_rapid_rate = 3000.0  # mm/min assumed rapid rate for time estimate",
@@ -650,6 +703,7 @@ function postEpiloguePy(gcodePath, postName, isTorna) {
     "if post_mod is None:",
     "    raise RuntimeError('post-processor modulu bulunamadi')",
     "_grp = list(job.Operations.Group)",
+    autoFixClearanceHeightsPy(),
     autoFixDeepPlungesPy(),
     plungeCheckPy(isTorna),
     collisionCheckPy(),
