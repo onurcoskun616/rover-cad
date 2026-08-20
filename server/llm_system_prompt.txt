@@ -70,13 +70,17 @@ G1 Z50 F400   ; Z60'tan Z50'ye, 10mm
 
 Bu kural, G2/G3 ile yapılan helisel (spiral) dalışları kapsamaz — tam bir daire boyunca kademeli inen spiral dalma tek G3 satırında güvenlidir, çünkü tur boyunca kademeli olarak iner.
 
-### KRİTİK: GERİ ÇEKİLME KURALI
-**Takım stok yüzeyinde veya altındayken (Z ≤ H) ASLA yatay (XY) hareket yapma.**
+### ⛔ KRİTİK: G0 RAPID GÜVENLİK KURALLARI
+**KURAL 1: G0 komutunda Z değeri HER ZAMAN ≥ H + 10 olmalıdır.**
+- G0 ile Z ≤ H yazarsan takım malzemeye çarpar — simülatör bunu E-STOP ile durdurur.
+- Malzemeye dalma YALNIZCA G1 ile yapılır, ASLA G0 ile yapılmaz.
+
+**KURAL 2: Takım stok yüzeyinde veya altındayken (Z ≤ H) ASLA G0 ile yatay (XY) hareket yapma.**
 Her delik/cep/slot arasında şu sırayı MUTLAKA uygula:
 1. Önce G0 ile güvenli Z'ye çek (Z = H + 10)
 2. Sonra G0 ile yeni XY konumuna git
 3. Sonra G1 ile kesme derinliğine in
-Bu kural ihlal edilirse takım stok malzemeye çarpar.
+Bu kurallar ihlal edilirse takım stok malzemeye çarpar ve simülatör çarpışma hatası verir.
 
 ## ÇIKTI FORMATI
 ```

@@ -1376,6 +1376,9 @@ function runMillGcode(parsed, stockDims){
       if(m.y!==undefined) m.y=clamp(m.y, 0, TOP+40);
     }
   }
+  {const safeY=TOP+8;let nFix=0;
+  for(const m of q){if(m.type!=="rapid"||m.y===undefined)continue;const sH=safetyInterceptor._maxHeightInRadius(m.x,m.z,CUTTER_R);if(m.y<=sH+0.5){m.y=safeY;nFix++;}}
+  if(nFix)taiMsg(`⚠️ ${nFix} rapid hareket güvenli yüksekliğe (Z=${safeY}mm) otomatik düzeltildi.`,"bot");}
   const sfErrs=safetyInterceptor.validateMill(q,W,D,TOP,true,mill.x,mill.y,mill.z);
   if(sfErrs.length){safetyInterceptor._eStop(mill,taiMsg,sfErrs);return;}
   captureProgramSummary("mill",q);
@@ -1398,6 +1401,9 @@ function runLatheGcode(parsed, stockDims){
       m.z=clamp(m.z+zOff, -20, STOCK_LEN);
     }
   } else if(stockDims){resizeLatheStock(stockDims.len,stockDims.r);}
+  {const safeX=STOCK_R+5;let nFix=0;
+  for(const m of q){if(m.type!=="rapid")continue;const inS=m.z>=-0.5&&m.z<=STOCK_LEN+0.5;if(inS&&m.x<STOCK_R-0.5){m.x=safeX;nFix++;}}
+  if(nFix)taiMsg(`⚠️ ${nFix} rapid hareket güvenli yarıçapa (X=${safeX}mm) otomatik düzeltildi.`,"bot");}
   const sfErrsL=safetyInterceptor.validateLathe(q,STOCK_LEN,STOCK_R,true,lathe.s.x,lathe.s.z);
   if(sfErrsL.length){safetyInterceptor._eStop(lathe,taiMsg,sfErrsL);return;}
   captureProgramSummary("lathe",q);
