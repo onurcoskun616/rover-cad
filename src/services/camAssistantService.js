@@ -652,8 +652,6 @@ function autoFixFaceBoundaryPy() {
     "        _name = str(getattr(_op, 'Name', '')) + str(getattr(_op, 'Label', ''))",
     "        if 'Face' not in _cls and 'Face' not in _name:",
     "            continue",
-    "        if not hasattr(_op, 'BoundaryShape'):",
-    "            continue",
     // BoundaryShape is the knob that decides how far the clearing reaches:
     // 'Face Region' stops at the selected face's own outline, 'Stock' runs out
     // to the block. Base stays exactly as the model set it — an earlier version
@@ -669,10 +667,17 @@ function autoFixFaceBoundaryPy() {
     "            _prev_fd = float(_op.FinalDepth.Value)",
     "        except Exception:",
     "            pass",
-    "        try:",
-    "            _op.BoundaryShape = 'Stock'",
-    "        except Exception:",
-    "            continue",
+    // The boundary is a bonus; the depths are the point. An earlier version
+    // skipped the whole operation when BoundaryShape was missing or refused the
+    // value — which meant the depths were never corrected either, and a face op
+    // left skimming 10mm above the part went out untouched, cutting nothing but
+    // air. Widening the boundary is worth attempting, and worth nothing if it
+    // costs the fix that actually matters.
+    "        if _prev_boundary is not None:",
+    "            try:",
+    "                _op.BoundaryShape = 'Stock'",
+    "            except Exception:",
+    "                pass",
     "        for _prop, _val in (('StartDepth', _stock_top), ('FinalDepth', _final)):",
     "            if hasattr(_op, _prop):",
     "                try:",
@@ -707,6 +712,7 @@ function autoFixFaceBoundaryPy() {
     // cutting at all) still reached the machine. Undoing a subset of a failed
     // change is not a rollback.
     "    _reverted = 0",
+    "    _tried = []",
     "    for _op, _prev, _psd, _pfd in _targets:",
     "        if _rover_face_cuts(_op):",
     "            continue",
@@ -717,10 +723,32 @@ function autoFixFaceBoundaryPy() {
     "                _op.StartDepth = _psd",
     "            if _pfd is not None:",
     "                _op.FinalDepth = _pfd",
-    "            _reverted += 1",
+    "            _tried.append((_op, _prev, _psd, _pfd))",
     "        except Exception:",
     "            pass",
-    "    if _reverted:",
+    "    if _tried:",
+    "        _doc.recompute()",
+    // Restoring is only an improvement if what we restored actually cuts. The
+    // model's own depths are how this started: a face op skimming a 1mm layer
+    // ~10mm ABOVE a 10mm-tall part, entirely in air, producing nothing. Handing
+    // that back is not a rollback, it is the original bug. When neither setting
+    // cuts, keep the forced one — it is at least aimed at the block's real top.
+    "    _refixed = False",
+    "    for _op, _prev, _psd, _pfd in _tried:",
+    "        if _rover_face_cuts(_op):",
+    "            _reverted += 1",
+    "            continue",
+    "        try:",
+    "            _op.BoundaryShape = 'Stock'",
+    "        except Exception:",
+    "            pass",
+    "        try:",
+    "            _op.StartDepth = _stock_top",
+    "            _op.FinalDepth = _final",
+    "            _refixed = True",
+    "        except Exception:",
+    "            pass",
+    "    if _refixed:",
     "        _doc.recompute()",
     // Per-op diagnostic: without FreeCAD to hand, this is what says whether the
     // forced settings produced a real path, whether the rollback recovered one,
