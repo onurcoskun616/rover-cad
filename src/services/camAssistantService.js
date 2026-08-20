@@ -452,6 +452,100 @@ export function parseCollisionViolations(text) {
   }
 }
 
+// Trusted transform (NOT model output): make the FreeCAD Job's Stock match the
+// raw block the user actually entered in the CAM wizard. `PathJob.Create(...,
+// None)` leaves the Job on FreeCAD's default stock — the part's own bounding
+// box plus a ~1mm skin — so every operation gets planned for a block that
+// shrink-wraps the finished part. Live testing showed exactly what that costs:
+// on a real 80x143x20 plate holding a ~20x23x13 hexagon, the FaceMill skimmed a
+// 4x7mm rectangle (the default stock's whole top) instead of the plate's, the
+// Profile traced the outline once at a single depth instead of descending
+// through 20mm of material, and every ClearanceHeight/SafeHeight came out below
+// the plate's real top — so the CNC simulator, which renders the block the user
+// entered, saw each retract rapid drive straight into stock the toolpath never
+// knew existed, and the finished "part" was just its outline scratched into an
+// otherwise untouched plate. Setting the stock here rather than in the prompt is
+// deliberate: the model is told the block dimensions in [CAM_PARAMETRELERI] and
+// still left the Job on its default stock, and this is a property with one
+// correct value that can be computed outright.
+//
+// Injected immediately AFTER the Job is created and BEFORE the model's
+// operations are built, because operations read the stock when their paths are
+// computed — setting it afterwards would leave already-computed depths and
+// boundaries derived from the default block.
+//
+// Extents go on symmetrically in X/Y (part centred in the block) with ALL the
+// spare Z above the part, mirroring how a block is actually clamped: the part's
+// bottom sits on the fixture and the excess on top is what gets faced off.
+// Skipped when the entered block is smaller than the part on any axis — that
+// part cannot be made from that block, and silently shrinking the stock would
+// hide the mistake instead of surfacing it.
+function realStockPy(sx, sy, sz) {
+  return [
+    "def _rover_real_stock(_doc, _job, _base_obj, _sx, _sy, _sz):",
+    "    try:",
+    "        _bb = _base_obj.Shape.BoundBox",
+    "        _stock = _job.Stock",
+    "    except Exception as _e:",
+    "        print('REAL_STOCK=skipped (' + str(_e) + ')')",
+    "        return",
+    "    if _stock is None:",
+    "        print('REAL_STOCK=skipped (job has no Stock)')",
+    "        return",
+    "    _px = float(_bb.XLength); _py = float(_bb.YLength); _pz = float(_bb.ZLength)",
+    "    if _sx + 1e-6 < _px or _sy + 1e-6 < _py or _sz + 1e-6 < _pz:",
+    "        print('REAL_STOCK=skipped (block %gx%gx%g smaller than part %gx%gx%g)' % (_sx, _sy, _sz, _px, _py, _pz))",
+    "        return",
+    "    _ext = (( 'ExtXneg', (_sx - _px) / 2.0), ('ExtXpos', (_sx - _px) / 2.0),",
+    "            ('ExtYneg', (_sy - _py) / 2.0), ('ExtYpos', (_sy - _py) / 2.0),",
+    "            ('ExtZneg', 0.0), ('ExtZpos', _sz - _pz))",
+    "    _n = 0",
+    "    for _k, _v in _ext:",
+    "        if hasattr(_stock, _k):",
+    "            try:",
+    "                setattr(_stock, _k, _v)",
+    "                _n += 1",
+    "            except Exception:",
+    "                pass",
+    "    if _n:",
+    "        _doc.recompute()",
+    "        print('REAL_STOCK=%gx%gx%g' % (_sx, _sy, _sz))",
+    "    else:",
+    "        print('REAL_STOCK=skipped (stock exposes no Ext* properties)')",
+    `_rover_real_stock(doc, job, base, ${sx}, ${sy}, ${sz})`,
+  ].join("\n");
+}
+
+// Splice realStockPy() into the model's script on the line after the Job is
+// created, matching that line's indentation (the script builds the Job inside a
+// function body, so a flush-left block would be a syntax error). Returns the
+// code untouched when the wizard has no block dimensions or the Job line isn't
+// where the prompt mandates it — a missing stock override only costs the fix,
+// while a bad splice would cost the whole run.
+function injectRealStockPy(code, answers) {
+  const sx = positiveNumberOrNull(answers?.stockX);
+  const sy = positiveNumberOrNull(answers?.stockY);
+  const sz = positiveNumberOrNull(answers?.stockZ);
+  if (!sx || !sy || !sz) return code;
+  const lines = code.split("\n");
+  const idx = lines.findIndex((l) => /^\s*job\s*=.*PathJob\s*\.\s*Create\s*\(/.test(l));
+  if (idx < 0) return code;
+  const indent = lines[idx].match(/^\s*/)[0];
+  const block = realStockPy(sx, sy, sz)
+    .split("\n")
+    .map((l) => (l ? indent + l : l));
+  lines.splice(idx + 1, 0, ...block);
+  return lines.join("\n");
+}
+
+// Sanitize the model's script, then give the Job the user's real stock block.
+// Shared by both run paths (fresh generation and the re-run of an approved
+// preview's stored code) so an exported G-code can never be planned against a
+// different block than the preview the user approved.
+function preparePathCodePy(code, answers) {
+  return wrapWithTracebackPy(injectRealStockPy(sanitizeFreeCADCode(code), answers));
+}
+
 // Trusted epilogue (NOT model output): PREVENTIVE, deterministic fix for the
 // "rapid passes through the part" collision violation. The error message has
 // always pointed at the real cause ("yanlis/eksik ... ClearanceHeight/
@@ -483,7 +577,20 @@ function autoFixClearanceHeightsPy() {
     "        _bb = _base_obj.Shape.BoundBox",
     "    except Exception:",
     "        return",
-    "    _safe_z = float(_bb.ZMax) + 5.0",
+    // Clear the STOCK, not just the finished part. Deriving this from the part
+    // alone put every retract below the top of the raw block whenever the block
+    // was taller than the part (the normal case — that excess is what gets
+    // machined away), so the "safe" height sat inside material the toolpath was
+    // about to travel across. Live case: part ZMax 13 gave safe_z 18 on a 20mm
+    // plate, and every rapid at Z18 was a crash.
+    "    _top = float(_bb.ZMax)",
+    "    try:",
+    "        _stk = getattr(job, 'Stock', None)",
+    "        if _stk is not None:",
+    "            _top = max(_top, float(_stk.Shape.BoundBox.ZMax))",
+    "    except Exception:",
+    "        pass",
+    "    _safe_z = _top + 5.0",
     "    _fixed = False",
     "    for _op in _grp:",
     "        for _prop in ('ClearanceHeight', 'SafeHeight'):",
@@ -869,10 +976,92 @@ function postEpiloguePy(gcodePath, postName, isTorna) {
     autoFixDeepPlungesPy(),
     plungeCheckPy(isTorna),
     collisionCheckPy(),
+    // Report which magazine slot each operation runs on, so a post that drops
+    // tool changes (grbl_post does — real GRBL has no automatic changer) can
+    // still be matched back to the right tool downstream. Keyed by Label
+    // because that is the name the post writes into its own
+    // "(Begin operation: <Label>)" marker.
+    "import json as _json_tm",
+    "_tmap = []",
+    "for _op in _grp:",
+    "    try:",
+    "        _tc = getattr(_op, 'ToolController', None)",
+    "        _tn = int(_tc.ToolNumber) if _tc is not None else 0",
+    "    except Exception:",
+    "        _tn = 0",
+    "    _tmap.append([str(getattr(_op, 'Label', '')), _tn])",
+    "print('TOOLMAP=' + _json_tm.dumps(_tmap))",
     `_out = ${JSON.stringify(gcodePath)}`,
     "post_mod.export(_grp, _out, '--no-show-editor')",
     "print('GCODE_PATH=' + _out)",
   ].join("\n");
+}
+
+/** Read the operation -> magazine slot map printed by postEpiloguePy(). */
+export function parseToolMap(text) {
+  const m = /TOOLMAP=(\[.*\])/.exec(text || "");
+  if (!m) return [];
+  try {
+    const parsed = JSON.parse(m[1]);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+// grbl_post deliberately emits no tool change: real GRBL has no automatic
+// changer, so a machinist swaps tools by hand. The CNC simulator has a 40-slot
+// magazine and picks its tool from the T word, so a G-code with no T word left
+// it cutting with whatever tool the previous program had loaded. Live case: a
+// path compensated for a O6mm endmill ran against a leftover O26mm cutter, and
+// the hexagon profile came out as a groove wide enough to look like a different
+// part. Multi-tool jobs were worse — every operation ran on tool one.
+//
+// So when the exported file has no T word at all, add one per operation from
+// the Job's own ToolControllers, at the "(Begin operation: ...)" marker the post
+// already writes, and only where the tool actually changes. A file that DOES
+// carry tool changes is left untouched — that post meant what it wrote.
+// `M6` rides along for real controls that expect it; the simulator ignores it.
+function ensureToolChanges(gcodePath, toolMap) {
+  if (!Array.isArray(toolMap) || !toolMap.length) return;
+  let raw;
+  try {
+    raw = fs.readFileSync(gcodePath, "utf-8");
+  } catch {
+    return;
+  }
+  const lines = raw.split(/\r?\n/);
+  // Strip comments first: "(Tool: T5 ...)" is a note, not a tool change.
+  const alreadyHasToolWord = lines.some((l) => /(?:^|\s)T\d+/.test(l.replace(/\(.*?\)/g, "")));
+  if (alreadyHasToolWord) return;
+
+  const slotByLabel = new Map(
+    toolMap
+      .filter((e) => Array.isArray(e) && e[0] && Number(e[1]) > 0)
+      .map((e) => [String(e[0]), Math.round(Number(e[1]))]),
+  );
+  if (!slotByLabel.size) return;
+
+  const out = [];
+  let currentSlot = null;
+  let injected = 0;
+  for (const line of lines) {
+    out.push(line);
+    const marker = /^\(Begin operation:\s*(.+?)\s*\)\s*$/.exec(line);
+    if (!marker) continue;
+    const slot = slotByLabel.get(marker[1]);
+    if (!slot || slot === currentSlot) continue;
+    out.push(`T${slot} M6`);
+    currentSlot = slot;
+    injected += 1;
+  }
+  if (!injected) return;
+  try {
+    fs.writeFileSync(gcodePath, out.join("\n"), "utf-8");
+    console.log(`${injected} takim degisimi G-code'a eklendi:`, path.basename(gcodePath));
+  } catch (err) {
+    console.warn("Takim degisimi eklenemedi:", err.message);
+  }
 }
 
 /**
@@ -978,7 +1167,7 @@ async function generateAndRunPathCode({ abs, geometry, answers, plan, threadGuid
       const result = await callFreecadTool(config.freecadMcp.toolName, {
         [config.freecadMcp.toolParam]:
           disableInteractiveToolControllerPy() + "\n" +
-          wrapWithTracebackPy(sanitizeFreeCADCode(code)) + "\n" + epiloguePy,
+          preparePathCodePy(code, answers) + "\n" + epiloguePy,
       });
       text = extractResultText(result);
       if (result?.isError || text.startsWith("Failed to execute code")) {
@@ -1176,7 +1365,7 @@ export async function generateCamGcodeFromPlan(stepPath, answers, plan, context 
     const result = await callFreecadTool(config.freecadMcp.toolName, {
       [config.freecadMcp.toolParam]:
         disableInteractiveToolControllerPy() + "\n" +
-        wrapWithTracebackPy(sanitizeFreeCADCode(stored)) + "\n" + epiloguePy,
+        preparePathCodePy(stored, answers) + "\n" + epiloguePy,
     });
     const text = extractResultText(result);
     if ((result?.isError || !text.includes("GCODE_PATH=")) && !fs.existsSync(gcodePath)) {
@@ -1198,14 +1387,17 @@ export async function generateCamGcodeFromPlan(stepPath, answers, plan, context 
       }
       throw new Error(`Guvenlik kontrolu basarisiz: ${parts.join(" | ")}. Onizlemeyi yeniden olusturun.`);
     }
+    // Before any dialect transform, so injected changes get translated too.
+    ensureToolChanges(gcodePath, parseToolMap(text));
     applyControllerTransform(gcodePath, postName, abs, answers);
     return { gcodePath, safetyChecks: buildSafetyChecks(isTornaMachine(answers)) };
   }
 
   // No approved preview to reuse → generate the Path code and post-process it.
+  let runText = "";
   try {
     const geometry = await describeStepGeometry(stepPath);
-    await generateAndRunPathCode({
+    ({ text: runText } = await generateAndRunPathCode({
       abs,
       geometry,
       answers,
@@ -1213,12 +1405,13 @@ export async function generateCamGcodeFromPlan(stepPath, answers, plan, context 
       threadGuidance: threadGuidanceFor(answers, context),
       epiloguePy,
       successMarker: "GCODE_PATH=",
-    });
+    }));
   } catch (err) {
     try { fs.unlinkSync(gcodePath); } catch { /* not present; fine */ }
     throw err;
   }
   if (!fs.existsSync(gcodePath)) throw new Error("G-code dosyasi olusmadi");
+  ensureToolChanges(gcodePath, parseToolMap(runText));
   applyControllerTransform(gcodePath, postName, abs, answers);
   return { gcodePath, safetyChecks: buildSafetyChecks(isTornaMachine(answers)) };
 }
