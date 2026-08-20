@@ -595,6 +595,87 @@ function preparePathCodePy(code, answers) {
   return wrapWithTracebackPy(injectRealStockPy(sanitizeFreeCADCode(code), answers));
 }
 
+// Trusted epilogue (NOT model output): force every MillFace operation to face
+// the RAW BLOCK's top. The cam-code prompt already spells this out, and the
+// model kept pinning `Base` to the part's own top faces anyway — so MillFace
+// cleared that little island instead of the block. On a 98x156 plate holding a
+// ~57x51 part that came out as a handful of disconnected diagonal strokes that
+// read as a letter scratched into the stock, plus a stray plunge out where the
+// island's first pass started, while the rest of the block's top was never
+// touched. Same lesson as autoFixClearanceHeightsPy above: when a property has
+// exactly one correct value, set the property instead of asking again.
+//
+// Depths go with it — facing runs from the block's top down to the finished top
+// surface, since that gap IS the excess this operation exists to remove — and
+// are re-asserted after the recompute because FreeCAD's own opExecute resets
+// them to the operation's defaults, which is what collapsed facing into a
+// single pass at the part's top. Must run BEFORE autoFixDeepPlungesPy: that one
+// hand-edits Path.Commands in memory and a later recompute would undo its work.
+function autoFixFaceBoundaryPy() {
+  return [
+    "def _rover_fix_face_ops(_doc, _grp, _base_obj, _job):",
+    "    try:",
+    "        _part_top = float(_base_obj.Shape.BoundBox.ZMax)",
+    "    except Exception:",
+    "        return",
+    "    _stock_top = _part_top",
+    "    try:",
+    "        _stk = getattr(_job, 'Stock', None)",
+    "        if _stk is not None:",
+    "            _stock_top = max(_stock_top, float(_stk.Shape.BoundBox.ZMax))",
+    "    except Exception:",
+    "        pass",
+    // No excess above the part means there is nothing to face off, so fall back
+    // to the shallow skim rather than emitting a zero-depth operation.
+    "    _final = _part_top if _stock_top > _part_top + 1e-6 else _part_top - 1.0",
+    "    _targets = []",
+    "    for _op in _grp:",
+    "        _cls = ''",
+    "        try:",
+    "            _cls = type(_op.Proxy).__name__",
+    "        except Exception:",
+    "            pass",
+    "        _name = str(getattr(_op, 'Name', '')) + str(getattr(_op, 'Label', ''))",
+    "        if 'Face' not in _cls and 'Face' not in _name:",
+    "            continue",
+    "        if not hasattr(_op, 'BoundaryShape'):",
+    "            continue",
+    "        try:",
+    "            _op.BoundaryShape = 'Stock'",
+    "        except Exception:",
+    "            continue",
+    "        try:",
+    "            _op.Base = []",
+    "        except Exception:",
+    "            pass",
+    "        for _prop, _val in (('StartDepth', _stock_top), ('FinalDepth', _final)):",
+    "            if hasattr(_op, _prop):",
+    "                try:",
+    "                    setattr(_op, _prop, _val)",
+    "                except Exception:",
+    "                    pass",
+    "        _targets.append(_op)",
+    "    if not _targets:",
+    "        print('FACE_FIX=0')",
+    "        return",
+    "    _doc.recompute()",
+    "    _again = False",
+    "    for _op in _targets:",
+    "        try:",
+    "            if (abs(float(_op.StartDepth.Value) - _stock_top) > 1e-6",
+    "                    or abs(float(_op.FinalDepth.Value) - _final) > 1e-6):",
+    "                _op.StartDepth = _stock_top",
+    "                _op.FinalDepth = _final",
+    "                _again = True",
+    "        except Exception:",
+    "            pass",
+    "    if _again:",
+    "        _doc.recompute()",
+    "    print('FACE_FIX=%d (top %.3f -> %.3f)' % (len(_targets), _stock_top, _final))",
+    "_rover_fix_face_ops(doc, _grp, base, job)",
+  ].join("\n");
+}
+
 // Trusted epilogue (NOT model output): PREVENTIVE, deterministic fix for the
 // "rapid passes through the part" collision violation. The error message has
 // always pointed at the real cause ("yanlis/eksik ... ClearanceHeight/
@@ -953,6 +1034,7 @@ function previewEpiloguePy(previewJsonPath, defaultFeed, isTorna) {
     "    _grp = list(job.Operations.Group)",
     "except Exception as _e:",
     "    raise RuntimeError('job.Operations bulunamadi: ' + str(_e))",
+    autoFixFaceBoundaryPy(),
     autoFixClearanceHeightsPy(),
     autoFixUnsafeRapidsToFeedPy(),
     autoFixDeepPlungesPy(),
@@ -1026,6 +1108,7 @@ function postEpiloguePy(gcodePath, postName, isTorna) {
     "if post_mod is None:",
     "    raise RuntimeError('post-processor modulu bulunamadi')",
     "_grp = list(job.Operations.Group)",
+    autoFixFaceBoundaryPy(),
     autoFixClearanceHeightsPy(),
     autoFixUnsafeRapidsToFeedPy(),
     autoFixDeepPlungesPy(),
