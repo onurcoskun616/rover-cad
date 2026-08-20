@@ -210,7 +210,12 @@ async function readJson(response) {
 }
 
 const POLL_INTERVAL_MS = 1500;
-const POLL_TIMEOUT_MS = 7 * 60 * 1000;
+// Backend retries (up to 3 attempts for model generation) each now allow up
+// to 8 minutes for the LLM call alone (CLAUDE_CLI_TIMEOUT_MS) — worst case
+// comfortably exceeds this 30-minute window even on a legitimately slow
+// but eventually-successful request, which would otherwise strand a
+// completed backend result behind a frontend that already gave up.
+const POLL_TIMEOUT_MS = 30 * 60 * 1000;
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));

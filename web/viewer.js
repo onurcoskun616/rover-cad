@@ -645,9 +645,9 @@ export function loadStl(viewer, url) {
       geometry.computeVertexNormals();
 
       const material = new THREE.MeshStandardMaterial({
-        color: 0x2563eb,
-        metalness: 0.15,
-        roughness: 0.55,
+        color: 0xb0b4b8,
+        metalness: 0.2,
+        roughness: 0.6,
       });
       const mesh = new THREE.Mesh(geometry, material);
       viewer.scene.add(mesh);

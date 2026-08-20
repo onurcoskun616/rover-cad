@@ -19,13 +19,17 @@ const camBackBtn = byId("cam-back-btn");
 const camNextBtn = byId("cam-next-btn");
 const camPlanBtn = byId("cam-plan-btn");
 const camPlanView = byId("cam-plan-view");
-const camPlanText = byId("cam-plan-text");
+const camPlanSummary = byId("cam-plan-summary");
+const camPlanTbody = byId("cam-plan-tbody");
+const camPlanNotes = byId("cam-plan-notes");
 const camGenerateBtn = byId("cam-generate-btn");
 const camReviseBtn = byId("cam-revise-btn");
 const camReviseBox = byId("cam-revise-box");
 const camReviseInput = byId("cam-revise-input");
 const camReviseSubmit = byId("cam-revise-submit");
 const gcodeOutput = byId("gcode-output");
+const camSafetySummary = byId("cam-safety-summary");
+const camSafetyList = byId("cam-safety-list");
 const gcodePreview = byId("gcode-preview");
 const gcodeLink = byId("gcode-link");
 const cncSimBtn = byId("cnc-sim-btn");
@@ -73,7 +77,14 @@ async function readJson(response) {
 }
 
 const POLL_INTERVAL_MS = 1500;
-const POLL_TIMEOUT_MS = 7 * 60 * 1000;
+// CAM code generation retries up to twice, and each attempt now allows up to
+// 8 minutes for the LLM call plus 5 minutes for FreeCAD execution
+// (CLAUDE_CLI_TIMEOUT_MS / FREECAD_MCP_CALL_TIMEOUT_MS) — worst case ~26min
+// across both attempts. A complex 3D freeform plan (toroid/surface
+// roughing+finishing), or just a slow LLM CLI round-trip, can legitimately
+// need that. A shorter window would give up on the frontend before a
+// slow-but-successful backend attempt ever finished.
+const POLL_TIMEOUT_MS = 35 * 60 * 1000;
 function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 
 async function runAsyncJob(url, options, onTick) {
@@ -112,6 +123,68 @@ function setCamStatus(message, busy) {
 
 function escapeHtml(s) {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+// Critical machining parameters the machinist can review/tweak before the
+// plan is turned into FreeCAD code — editing here writes straight into
+// `camPlan.steps`, which is what gets sent to /cam-simulate and /cam-confirm
+// verbatim, so an edit made here is exactly what the code generator sees.
+const CAM_PLAN_NUMERIC_FIELDS = [
+  { field: "stepDownMm", max: 10 },
+  { field: "feedMmMin", max: null },
+  { field: "startDepthMm", max: null },
+  { field: "finalDepthMm", max: null },
+];
+
+function renderCamPlanTable(plan) {
+  camPlanSummary.textContent = plan.summary || "";
+  camPlanNotes.textContent = plan.notes ? `Notlar: ${plan.notes}` : "";
+  camPlanTbody.innerHTML = (plan.steps || []).map((s, i) => {
+    const cells = CAM_PLAN_NUMERIC_FIELDS.map(({ field, max }) => {
+      const v = s[field];
+      const maxAttr = max != null ? ` max="${max}"` : "";
+      return `<td><input type="number" step="any"${maxAttr} class="cam-plan-input" data-idx="${i}" data-field="${field}" value="${v ?? ""}" /></td>`;
+    }).join("");
+    return (
+      `<tr>` +
+      `<td>${s.step}</td>` +
+      `<td><strong>${escapeHtml(s.operation || "")}</strong> — ${escapeHtml(s.tool || "")}` +
+      (s.description ? `<div class="cam-plan-desc">${escapeHtml(s.description)}</div>` : "") +
+      `</td>` +
+      cells +
+      `</tr>`
+    );
+  }).join("");
+}
+
+// Delegated so it works for every row rendered above, including after a
+// revised plan re-renders the whole table.
+camPlanTbody.addEventListener("change", (ev) => {
+  const input = ev.target.closest(".cam-plan-input");
+  if (!input || !camPlan) return;
+  const idx = Number(input.dataset.idx);
+  const field = input.dataset.field;
+  const step = camPlan.steps?.[idx];
+  if (!step) return;
+  let value = input.value.trim() === "" ? null : Number(input.value);
+  if (value != null && !Number.isFinite(value)) value = null;
+  const spec = CAM_PLAN_NUMERIC_FIELDS.find((f) => f.field === field);
+  if (value != null && spec?.max != null && value > spec.max) {
+    value = spec.max; // silently clamp (StepDown must never exceed the safety limit)
+    input.value = String(value);
+  }
+  step[field] = value;
+});
+
+function renderSafetyChecks(checks) {
+  if (!Array.isArray(checks) || checks.length === 0) {
+    camSafetySummary.hidden = true;
+    return;
+  }
+  camSafetyList.innerHTML = checks.map((c) =>
+    `<li class="${c.ok ? "cam-safety-ok" : "cam-safety-fail"}">${c.ok ? "✓" : "✕"} ${escapeHtml(c.label || "")}</li>`
+  ).join("");
+  camSafetySummary.hidden = false;
 }
 
 async function loadCamStep(targetIndex) {
@@ -197,13 +270,14 @@ async function requestCamPlan(changeRequest) {
     const plan = result.body.plan;
     camPlan = plan;
     setCamStatus("", false);
-    camPlanText.textContent = plan.planText || JSON.stringify(plan, null, 2);
+    renderCamPlanTable(plan);
     camPlanView.hidden = false;
     camReviseBox.hidden = true;
     camReviseInput.value = "";
     camPreviewToken = null;
     camEstimatedMinutes = null;
     gcodeOutput.hidden = true;
+    camSafetySummary.hidden = true;
     camQuote.hidden = true;
     camQuoteForm.hidden = true;
     camQuoteResult.hidden = true;
@@ -249,6 +323,7 @@ async function handleCamGenerate() {
 
     const gcodeUrl = confirmResult.body.gcodeUrl;
     setCamStatus("G-code hazır.", false);
+    renderSafetyChecks(confirmResult.body.safetyChecks);
 
     gcodeLink.href = gcodeUrl;
 

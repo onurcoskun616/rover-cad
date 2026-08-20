@@ -12,6 +12,11 @@
 }}
 </script>
 <style>
+  @media print {
+    body > *:not(#sheet-overlay) { display: none !important; }
+    #sheet-overlay { position: static !important; background: #fff !important; padding: 0 !important; display: block !important; }
+    #sheet-panel { max-width: none !important; max-height: none !important; }
+  }
   @keyframes spin-slow { to { transform: rotate(360deg); } }
   .animate-spin-slow { animation: spin-slow 2s linear infinite; display:inline-block; }
   .mdi-key{display:flex;align-items:center;justify-content:center;border-radius:3px;border:1px solid rgba(9,9,11,.6);
@@ -28,15 +33,14 @@
 
   /* Topkapı AI Chat Bot */
   #tai-toggle{display:none;}
-  .tai-open-btn{display:flex;align-items:center;gap:10px;width:100%;padding:10px 12px;border-radius:8px;border:1px solid rgba(6,182,212,.3);
-    background:linear-gradient(135deg,#0c1a24 0%,#18181b 100%);cursor:pointer;transition:border-color .2s,box-shadow .2s;}
-  .tai-open-btn:hover{border-color:#06b6d4;box-shadow:0 0 12px rgba(6,182,212,.2);}
-  .tai-open-btn .tai-robot{width:36px;height:36px;border-radius:8px;background:#083344;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
-  .tai-open-btn .tai-info{flex:1;text-align:left;}
-  .tai-open-btn .tai-label{font-size:12px;font-weight:700;color:#67e8f9;letter-spacing:.02em;}
-  .tai-open-btn .tai-sub{font-size:9px;color:#a1a1aa;margin-top:1px;}
-  .tai-open-btn .tai-sub .tai-mode-tag{display:inline-block;background:#06b6d4;color:#fff;font-size:8px;font-weight:800;
-    padding:1px 6px;border-radius:8px;margin-left:4px;letter-spacing:.04em;vertical-align:middle;}
+  /* klasik sohbet asistanı stili yuvarlak buton — panelin sol alt köşesine
+     sabitlenir (position:fixed), gerçek panel konumuna göre JS'te
+     hesaplanır (positionTaiTab), panel akışından ve kaydırmasından bağımsız */
+  .tai-dock-tab{position:fixed;z-index:20;display:flex;align-items:center;justify-content:center;
+    width:52px;height:52px;border-radius:50%;cursor:pointer;border:1px solid #06b6d4;
+    background:linear-gradient(135deg,#0c1a24 0%,#18181b 100%);color:#67e8f9;font-size:24px;
+    box-shadow:0 4px 14px rgba(0,0,0,.5);transition:box-shadow .2s,background .2s,transform .15s;}
+  .tai-dock-tab:hover{box-shadow:0 4px 20px rgba(6,182,212,.45);background:linear-gradient(135deg,#0e2430 0%,#1c1c1f 100%);transform:scale(1.06);}
   #tai-panel{position:fixed;right:20px;bottom:20px;z-index:10001;width:360px;max-height:520px;
     border-radius:14px;background:#18181b;border:1px solid #3f3f46;box-shadow:0 12px 40px rgba(0,0,0,.6);
     display:none;flex-direction:column;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;}
@@ -95,7 +99,7 @@
     <!-- ==================================================================== -->
     <!-- ============================  FREZE (3B)  ========================== -->
     <!-- ==================================================================== -->
-    <div id="view-mill" class="flex h-full w-full flex-col gap-2 lg:flex-row">
+    <div id="view-mill" class="relative flex h-full w-full flex-col gap-2 lg:flex-row">
       <section class="relative flex-1 overflow-hidden rounded-md border border-zinc-700 bg-black">
         <div id="mill-canvas-wrap" class="absolute inset-0"></div>
 
@@ -117,6 +121,9 @@
           <button id="m-stop"  title="Stop"         class="tb-btn h-10 w-10 text-lg">⏹</button>
           <button id="m-new"   title="Yeni Parça"   class="tb-btn h-10 w-10 text-base">⤓</button>
           <button id="m-mute"  title="Ses"          class="tb-btn h-10 w-10 text-base">🔊</button>
+          <button id="mag-edit-open" title="Takım Magazinini Düzenle" class="tb-btn h-10 w-10 text-base">🧰</button>
+          <button id="sheet-open-mill" title="Kurulum Föyü (süre/maliyet)" class="tb-btn h-10 w-10 text-base">🧾</button>
+          <button id="vise-toggle" title="Mengene Çarpışma Kontrolü" class="tb-btn h-10 w-10 text-base">🔧</button>
         </div>
         <!-- yüklenen dosya adı -->
         <div id="m-file-info" class="hidden absolute right-2 top-14 z-10 rounded bg-black/70 px-2 py-1 font-mono text-[10px] text-cyan-300"></div>
@@ -130,6 +137,9 @@
           <button id="m-wire"       title="Tel kafes" class="tb-icn h-9 w-9 text-sm">◇</button>
         </div>
       </section>
+
+      <!-- Topkapı AI — panelin sol alt köşesine sabitlenmiş klasik sohbet asistanı butonu -->
+      <button id="tai-tab-mill" class="tai-dock-tab" type="button" title="Topkapı AI Asistanı">🤖</button>
 
       <!-- FREZE PANELİ -->
       <aside class="w-full shrink-0 overflow-y-auto lg:w-[380px]">
@@ -238,12 +248,6 @@
             <div id="mmdi" class="grid grid-cols-6 gap-1"></div>
           </div>
 
-          <!-- Topkapı AI chatbot -->
-          <button class="tai-open-btn" id="mtai-btn" type="button">
-            <div class="tai-robot"><svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#67e8f9" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="9" width="18" height="12" rx="3"/><circle cx="9" cy="15" r="1.5" fill="#67e8f9"/><circle cx="15" cy="15" r="1.5" fill="#67e8f9"/><line x1="9" y1="18" x2="15" y2="18"/><line x1="12" y1="3" x2="12" y2="9"/><circle cx="12" cy="3" r="2"/><line x1="1" y1="13" x2="3" y2="13"/><line x1="21" y1="13" x2="23" y2="13"/></svg></div>
-            <div class="tai-info"><div class="tai-label">Topkapi AI</div><div class="tai-sub">CNC Asistan <span class="tai-mode-tag" id="mtai-mode">FREZE</span></div></div>
-          </button>
-
           <!-- malzeme seçimi -->
           <div class="rounded border border-zinc-600 bg-zinc-900/60 p-2">
             <div class="mb-1 text-[9px] font-bold uppercase text-cyan-300">Malzeme / Material</div>
@@ -278,18 +282,23 @@
     <!-- ==================================================================== -->
     <!-- ============================  TORNA (2B)  ========================== -->
     <!-- ==================================================================== -->
-    <div id="view-lathe" class="hidden h-full w-full flex-col gap-2 lg:flex-row">
+    <div id="view-lathe" class="relative hidden h-full w-full flex-col gap-2 lg:flex-row">
       <section class="relative flex-1 overflow-hidden rounded-md border border-zinc-700 bg-black">
         <div class="pointer-events-none absolute left-2 top-2 z-10 rounded bg-black/40 px-2 py-1 font-mono text-[11px] text-cyan-300">Topkapı AI · FANUC 0i-T · Turning</div>
         <div class="absolute right-2 top-2 z-10 flex gap-2">
           <label title="G-Code Dosyası Yükle" class="tb-btn h-10 w-10 text-base cursor-pointer">
             <input type="file" id="l-file" accept=".nc,.gcode,.ngc,.txt,.tap" class="hidden"/>📂
           </label>
+          <button id="sheet-open-lathe" title="Kurulum Föyü (süre/maliyet)" class="tb-btn h-10 w-10 text-base">🧾</button>
         </div>
         <div id="l-file-info" class="hidden absolute right-2 top-14 z-10 rounded bg-black/70 px-2 py-1 font-mono text-[10px] text-cyan-300"></div>
         <canvas id="lathe-canvas" class="block h-full w-full"></canvas>
         <div id="hud" class="pointer-events-none absolute bottom-2 left-2 z-10 rounded bg-black/50 px-2 py-1 font-mono text-[11px] text-emerald-300"></div>
       </section>
+
+      <!-- Topkapı AI — panelin sol alt köşesine sabitlenmiş klasik sohbet asistanı butonu -->
+      <button id="tai-tab-lathe" class="tai-dock-tab" type="button" title="Topkapı AI Asistanı">🤖</button>
+
       <aside class="w-full shrink-0 overflow-y-auto lg:w-[380px]">
         <div class="flex h-full flex-col gap-1.5 rounded-md bg-zinc-800 p-2 text-zinc-200">
           <div class="rounded-sm border-4 border-zinc-500 bg-zinc-900 p-1.5">
@@ -375,12 +384,6 @@
           </div>
           <div class="rounded border border-zinc-600 bg-zinc-700/40 p-2"><div id="mdi-rows" class="grid grid-cols-6 gap-1"></div><div id="mdi-fn" class="mt-1 grid grid-cols-6 gap-1"></div></div>
 
-          <!-- Topkapı AI chatbot -->
-          <button class="tai-open-btn" id="ltai-btn" type="button">
-            <div class="tai-robot"><svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#67e8f9" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="9" width="18" height="12" rx="3"/><circle cx="9" cy="15" r="1.5" fill="#67e8f9"/><circle cx="15" cy="15" r="1.5" fill="#67e8f9"/><line x1="9" y1="18" x2="15" y2="18"/><line x1="12" y1="3" x2="12" y2="9"/><circle cx="12" cy="3" r="2"/><line x1="1" y1="13" x2="3" y2="13"/><line x1="21" y1="13" x2="23" y2="13"/></svg></div>
-            <div class="tai-info"><div class="tai-label">Topkapi AI</div><div class="tai-sub">CNC Asistan <span class="tai-mode-tag" id="ltai-mode">TORNA</span></div></div>
-          </button>
-
           <!-- malzeme seçimi -->
           <div class="rounded border border-zinc-600 bg-zinc-900/60 p-2">
             <div class="mb-1 text-[9px] font-bold uppercase text-cyan-300">Malzeme / Material</div>
@@ -411,6 +414,67 @@
 
   </div>
 </main>
+
+<!-- Takım Magazini Düzenleyici -->
+<div id="mag-edit-overlay" class="hidden fixed inset-0 z-[10010] flex items-center justify-center bg-black/70 p-4">
+  <div class="flex max-h-[88vh] w-full max-w-3xl flex-col overflow-hidden rounded-lg border border-zinc-700 bg-zinc-900 text-zinc-200">
+    <div class="flex items-center justify-between border-b border-zinc-700 px-4 py-3">
+      <h2 class="text-sm font-bold">🧰 Takım Magazini Düzenle</h2>
+      <button id="mag-edit-close" class="rounded px-2 py-1 text-zinc-400 hover:bg-zinc-800 hover:text-white">✕</button>
+    </div>
+    <div id="mag-edit-login-notice" class="hidden px-4 py-3 text-xs text-amber-300">
+      Takım magazinini düzenlemek için giriş yapmalısın. <a href="login.html" class="underline">Giriş yap</a>
+    </div>
+    <div id="mag-edit-body" class="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4 text-xs">
+      <section>
+        <h3 class="mb-2 font-bold text-cyan-300">Takım Tanımla</h3>
+        <div class="grid grid-cols-2 gap-2 sm:grid-cols-6">
+          <input id="mag-t-name" placeholder="İsim (ör. Ø8 Parmak Freze)" class="col-span-2 rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5 sm:col-span-2">
+          <select id="mag-t-type" class="rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5">
+            <option value="endmill">Parmak Freze</option>
+            <option value="roughing">Kaba Freze</option>
+            <option value="drill">Matkap</option>
+            <option value="ballmill">Top Freze</option>
+            <option value="chamfer">Pah Freze</option>
+          </select>
+          <input id="mag-t-dia" type="number" min="0.1" step="0.1" placeholder="Çap mm" class="rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5">
+          <input id="mag-t-flute" type="number" min="0" step="0.5" placeholder="Kesici boy mm" class="rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5">
+          <input id="mag-t-total" type="number" min="0" step="0.5" placeholder="Toplam boy mm" class="rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5">
+          <input id="mag-t-rpm" type="number" min="0" step="100" placeholder="Maks RPM" class="rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5">
+          <input id="mag-t-flutes" type="number" min="1" step="1" placeholder="Ağız sayısı" class="rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5">
+          <input id="mag-t-material" placeholder="Malzeme (ör. Karbur)" class="rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5">
+          <button id="mag-t-add" class="rounded bg-cyan-700 px-2 py-1.5 font-bold hover:bg-cyan-600">+ Ekle</button>
+        </div>
+        <div id="mag-t-error" class="hidden mt-1 text-red-400"></div>
+        <div id="mag-tools-list" class="mt-2 grid gap-1"></div>
+      </section>
+      <section>
+        <h3 class="mb-2 font-bold text-cyan-300">Slot Sırası (T01–T40)</h3>
+        <div id="mag-slots-grid" class="grid grid-cols-2 gap-1.5 sm:grid-cols-4"></div>
+      </section>
+    </div>
+    <div class="flex items-center justify-between gap-2 border-t border-zinc-700 px-4 py-3">
+      <span id="mag-edit-status" class="text-xs text-zinc-400"></span>
+      <div class="flex gap-2">
+        <button id="mag-edit-cancel" class="rounded border border-zinc-700 px-3 py-1.5 text-xs hover:bg-zinc-800">Kapat</button>
+        <button id="mag-edit-save" class="rounded bg-emerald-700 px-3 py-1.5 text-xs font-bold hover:bg-emerald-600">Kaydet</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="sheet-overlay" class="hidden fixed inset-0 z-[10010] flex items-center justify-center bg-black/70 p-4 print:static print:bg-white print:p-0">
+  <div id="sheet-panel" class="flex max-h-[88vh] w-full max-w-2xl flex-col overflow-hidden rounded-lg border border-zinc-700 bg-zinc-900 text-zinc-200 print:max-h-none print:w-auto print:max-w-none print:rounded-none print:border-0 print:bg-white print:text-black">
+    <div class="flex items-center justify-between border-b border-zinc-700 px-4 py-3 print:hidden">
+      <h2 class="text-sm font-bold">🧾 Kurulum Föyü</h2>
+      <button id="sheet-close" class="rounded px-2 py-1 text-zinc-400 hover:bg-zinc-800 hover:text-white">✕</button>
+    </div>
+    <div id="sheet-body" class="min-h-0 flex-1 overflow-y-auto p-4 text-xs print:overflow-visible print:p-6 print:text-sm"></div>
+    <div class="flex items-center justify-end gap-2 border-t border-zinc-700 px-4 py-3 print:hidden">
+      <button id="sheet-print" class="rounded bg-emerald-700 px-3 py-1.5 text-xs font-bold hover:bg-emerald-600">🖨 Yazdır</button>
+    </div>
+  </div>
+</div>
 
 <!-- Topkapı AI Chat Bot -->
 <button id="tai-toggle" title="Topkapı AI"></button>
@@ -491,7 +555,7 @@ class LatheEngine{
   update(dt){const tr=this.s.spindleOn?this.s.spindleRpm:0;this.s.actualRpm+=(tr-this.s.actualRpm)*Math.min(1,dt*3);if(this.s.actualRpm<1)this.s.actualRpm=tr===0?0:this.s.actualRpm;this.angle+=(this.s.actualRpm/60)*dt*Math.PI*2;
     if(this.s.emergency)return;const feedRate=(this.s.feed/60)*this.s.feedOverride,rapid=220;
     if(this.s.mode==="MANUAL"&&!this.moveActive&&(this.jogX||this.jogZ)){const rate=this.s.spindleOn?feedRate:rapid*.35;this.s.x=clamp(this.s.x+this.jogX*rate*dt,0,STOCK_R+12);this.s.z=clamp(this.s.z+this.jogZ*rate*dt,-20,STOCK_LEN);this.s.targetX=this.s.x;this.s.targetZ=this.s.z;}
-    if(this.moveActive){const m=this.moveActive,rate=m.type==="feed"?feedRate:rapid,dx=m.x-this.s.x,dz=m.z-this.s.z,dist=Math.hypot(dx,dz),step=rate*dt;
+    if(this.moveActive){const m=this.moveActive,rate=m.type==="feed"?(m.threadFeed?(m.threadFeed/60)*this.s.feedOverride:(m.gcodeFeed?(m.gcodeFeed/60)*this.s.feedOverride:feedRate)):rapid,dx=m.x-this.s.x,dz=m.z-this.s.z,dist=Math.hypot(dx,dz),step=rate*dt;
       if(dist<=step||dist<1e-4){this.s.x=m.x;this.s.z=m.z;this.moveActive=this.queue.shift()||null;if(!this.moveActive&&this.s.running)this.s.running=false;}else{this.s.x+=(dx/dist)*step;this.s.z+=(dz/dist)*step;}}
     const cutting=this.s.actualRpm>30&&this.s.z>=-1&&this.s.z<=STOCK_LEN&&this.s.x<STOCK_R+.5;
     if(cutting){const agg=Math.max(.4,(this.s.actualRpm/1200)*1.2);if(this.cutAt(this.s.z,this.s.x,agg))this.spawnChips(this.s.z,this.s.x,3);}
@@ -677,7 +741,16 @@ function initMill(){
 
   camera=new THREE.PerspectiveCamera(45,1,1,3000);
   controls=new OrbitControls(camera,renderer.domElement);
-  controls.enableDamping=true;controls.target.set(0,20,0);
+  // Damping'in "momentum/glide" davranışı fare tekerleğinde her scroll'un
+  // birkaç kare boyunca sönümlenerek devam etmesine yol açıyordu — hızlı
+  // art arda scroll'da kamera hedeften geçip geri sekiyor gibi hissettiriyor
+  // ("gidip gelme"). Damping kapatılınca zoom her tekerlek hareketine 1:1,
+  // anında karşılık veriyor; zoomSpeed düşürülerek de her "tık" daha ince
+  // bir adım oluyor (hassas ayar).
+  controls.enableDamping=false;
+  controls.zoomSpeed=0.6;
+  controls.target.set(0,20,0);
+  applyStockZoomLimits();
   setView("iso");
 
   scene.add(new THREE.HemisphereLight(0xffffff,0x556070,0.85));
@@ -692,6 +765,7 @@ function initMill(){
   floor.rotation.x=-Math.PI/2;floor.position.y=-42;floor.receiveShadow=true;scene.add(floor);
 
   buildWorkpiece();
+  buildVise();
   buildTool();
   buildMagazineDisk();
   buildChipPool();
@@ -791,10 +865,39 @@ function resizeMillStock(newW, newD, newTop){
   dx=W/(COLS-1); dz=D/(ROWS-1);
   heights=new Float32Array(COLS*ROWS).fill(TOP);
   buildWorkpiece();
+  buildVise();
   mill.x=0; mill.y=TOP+30; mill.z=0;
   mill.running=false; mill.queue=[]; mill.moveActive=null; mill.removed=0;
   controls.target.set(0,TOP*0.3,0);
+  applyStockZoomLimits();
   setView("iso");
+}
+
+// Mengene (vise) jaws flanking the stock in X — the most common real
+// workholding setup, and a real source of crashes the stock-only heightmap
+// collision check can't see (a rapid can clear the stock fine and still hit
+// the jaws holding it). Purely additive: off by default, toggled by the
+// user, visualized so the check is never a "trust me" black box.
+let viseGroup=null, viseEnabled=false;
+const VISE_JAW_WIDTH=25, VISE_JAW_HEIGHT=45, VISE_JAW_OVERHANG=15;
+function buildVise(){
+  if(viseGroup){while(viseGroup.children.length){const c=viseGroup.children[0];c.geometry.dispose();c.material.dispose();viseGroup.remove(c);}scene.remove(viseGroup);}
+  viseGroup=new THREE.Group();
+  const jawMat=new THREE.MeshStandardMaterial({color:0x556270,metalness:.7,roughness:.4});
+  const depth=D+VISE_JAW_OVERHANG*2;
+  const mkJaw=(sign)=>{
+    const jaw=new THREE.Mesh(new THREE.BoxGeometry(VISE_JAW_WIDTH,VISE_JAW_HEIGHT,depth),jawMat);
+    jaw.position.set(sign*(W/2+VISE_JAW_WIDTH/2),VISE_JAW_HEIGHT/2,0);
+    jaw.castShadow=true;jaw.receiveShadow=true;
+    viseGroup.add(jaw);
+  };
+  mkJaw(1);mkJaw(-1);
+  viseGroup.visible=viseEnabled;
+  scene.add(viseGroup);
+}
+function setViseEnabled(v){
+  viseEnabled=v;
+  if(viseGroup)viseGroup.visible=v;
 }
 
 function resizeLatheStock(newLen, newR){
@@ -810,7 +913,24 @@ function resizeLatheStock(newLen, newR){
 }
 
 function millResize(){if(!renderer)return;const wrap=$("mill-canvas-wrap"),w=wrap.clientWidth||1,h=wrap.clientHeight||1;renderer.setSize(w,h,false);camera.aspect=w/h;camera.updateProjectionMatrix();}
-function setView(v){const d=360;const map={iso:[d*.9,d*.7,d*.9],top:[0,d*1.2,1],front:[0,d*.4,d*1.1],right:[d*1.1,d*.4,0]};const p=map[v]||map.iso;camera.position.set(p[0],p[1],p[2]);controls&&controls.update();}
+// Kamera mesafesi/zoom sınırları stok boyutuyla orantılı, sabit değerler
+// değil — böylece çok küçük/büyük bir stokla zoom aralığı parçaya uymama
+// sorunu yaşanmıyor.
+function stockCameraScale(){return Math.max(W||0,D||0,TOP||0,40);}
+// minDistance eskiden s*0.3 idi (varsayılan stokta 60mm) — tekerlekle içeri
+// zoom yapılınca kamerayı parçanın/tablanın neredeyse üstüne getiriyor,
+// ekranı tek bir gri yüzeyle dolduruyordu ("zoom bozuk" hissi). s*0.8 parçayı
+// hâlâ kadrajda tutacak kadar mesafe bırakıyor. maxDistance ise sahne
+// sisiyle (scene.fog) birlikte ayarlanıyor ki en uzak zoom da tamamen sise
+// gömülüp görünmez hale gelmesin.
+function applyStockZoomLimits(){
+  if(!controls)return;
+  const s=stockCameraScale();
+  controls.minDistance=Math.max(40,s*0.8);
+  controls.maxDistance=Math.max(600,s*6);
+  if(scene&&scene.fog){scene.fog.near=controls.maxDistance*0.75;scene.fog.far=controls.maxDistance*1.6;}
+}
+function setView(v){const s=stockCameraScale();const d=Math.max(140,s*1.8);const map={iso:[d*.9,d*.7,d*.9],top:[0,d*1.2,1],front:[0,d*.4,d*1.1],right:[d*1.1,d*.4,0]};const p=map[v]||map.iso;camera.position.set(p[0],p[1],p[2]);controls&&controls.update();}
 
 /* --- freze fiziği --- */
 function colX(ix){return -W/2+ix*dx;} function colZ(iy){return -D/2+iy*dz;}
@@ -873,7 +993,7 @@ function updateMill(dt){
         else if(m._ph===1){const p=Math.min((m._t-0.3)/0.6,1);const e=p<.5?2*p*p:-1+(4-2*p)*p;magGroup.rotation.y=m._rotStart+(m._rotEnd-m._rotStart)*e;if(m._t>=0.9){m._ph=2;magazine.requestChange(m.targetSlot);buildTool();toolGroup.visible=false;}}
         else if(m._ph===2){toolGroup.visible=true;const p=Math.min((m._t-0.9)/0.3,1);toolYOff=80*(1-p);if(m._t>=1.2){m._ph=3;}}
         else{toolYOff=0;magGroup.visible=false;mill.spindleOn=true;mill.coolantMode="flood";mill.moveActive=mill.queue.shift()||null;if(!mill.moveActive&&mill.running)mill.running=false;}
-      }else{const rate=m.type==="feed"?feedRate:rapid;
+      }else{const rate=m.type==="feed"?(m.gcodeFeed?(m.gcodeFeed/60)*mill.feedOverride:feedRate):rapid;
       const ex=m.x-mill.x,ey=m.y-mill.y,ez=m.z-mill.z,dist=Math.hypot(ex,ey,ez),stepv=rate*dt;
       if(dist<=stepv||dist<1e-4){mill.x=m.x;mill.y=m.y;mill.z=m.z;mill.moveActive=mill.queue.shift()||null;if(!mill.moveActive&&mill.running)mill.running=false;}
       else{mill.x+=ex/dist*stepv;mill.y+=ey/dist*stepv;mill.z+=ez/dist*stepv;}}}
@@ -958,11 +1078,46 @@ function syncMill(dt){
 /* ==================================================================== */
 /* =========================  G-CODE PARSER  ========================== */
 /* ==================================================================== */
+// G2/G3 in the G17 (XY) plane: center = start + (I,J), Z is interpolated
+// linearly across the swept angle (the standard helical-plunge idiom — a
+// full circle with start==end and a lower end Z, as FreeCAD/CAM posts and
+// this app's own G-code generator both emit for round pockets/bosses).
+// clockwise=true for G2, false for G3.
+function millArcPoints(sx,sy,sz,ex,ey,ez,i,j,clockwise){
+  const cx=sx+i, cy=sy+j;
+  const r=Math.hypot(sx-cx,sy-cy)||0.001;
+  const startAngle=Math.atan2(sy-cy,sx-cx);
+  const endAngle=Math.atan2(ey-cy,ex-cx);
+  const isFullCircle=Math.abs(sx-ex)<1e-6&&Math.abs(sy-ey)<1e-6;
+  let sweep=endAngle-startAngle;
+  if(isFullCircle){
+    sweep=clockwise?-2*Math.PI:2*Math.PI;
+  }else if(clockwise){
+    while(sweep>=0) sweep-=2*Math.PI;
+  }else{
+    while(sweep<=0) sweep+=2*Math.PI;
+  }
+  const segs=Math.max(4,Math.round(Math.abs(sweep)/(Math.PI/16)));
+  const pts=[];
+  for(let k=1;k<=segs;k++){
+    const t=k/segs, a=startAngle+sweep*t;
+    pts.push({x:cx+Math.cos(a)*r,y:cy+Math.sin(a)*r,z:sz+(ez-sz)*t});
+  }
+  return pts;
+}
+
 function parseGcode(text, type){
   const lines=text.split(/\r?\n/);
   const q=[];
-  let cur={x:0,y:type==="mill"?90:0,z:0}, feed=200, lastG=0;
+  let cur={x:0,y:type==="mill"?90:0,z:0}, feed=200, lastG=0, prevWasRapid=false, approachZ=Infinity;
   const bounds={xMin:Infinity,xMax:-Infinity,yMin:Infinity,yMax:-Infinity,zMin:Infinity,zMax:-Infinity};
+  function pushMillPoint(isRapid,nx,ny,nz){
+    if(!isRapid&&prevWasRapid) approachZ=Math.min(approachZ,cur.z);
+    if(!isRapid){bounds.xMin=Math.min(bounds.xMin,nx);bounds.xMax=Math.max(bounds.xMax,nx);bounds.yMin=Math.min(bounds.yMin,ny);bounds.yMax=Math.max(bounds.yMax,ny);bounds.zMin=Math.min(bounds.zMin,nz);bounds.zMax=Math.max(bounds.zMax,nz);}
+    q.push(isRapid?{type:"rapid",x:nx,y:ny,z:nz}:{type:"feed",x:nx,y:ny,z:nz,gcodeFeed:feed});
+    cur={x:nx,y:ny,z:nz};
+    prevWasRapid=isRapid;
+  }
   for(let raw of lines){
     raw=raw.replace(/;.*$/,"").replace(/\(.*?\)/g,"").trim().toUpperCase();
     if(!raw) continue;
@@ -989,18 +1144,68 @@ function parseGcode(text, type){
     if(lastG===0||lastG===1||lastG===2||lastG===3){
       if(type==="mill"){
         const nx="X" in p?p.X:cur.x, ny="Y" in p?p.Y:cur.y, nz="Z" in p?p.Z:cur.z;
-        if(lastG!==0){bounds.xMin=Math.min(bounds.xMin,nx);bounds.xMax=Math.max(bounds.xMax,nx);bounds.yMin=Math.min(bounds.yMin,ny);bounds.yMax=Math.max(bounds.yMax,ny);bounds.zMin=Math.min(bounds.zMin,nz);bounds.zMax=Math.max(bounds.zMax,nz);}
-        q.push({type:lastG===0?"rapid":"feed",x:nx,y:ny,z:nz});
-        cur={x:nx,y:ny,z:nz};
+        if(lastG===2||lastG===3){
+          if("I" in p||"J" in p){
+            const pts=millArcPoints(cur.x,cur.y,cur.z,nx,ny,nz,p.I||0,p.J||0,lastG===2);
+            for(const pt of pts) pushMillPoint(false,pt.x,pt.y,pt.z);
+          }else{
+            // No I/J center given (R-format or malformed) — fall back to a
+            // straight line rather than dropping the move entirely.
+            pushMillPoint(false,nx,ny,nz);
+          }
+        }else{
+          pushMillPoint(lastG===0,nx,ny,nz);
+        }
       } else {
         const nx="X" in p?p.X/2:cur.x, nz="Z" in p?p.Z:cur.z;
         if(lastG!==0){bounds.xMin=Math.min(bounds.xMin,nx);bounds.xMax=Math.max(bounds.xMax,nx);bounds.zMin=Math.min(bounds.zMin,nz);bounds.zMax=Math.max(bounds.zMax,nz);}
-        q.push({type:lastG===0?"rapid":"feed",x:nx,z:nz});
+        q.push(lastG===0?{type:"rapid",x:nx,z:nz}:{type:"feed",x:nx,z:nz,gcodeFeed:feed});
         cur={x:nx,z:nz};
       }
+    } else if(type==="lathe"&&lastG===33){
+      // Thread cutting (single synchronized pass, as written — real G33
+      // programs already have their own approach/retract rapids around it).
+      // Approximate simulation: motion/feed/pass-count are simulated
+      // correctly, but the stock is a per-Z radius profile (no per-angle
+      // data), so this cannot carve a true helical groove — it cuts like a
+      // normal turning pass at the commanded depth.
+      const nx="X" in p?p.X/2:cur.x, nz="Z" in p?p.Z:cur.z;
+      const pitch=p.K||p.F||1.5;
+      const threadFeed=Math.max(20,pitch*(lathe.s.spindleRpm||500));
+      bounds.xMin=Math.min(bounds.xMin,nx);bounds.xMax=Math.max(bounds.xMax,nx);bounds.zMin=Math.min(bounds.zMin,nz);bounds.zMax=Math.max(bounds.zMax,nz);
+      q.push({type:"feed",x:nx,z:nz,threadFeed});
+      cur={x:nx,z:nz};
+    } else if(type==="lathe"&&lastG===76){
+      // Simplified single-line threading canned cycle — NOT the real 2-line
+      // Fanuc G76 syntax (this simulator's own convenience form, consistent
+      // with the plain-mm convention used everywhere else here instead of
+      // Fanuc's micron P/Q values). X=final diameter (the sole authority on
+      // depth — no separate P total-depth input, so it can never disagree
+      // with X), Z=thread end, Q=first-pass depth mm, F/K=pitch mm/rev.
+      // Expands into degressive-depth passes with safe (X-then-Z) rapid
+      // retracts so the SafetyInterceptor doesn't flag the auto-generated
+      // moves, and the final pass always lands exactly on the commanded X.
+      const finalX="X" in p?p.X/2:cur.x, endZ="Z" in p?p.Z:cur.z;
+      const startX=cur.x, startZ=cur.z;
+      const totalDepth=Math.max(0.02,startX-finalX), firstCut=Math.max(0.02,p.Q||0.2);
+      const pitch=p.K||p.F||1.5;
+      const threadFeed=Math.max(20,pitch*(lathe.s.spindleRpm||500));
+      const clearX=startX+2;
+      const nPasses=Math.max(1,Math.ceil(totalDepth/firstCut));
+      for(let i=1;i<=nPasses;i++){
+        const passX=i===nPasses?finalX:(startX-totalDepth*(i/nPasses));
+        q.push({type:"rapid",x:clearX,z:startZ});
+        q.push({type:"feed",x:passX,z:startZ});
+        q.push({type:"feed",x:passX,z:endZ,threadFeed});
+        q.push({type:"rapid",x:clearX,z:endZ});
+        bounds.xMin=Math.min(bounds.xMin,passX);bounds.xMax=Math.max(bounds.xMax,passX);
+        bounds.zMin=Math.min(bounds.zMin,Math.min(startZ,endZ));bounds.zMax=Math.max(bounds.zMax,Math.max(startZ,endZ));
+      }
+      q.push({type:"rapid",x:clearX,z:startZ});
+      cur={x:finalX,z:startZ};
     }
   }
-  return {q, bounds};
+  return {q, bounds, approachZ};
 }
 
 /* ==================================================================== */
@@ -1023,7 +1228,7 @@ class SafetyInterceptor {
     const hLen=Math.hypot(nx-px,nz-pz);
     if(hLen<0.1){
       const surfH=this._maxHeightInRadius(nx,nz,toolR);
-      if(ny<=surfH+0.3&&ny<py) return {hit:true,surfH,toolY:ny};
+      if(ny<surfH-0.3&&ny<py) return {hit:true,surfH,toolY:ny};
       return {hit:false};
     }
     const steps=Math.max(3,Math.ceil(hLen/3));
@@ -1031,9 +1236,28 @@ class SafetyInterceptor {
       const t=s/steps;
       const sx=px+(nx-px)*t, sy=py+(ny-py)*t, sz=pz+(nz-pz)*t;
       const surfH=this._maxHeightInRadius(sx,sz,toolR);
-      if(sy<=surfH+0.3) return {hit:true,surfH,toolY:sy};
+      if(sy<surfH-0.3) return {hit:true,surfH,toolY:sy};
     }
     return {hit:false};
+  }
+  // Mengene (vise) jaw collision — flanking blocks in X, separate from the
+  // stock heightmap entirely, so a move that clears the stock fine can still
+  // be caught if it swings into a jaw. Checked for every move (not just
+  // rapids): a feed touching the jaws is just as bad, there's no legitimate
+  // "cutting into the vise" case.
+  _viseHit(px,py,pz,nx,ny,nz,toolR){
+    if(!viseEnabled) return null;
+    const jawInner=W/2, jawOuter=jawInner+VISE_JAW_WIDTH, jawH=VISE_JAW_HEIGHT, zLim=D/2+VISE_JAW_OVERHANG;
+    const hLen=Math.hypot(nx-px,nz-pz);
+    const steps=Math.max(1,Math.ceil(hLen/3));
+    for(let s=0;s<=steps;s++){
+      const t=steps?s/steps:1;
+      const sx=px+(nx-px)*t, sy=py+(ny-py)*t, sz=pz+(nz-pz)*t;
+      const inJawX=Math.abs(sx)+toolR>=jawInner && Math.abs(sx)-toolR<=jawOuter;
+      const inJawZ=sz>=-zLim&&sz<=zLim;
+      if(inJawX&&inJawZ&&sy<jawH+0.3) return {x:sx,y:sy,z:sz};
+    }
+    return null;
   }
   validateMill(queue, sw, sd, sh, spindleOn, cx, cy, cz){
     const xLim=sw/2+20, zLim=sd/2+20, yMax=sh+60, maxPlunge=10, errs=[];
@@ -1041,8 +1265,16 @@ class SafetyInterceptor {
     let px=cx, py=cy, pz=cz;
     for(let i=0;i<queue.length;i++){
       const m=queue[i];
-      if(m.type==="tc"){const tl=magazine.getToolInSlot(m.targetSlot);if(tl)toolR=tl.dia/2;continue;}
+      if(m.type==="tc"){
+        const tl=magazine.getToolInSlot(m.targetSlot);
+        if(tl)toolR=tl.dia/2;
+        else errs.push(`Satır ${i+1}: T${String(m.targetSlot+1).padStart(2,"0")} slotunda takım yok — program bu slottaki bir takımı bekliyor, magazine önce yerleştirin`);
+        continue;
+      }
       const nx=m.x, ny=m.y, nz=m.z;
+      const vHit=this._viseHit(px,py,pz,nx,ny,nz,toolR);
+      if(vHit)
+        errs.push(`Satır ${i+1}: Mengene çenesine çarpma riski (X=${vHit.x.toFixed(1)}, Y=${vHit.y.toFixed(1)}, Z=${vHit.z.toFixed(1)}mm) — takım kırılma/tezgah hasarı riski`);
       if(Math.abs(nx)>xLim)
         errs.push(`Satır ${i+1}: X soft limit aşımı (${nx.toFixed(1)}mm, limit ±${xLim.toFixed(0)}mm) — takım tezgah dışına çıkar`);
       if(ny<-0.5)
@@ -1115,7 +1347,7 @@ class SafetyInterceptor {
 const safetyInterceptor=new SafetyInterceptor();
 
 function runMillGcode(parsed, stockDims){
-  const {q, bounds}=parsed;
+  const {q, bounds, approachZ}=parsed;
   if(!q.length) return;
   for(const m of q){if(m.type==="tc")continue;const gy=m.y,gz=m.z;m.y=gz;m.z=gy;}
   const bYmin=bounds.yMin,bYmax=bounds.yMax,bZmin=bounds.zMin,bZmax=bounds.zMax;
@@ -1131,7 +1363,11 @@ function runMillGcode(parsed, stockDims){
     const margin=20;
     const newW=Math.max(80,(bounds.xMax-bounds.xMin)+margin*2);
     const newD=Math.max(60,(bounds.zMax-bounds.zMin)+margin*2);
-    const newTop=Math.max(20,Math.round(bounds.yMax+10));
+    // Prefer the program's own rapid-to-feed approach height (a real
+    // "just above the material" reference) over the deepest-cut+10mm guess
+    // whenever it's lower — that guess otherwise overstates clearance and
+    // makes a perfectly normal approach rapid look like it dives into stock.
+    const newTop=Math.max(20,Math.round(Number.isFinite(approachZ)?Math.min(approachZ,bounds.yMax+10):bounds.yMax+10));
     resizeMillStock(Math.round(newW),Math.round(newD),newTop);
     const cx=(bounds.xMax+bounds.xMin)/2, cz=(bounds.zMax+bounds.zMin)/2;
     for(const m of q){
@@ -1140,8 +1376,12 @@ function runMillGcode(parsed, stockDims){
       if(m.y!==undefined) m.y=clamp(m.y, 0, TOP+40);
     }
   }
+  {const safeY=TOP+8;let nFix=0;
+  for(const m of q){if(m.type!=="rapid"||m.y===undefined)continue;const sH=safetyInterceptor._maxHeightInRadius(m.x,m.z,CUTTER_R);if(m.y<=sH+0.5){m.y=safeY;nFix++;}}
+  if(nFix)taiMsg(`⚠️ ${nFix} rapid hareket güvenli yüksekliğe (Z=${safeY}mm) otomatik düzeltildi.`,"bot");}
   const sfErrs=safetyInterceptor.validateMill(q,W,D,TOP,true,mill.x,mill.y,mill.z);
   if(sfErrs.length){safetyInterceptor._eStop(mill,taiMsg,sfErrs);return;}
+  captureProgramSummary("mill",q);
   mill.mode="AUTO"; mill.spindleOn=true; mill.paused=false; if(mill.coolantMode==="off")mill.coolantMode="flood";
   mill.queue=q; mill.moveActive=mill.queue.shift(); mill.running=true;
 }
@@ -1161,8 +1401,12 @@ function runLatheGcode(parsed, stockDims){
       m.z=clamp(m.z+zOff, -20, STOCK_LEN);
     }
   } else if(stockDims){resizeLatheStock(stockDims.len,stockDims.r);}
+  {const safeX=STOCK_R+5;let nFix=0;
+  for(const m of q){if(m.type!=="rapid")continue;const inS=m.z>=-0.5&&m.z<=STOCK_LEN+0.5;if(inS&&m.x<STOCK_R-0.5){m.x=safeX;nFix++;}}
+  if(nFix)taiMsg(`⚠️ ${nFix} rapid hareket güvenli yarıçapa (X=${safeX}mm) otomatik düzeltildi.`,"bot");}
   const sfErrsL=safetyInterceptor.validateLathe(q,STOCK_LEN,STOCK_R,true,lathe.s.x,lathe.s.z);
   if(sfErrsL.length){safetyInterceptor._eStop(lathe,taiMsg,sfErrsL);return;}
+  captureProgramSummary("lathe",q);
   lathe.setMode("AUTO"); lathe.s.spindleOn=true; if(lathe.s.coolantMode==="off")lathe.s.coolantMode="flood";
   lathe.queue=q; lathe.moveActive=lathe.queue.shift()||null; lathe.s.running=true;
 }
@@ -1217,8 +1461,7 @@ function setTab(t){
   if(t==="mill"){millResize();} else {latheResize();}
   const modeLabel=t==="mill"?"FREZE":"TORNA";
   const mb=$("tai-mode-badge");if(mb)mb.textContent=modeLabel;
-  const mm=$("mtai-mode");if(mm)mm.textContent=modeLabel;
-  const lm=$("ltai-mode");if(lm)lm.textContent=modeLabel;
+  positionTaiTab();
 }
 $("tab-mill").onclick=()=>setTab("mill");
 $("tab-lathe").onclick=()=>setTab("lathe");
@@ -1248,9 +1491,35 @@ let taiLastOp=null;
 
 function taiOpen(){taiPanel.classList.toggle("open");if(taiPanel.classList.contains("open")){taiInput.focus();taiRenderChips();}}
 taiToggle.onclick=taiOpen;
-$("mtai-btn").onclick=taiOpen;
-$("ltai-btn").onclick=taiOpen;
+$("tai-tab-mill").onclick=taiOpen;
+$("tai-tab-lathe").onclick=taiOpen;
 taiClose.onclick=()=>taiPanel.classList.remove("open");
+
+function positionTaiTab(){
+  [["tai-tab-mill","view-mill"],["tai-tab-lathe","view-lathe"]].forEach(([tabId,rowId])=>{
+    const tab=$(tabId), row=$(rowId);
+    if(!tab||!row) return;
+    const aside=row.querySelector("aside");
+    if(!aside) return;
+    const r=aside.getBoundingClientRect();
+    if(!r.width&&!r.height) return; // görünmeyen sekme (hidden), atla
+    const stacked=getComputedStyle(row).flexDirection==="column";
+    if(stacked){
+      // panel 3B ekranın altına düşüyor: butonu panelin hemen üstüne,
+      // simülasyon (3B) tarafına sabitle
+      tab.style.left=(r.left+12)+"px";
+      tab.style.top=(r.top-tab.offsetHeight-12)+"px";
+    } else {
+      // panel sağda: butonu panelin sol-alt köşesine ama simülasyon
+      // tarafına (panelin dışına) sabitle — Acil Durum/Reset gibi panel
+      // kontrollerinin üzerine binmesin
+      tab.style.left=(r.left-tab.offsetWidth-12)+"px";
+      tab.style.top=(r.bottom-tab.offsetHeight-12)+"px";
+    }
+  });
+}
+window.addEventListener("resize",positionTaiTab);
+positionTaiTab();
 
 function taiMsg(text,who){const d=document.createElement("div");d.className="tai-msg "+(who==="bot"?"tai-msg-bot":"tai-msg-user");d.innerHTML=text;taiMessages.appendChild(d);taiMessages.scrollTop=taiMessages.scrollHeight;return d;}
 const A=s=>`<span class="tai-msg-action">${s}</span>`;
@@ -1603,8 +1872,22 @@ function taiUserInput(text){
   taiRenderChips();
 }
 
-function taiRunMill(q){mill.queue=q;mill.moveActive=q.shift();mill.running=true;}
-function taiRunLathe(q){lathe.queue=q;lathe.moveActive=lathe.queue.shift()||null;lathe.s.running=true;}
+// Locally-executed operations (delik/cep/örnek parça/vb.) never produce G-code
+// text — they build the move queue directly. Remember the last queue so the
+// WS/chat layer can synthesize G-code for it and record it into masterGcode
+// (nc kaydet), the same as LLM-generated operations already are.
+let lastRunQueue=null, lastRunType=null;
+function taiRunMill(q){lastRunQueue=q.slice();lastRunType="mill";captureProgramSummary("mill",q);mill.queue=q;mill.moveActive=q.shift();mill.running=true;}
+function taiRunLathe(q){lastRunQueue=q.slice();lastRunType="lathe";captureProgramSummary("lathe",q);lathe.queue=q;lathe.moveActive=lathe.queue.shift()||null;lathe.s.running=true;}
+function takeLastRunQueue(){const q=lastRunQueue,t=lastRunType;lastRunQueue=null;lastRunType=null;return q&&q.length?{queue:q,type:t}:null;}
+
+// Setup-sheet data (kurulum föyü): the last program run, kept separately from
+// lastRunQueue above (which the G-code export feature consumes/clears) so the
+// setup sheet can be reopened any time after a run without interfering.
+let lastProgramSummary=null;
+function captureProgramSummary(type,q){
+  lastProgramSummary={type,queue:q.slice(),feedMmMin:type==="mill"?mill.feed:lathe.s.feed};
+}
 function taiRunMillWithTool(opType,reqDia,reqDepth,genQ){
   const slot=magazine.findSlotForOp(opType,reqDia,reqDepth);
   if(slot===-1)return null;
@@ -1748,7 +2031,7 @@ function taiExec(raw){
   if(fd){const v=parseInt(fd[1]);if(im){mill.feed=clamp(v,1,2000);$("mrng-feed").value=mill.feed;$("mlbl-feed").textContent=mill.feed+" mm/m";}else{lathe.setFeed(v);$("rng-feed").value=lathe.s.feed;$("lbl-feed").textContent=lathe.s.feed+" mm/m";}return A("✓ İlerleme "+(im?mill.feed:lathe.s.feed)+" mm/m.");}
   let ovr=t.match(/(?:override|ovr)\s*(\d+)/i)||t.match(/(\d+)\s*%?\s*(?:override|ovr)/i);
   if(ovr){const v=parseInt(ovr[1])/100;if(im){mill.feedOverride=clamp(v,0,1.2);$("mrng-ovr").value=mill.feedOverride;$("mlbl-ovr").textContent=Math.round(mill.feedOverride*100)+"%";}else{lathe.setFeedOverride(v);$("rng-ovr").value=lathe.s.feedOverride;$("lbl-ovr").textContent=Math.round(lathe.s.feedOverride*100)+"%";}return A("✓ Override %"+Math.round(v*100));}
-  let tc=t.match(/(?:takim|tool)\s*(\d+)/i)||t.match(/(\d+)\s*(?:no.?lu\s*takim)/i);
+  let tc=t.match(/(?:takim|tool)\s*(\d+)/i)||t.match(/(\d+)\s*(?:no.?lu\s*takim)/i)||t.match(/\bt0*(\d{1,2})\b/i);
   if(tc){const v=parseInt(tc[1]);if(im){const slot=clamp(v,1,40)-1;const tl=magazine.getToolInSlot(slot);if(!tl)return A("⛔ T"+String(v).padStart(2,"0")+" slotunda takım yok.");magazine.requestChange(slot);buildTool();return A("✓ Takım T"+String(v).padStart(2,"0")+" seçildi: "+tl.name+" (Ø"+tl.dia+"mm, boy:"+tl.fluteLen+"mm)");}else{lathe.setToolNo(v);return A("✓ Takım T"+String(v).padStart(2,"0")+" seçildi.");}}
   if(im&&(/(magazin|magazine|takim\s*list|tool\s*list)/i.test(t)||(/(takim|tool)/i.test(t)&&/(goster|listele|liste)/i.test(t)))){
     const lines=magazine.listTools();
@@ -1793,7 +2076,9 @@ function taiExec(raw){
     }
 
     /* --- dikdörtgen cep --- */
-    if(/(dikdortgen|rect)\s*(cep|pocket)/i.test(t)||/(cep|pocket)\s*(ac)?/i.test(t)&&!/(daire|circ|yuvarlak|altigen|hex)/i.test(t)){
+    // "çapında" (diameter) describing a pocket means round, not rectangular —
+    // route it to the daire cep branch below even without the word "daire".
+    if(/(dikdortgen|rect)\s*(cep|pocket)/i.test(t)||/(cep|pocket)\s*(ac)?/i.test(t)&&!/(daire|circ|yuvarlak|altigen|hex|\bcap|\bdia\b|ø)/i.test(t)){
       const dims=t.match(/(\d+\.?\d*)\s*x\s*(\d+\.?\d*)/i);
       let pw=dims?parseFloat(dims[1]):60, pl=dims?parseFloat(dims[2]):40;
       let dep=taiNum(t,["derin","derinlik","derinlig","depth","deep"])||10;
@@ -1809,7 +2094,7 @@ function taiExec(raw){
     }
 
     /* --- daire cep --- */
-    if(/(daire|circ|yuvarlak)\s*(cep|pocket)/i.test(t)){
+    if(/(daire|circ|yuvarlak)\s*(cep|pocket)/i.test(t)||/(cep|pocket)/i.test(t)&&/(\bcap|\bdia\b|ø)/i.test(t)){
       let dia=taiNum(t,["cap","capi","capinda","dia","\\bø"])||40;
       let dep=taiNum(t,["derin","derinlik","derinlig","depth"])||10;
       taiLastOp="pocket";
@@ -1918,10 +2203,320 @@ function taiExec(raw){
 taiMsg("Merhaba! Ben <b>Topkapı AI</b>, CNC asistanın.<br>Doğal dilde komut verebilirsin:<br>• \"<b>12mm çapında 20mm delik aç</b>\"<br>• \"<b>60x40mm 10mm derin cep aç</b>\"<br>• \"<b>Soğutma aç</b>\" / \"<b>Coolant flood</b>\" / \"<b>M8</b>\"<br>• \"<b>Örnek parçaları göster</b>\"<br>• \"<b>Yardım</b>\" yazarak tüm komutları gör.","bot");
 taiRenderChips();
 
+/* ==================================================================== */
+/* ================  TAKIM MAGAZİNİ DÜZENLEYİCİ (kalıcı)  ============= */
+/* ==================================================================== */
+const MAG_API_BASE = location.hostname==="localhost"||location.hostname==="127.0.0.1" ? location.origin : "https://api.topkapikoleji.org";
+const MAG_BUILTIN_COUNT = TOOL_LIBRARY.length; // ilk yükte kaç sabit takım var (12)
+function magToken(){ return localStorage.getItem("rover_session")||""; }
+function magHeaders(){ return {Authorization:`Bearer ${magToken()}`, "Content-Type":"application/json"}; }
+function magRefId(idx){ return idx<MAG_BUILTIN_COUNT ? "builtin:"+(idx+1) : magCustomTools[idx-MAG_BUILTIN_COUNT]?.id; }
+
+let magCustomTools=[]; // backend'den gelen kullanıcı tanımlı takımlar
+let magRefIdToIndex={}; // "builtin:N" | backend uuid -> TOOL_LIBRARY dizin
+
+function magRebuildIndex(){
+  TOOL_LIBRARY.length=MAG_BUILTIN_COUNT; // önceki eklenen özel takımları temizle
+  magRefIdToIndex={};
+  for(let i=0;i<MAG_BUILTIN_COUNT;i++) magRefIdToIndex["builtin:"+(i+1)]=i;
+  magCustomTools.forEach((ct)=>{
+    const idx=TOOL_LIBRARY.length;
+    TOOL_LIBRARY.push({id:idx+1,name:ct.name,type:ct.type,dia:ct.dia,fluteLen:ct.fluteLen,totalLen:ct.totalLen,maxRpm:ct.maxRpm});
+    magRefIdToIndex[ct.id]=idx;
+  });
+}
+
+async function magFetchTools(){
+  if(!magToken()) return [];
+  try{
+    const r=await fetch(`${MAG_API_BASE}/cnc-magazine/tools`,{headers:magHeaders()});
+    if(!r.ok) return [];
+    const d=await r.json();
+    return Array.isArray(d.tools)?d.tools:[];
+  }catch{ return []; }
+}
+async function magFetchLayout(){
+  if(!magToken()) return null;
+  try{
+    const r=await fetch(`${MAG_API_BASE}/cnc-magazine/layout`,{headers:magHeaders()});
+    if(!r.ok) return null;
+    const d=await r.json();
+    return Array.isArray(d.slots)?d.slots:null;
+  }catch{ return null; }
+}
+
+function magApplyLayout(layoutRefIds){
+  for(let s=0;s<magazine.capacity;s++){
+    const ref=layoutRefIds[s];
+    magazine.slots[s]=ref&&magRefIdToIndex[ref]!==undefined?magRefIdToIndex[ref]:null;
+  }
+  const firstFilled=magazine.slots.findIndex((v)=>v!==null);
+  magazine.activeSlot=firstFilled>=0?firstFilled:0;
+  magazine._applyTool();
+}
+
+async function magLoadFromServer(){
+  if(!magToken()) return;
+  magCustomTools=await magFetchTools();
+  magRebuildIndex();
+  const layout=await magFetchLayout();
+  if(layout&&layout.some((v)=>v)) magApplyLayout(layout);
+  buildTool();
+}
+magLoadFromServer();
+
+/* --- editör arayüzü --- */
+function magRenderToolsList(){
+  const el=$("mag-tools-list");
+  if(!magCustomTools.length){ el.innerHTML='<p class="text-zinc-500">Henüz özel takım tanımlamadın.</p>'; return; }
+  el.innerHTML=magCustomTools.map((t)=>`
+    <div class="flex items-center justify-between rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5">
+      <span>${t.name} — Ø${t.dia}mm, boy ${t.fluteLen}mm, ${t.maxRpm} RPM, ${t.flutes||2} ağız, ${t.material||"Karbur"}</span>
+      <button data-mag-del="${t.id}" class="rounded px-2 py-0.5 text-red-400 hover:bg-red-950">Sil</button>
+    </div>`).join("");
+}
+function magAllToolOptions(){
+  const opts=[{ref:"",label:"— Boş —"}];
+  for(let i=0;i<TOOL_LIBRARY.length;i++) opts.push({ref:magRefId(i),label:"T"+String(i+1<10?"0"+(i+1):i+1)+" tabanı: "+TOOL_LIBRARY[i].name});
+  return opts;
+}
+// Slot selections are tracked here as stable ref-ids ("builtin:N" or a
+// backend tool uuid) for the currently-open editing session — never as raw
+// TOOL_LIBRARY array indices, which shift whenever a custom tool is deleted
+// and would silently point a saved slot at the wrong tool.
+let magSlotRefs=null;
+function magSlotsToRefs(){
+  return Array.from({length:magazine.capacity},(_,s)=>
+    magazine.slots[s]!==null&&magazine.slots[s]!==undefined?magRefId(magazine.slots[s]):"");
+}
+function magRenderSlotsGrid(){
+  const grid=$("mag-slots-grid");
+  const opts=magAllToolOptions();
+  const optHtml=opts.map((o)=>`<option value="${o.ref}">${o.label}</option>`).join("");
+  let html="";
+  for(let s=0;s<magazine.capacity;s++){
+    html+=`<label class="flex items-center gap-1.5">
+      <span class="w-9 shrink-0 font-mono text-cyan-300">T${String(s+1).padStart(2,"0")}</span>
+      <select data-mag-slot="${s}" class="w-full rounded border border-zinc-700 bg-zinc-800 px-1 py-1">${optHtml}</select>
+    </label>`;
+  }
+  grid.innerHTML=html;
+  grid.querySelectorAll("[data-mag-slot]").forEach((sel)=>{
+    const s=Number(sel.dataset.magSlot);
+    sel.value=magSlotRefs[s]||"";
+    sel.onchange=()=>{ magSlotRefs[s]=sel.value; };
+  });
+}
+function magOpenEditor(){
+  $("mag-edit-overlay").classList.remove("hidden");
+  const loggedIn=Boolean(magToken());
+  $("mag-edit-login-notice").classList.toggle("hidden",loggedIn);
+  $("mag-edit-body").classList.toggle("hidden",!loggedIn);
+  $("mag-edit-save").disabled=!loggedIn;
+  if(loggedIn){ magSlotRefs=magSlotsToRefs(); magRenderToolsList(); magRenderSlotsGrid(); $("mag-edit-status").textContent=""; }
+}
+function magCloseEditor(){ $("mag-edit-overlay").classList.add("hidden"); }
+$("mag-edit-open").onclick=magOpenEditor;
+$("mag-edit-close").onclick=magCloseEditor;
+$("mag-edit-cancel").onclick=magCloseEditor;
+
+$("mag-t-add").onclick=async()=>{
+  const name=$("mag-t-name").value.trim();
+  const dia=parseFloat($("mag-t-dia").value);
+  $("mag-t-error").classList.add("hidden");
+  if(!name||!(dia>0)){ $("mag-t-error").textContent="İsim ve çap (0'dan büyük) zorunludur."; $("mag-t-error").classList.remove("hidden"); return; }
+  const body={
+    name, type:$("mag-t-type").value, dia,
+    fluteLen:parseFloat($("mag-t-flute").value)||0,
+    totalLen:parseFloat($("mag-t-total").value)||0,
+    maxRpm:parseFloat($("mag-t-rpm").value)||10000,
+    flutes:parseFloat($("mag-t-flutes").value)||2,
+    material:$("mag-t-material").value.trim()||"Karbur",
+  };
+  try{
+    const r=await fetch(`${MAG_API_BASE}/cnc-magazine/tools`,{method:"POST",headers:magHeaders(),body:JSON.stringify(body)});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok) throw new Error(d.error||"Takım eklenemedi.");
+    magCustomTools=await magFetchTools();
+    magRebuildIndex();
+    magRenderToolsList();
+    magRenderSlotsGrid();
+    ["mag-t-name","mag-t-dia","mag-t-flute","mag-t-total","mag-t-rpm","mag-t-flutes","mag-t-material"].forEach((id)=>{$(id).value="";});
+  }catch(err){ $("mag-t-error").textContent=err.message; $("mag-t-error").classList.remove("hidden"); }
+};
+
+$("mag-tools-list").addEventListener("click",async(e)=>{
+  const id=e.target.dataset.magDel;
+  if(!id) return;
+  try{
+    await fetch(`${MAG_API_BASE}/cnc-magazine/tools/${id}`,{method:"DELETE",headers:magHeaders()});
+    magCustomTools=await magFetchTools();
+    magRebuildIndex();
+    magRenderToolsList();
+    magRenderSlotsGrid();
+  }catch{}
+});
+
+$("mag-edit-save").onclick=async()=>{
+  const slots=magSlotRefs.map((v)=>v||null);
+  $("mag-edit-status").textContent="Kaydediliyor…";
+  try{
+    const r=await fetch(`${MAG_API_BASE}/cnc-magazine/layout`,{method:"PUT",headers:magHeaders(),body:JSON.stringify({slots})});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok) throw new Error(d.error||"Kaydedilemedi.");
+    magApplyLayout(slots);
+    buildTool();
+    $("mag-edit-status").textContent="✓ Kaydedildi.";
+  }catch(err){ $("mag-edit-status").textContent="⛔ "+err.message; }
+};
+
+/* ==================================================================== */
+/* ==================  Kurulum Föyü (süre + maliyet)  ================= */
+/* ==================================================================== */
+// Analytic cycle-time estimate: sums move distances at the SAME rates the
+// live simulation actually uses (mill.update/lathe.update), so it predicts
+// exactly how long pressing ▶ will take rather than a rough guess.
+function estimateCycleMinutes(summary){
+  if(!summary||!summary.queue.length) return 0;
+  const {type,queue,feedMmMin}=summary;
+  const feedRateSec=Math.max(0.01,feedMmMin)/60;
+  const rapidSec=type==="mill"?260:220;
+  let totalSec=0,px=null,py=null,pz=null;
+  for(const m of queue){
+    if(m.type==="tc"){totalSec+=1.5;continue;} // rough tool-change allowance
+    const mx=m.x,my=type==="mill"?(m.y??py??0):0,mz=m.z;
+    if(px!==null){
+      const dist=type==="mill"?Math.hypot(mx-px,my-py,mz-pz):Math.hypot(mx-px,mz-pz);
+      const rate=m.type==="rapid"?rapidSec:(m.threadFeed?m.threadFeed/60:(m.gcodeFeed?m.gcodeFeed/60:feedRateSec));
+      if(rate>0) totalSec+=dist/rate;
+    }
+    px=mx;py=my;pz=mz;
+  }
+  return totalSec/60;
+}
+// Mill-only: which magazine tools an uploaded/run program actually calls out
+// via T-codes (falls back to whatever is currently loaded if the program
+// never issued one, e.g. a locally-run sample operation).
+function toolsUsedInSummary(summary){
+  if(!summary||summary.type!=="mill") return [];
+  const slots=new Set();
+  for(const m of summary.queue) if(m.type==="tc") slots.add(m.targetSlot);
+  if(!slots.size) slots.add(magazine.activeSlot);
+  return [...slots].sort((a,b)=>a-b).map((s)=>({slot:s+1,tool:magazine.getToolInSlot(s)}));
+}
+function stockVolumeCm3(type){
+  if(type==="mill") return (W*D*TOP)/1000;
+  return (Math.PI*STOCK_R*STOCK_R*STOCK_LEN)/1000;
+}
+function computeSimCost(minutes,volumeCm3,inputs){
+  const matCost=Math.max(0,inputs.matPrice||0)*volumeCm3;
+  const machineCost=(minutes/60)*Math.max(0,inputs.hourlyRate||0);
+  const subtotal=matCost+machineCost;
+  const profit=subtotal*(Math.max(0,inputs.profitPct||0)/100);
+  return {matCost,machineCost,subtotal,total:subtotal+profit,profit};
+}
+function sheetCostInputs(){
+  return {
+    matPrice:parseFloat($("sheet-mat-price")?.value)||0,
+    hourlyRate:parseFloat($("sheet-hourly")?.value)||0,
+    profitPct:parseFloat($("sheet-profit")?.value)||0,
+  };
+}
+function updateSheetCost(){
+  const summary=lastProgramSummary;
+  const type=summary?summary.type:active;
+  const minutes=estimateCycleMinutes(summary);
+  const volumeCm3=stockVolumeCm3(type);
+  const cost=computeSimCost(minutes,volumeCm3,sheetCostInputs());
+  $("sheet-cost-mat").textContent=cost.matCost.toFixed(2)+" TL";
+  $("sheet-cost-machine").textContent=cost.machineCost.toFixed(2)+" TL";
+  $("sheet-cost-profit").textContent=cost.profit.toFixed(2)+" TL";
+  $("sheet-cost-total").textContent=cost.total.toFixed(2)+" TL";
+}
+function renderSheet(){
+  // önceki girilen maliyet değerlerini koru — modal her açıldığında sıfırlanmasın
+  const inputs=sheetCostInputs();
+  const summary=lastProgramSummary;
+  const type=summary?summary.type:active;
+  const minutes=estimateCycleMinutes(summary);
+  const volumeCm3=stockVolumeCm3(type);
+  const cost=computeSimCost(minutes,volumeCm3,inputs);
+  const md=MAT_DB[curMat]||MAT_DB.steel;
+  const stockLine=type==="mill"
+    ? `${Math.round(W)} × ${Math.round(D)} × ${Math.round(TOP)} mm`
+    : `Ø${Math.round(STOCK_R*2)} × ${Math.round(STOCK_LEN)} mm`;
+  const toolsHtml=type==="mill"
+    ? toolsUsedInSummary(summary).map((t)=>t.tool
+        ? `<div>T${String(t.slot).padStart(2,"0")} — ${t.tool.name} (Ø${t.tool.dia}mm)</div>`
+        : `<div class="text-amber-400">T${String(t.slot).padStart(2,"0")} — ⚠ slot boş</div>`).join("")
+        || '<div class="text-zinc-500">Program hiç T-kodu vermedi.</div>'
+    : `<div>T${String((lathe.s.toolNo||1)).padStart(2,"0")}</div>`;
+  const feedRpm=type==="mill"
+    ? `${mill.feed} mm/dk · ${mill.spindleRpm} RPM`
+    : `${lathe.s.feed} mm/dk · ${lathe.s.spindleRpm} RPM`;
+  $("sheet-body").innerHTML = `
+    <div class="mb-3 flex items-center justify-between print:mb-4">
+      <div>
+        <div class="text-sm font-bold print:text-lg">Kurulum Föyü</div>
+        <div class="text-[10px] text-zinc-500 print:text-xs">${new Date().toLocaleString("tr-TR")}</div>
+      </div>
+      <div class="text-[10px] text-zinc-500 print:text-xs">${type==="mill"?"FREZE":"TORNA"}</div>
+    </div>
+    <div class="grid grid-cols-2 gap-x-4 gap-y-1 rounded border border-zinc-700 p-2 print:border-black">
+      <div><span class="text-zinc-400">Malzeme:</span> ${md.label}</div>
+      <div><span class="text-zinc-400">Stok:</span> ${stockLine}</div>
+      <div><span class="text-zinc-400">İlerleme/Devir:</span> ${feedRpm}</div>
+      <div><span class="text-zinc-400">Tahmini çevrim süresi:</span> ${minutes.toFixed(1)} dk</div>
+    </div>
+    <div class="mt-3">
+      <div class="mb-1 font-bold text-cyan-300 print:text-black">Kullanılan Takımlar</div>
+      <div class="rounded border border-zinc-700 p-2 print:border-black">${toolsHtml}</div>
+    </div>
+    <div class="mt-3 print:hidden">
+      <div class="mb-1 font-bold text-cyan-300">Maliyet Tahmini</div>
+      <div class="grid grid-cols-3 gap-2">
+        <label class="flex flex-col gap-0.5">Malzeme (TL/cm³)<input id="sheet-mat-price" type="number" min="0" step="0.1" value="${inputs.matPrice||""}" class="rounded border border-zinc-700 bg-zinc-800 px-2 py-1"></label>
+        <label class="flex flex-col gap-0.5">Makine (TL/saat)<input id="sheet-hourly" type="number" min="0" step="10" value="${inputs.hourlyRate||""}" class="rounded border border-zinc-700 bg-zinc-800 px-2 py-1"></label>
+        <label class="flex flex-col gap-0.5">Kâr marjı (%)<input id="sheet-profit" type="number" min="0" step="1" value="${inputs.profitPct||""}" class="rounded border border-zinc-700 bg-zinc-800 px-2 py-1"></label>
+      </div>
+    </div>
+    <div class="mt-3 rounded border border-zinc-700 p-2 print:border-black">
+      <div class="flex justify-between"><span>Malzeme maliyeti</span><span id="sheet-cost-mat">${cost.matCost.toFixed(2)} TL</span></div>
+      <div class="flex justify-between"><span>Makine süresi (${minutes.toFixed(1)} dk)</span><span id="sheet-cost-machine">${cost.machineCost.toFixed(2)} TL</span></div>
+      <div class="flex justify-between print:hidden"><span>Kâr marjı</span><span id="sheet-cost-profit">${cost.profit.toFixed(2)} TL</span></div>
+      <div class="mt-1 flex justify-between border-t border-zinc-600 pt-1 text-sm font-bold print:border-black"><span>TOPLAM</span><span id="sheet-cost-total">${cost.total.toFixed(2)} TL</span></div>
+    </div>
+    <div class="mt-3 text-[9px] text-zinc-500 print:text-[10px]">Bu föy simülatörün tahmini hesaplarına dayanır; bağlayıcı bir teklif değildir. Gerçek çevrim süresi ve maliyet malzeme/takım/tezgah farklarına göre değişebilir.</div>
+  `;
+  $("sheet-mat-price").oninput=updateSheetCost;
+  $("sheet-hourly").oninput=updateSheetCost;
+  $("sheet-profit").oninput=updateSheetCost;
+}
+function openSheet(){
+  $("sheet-overlay").classList.remove("hidden");
+  renderSheet();
+}
+$("sheet-open-mill").onclick=openSheet;
+$("sheet-open-lathe").onclick=openSheet;
+$("sheet-close").onclick=()=>$("sheet-overlay").classList.add("hidden");
+$("sheet-print").onclick=()=>window.print();
+
+function refreshViseButton(){
+  const b=$("vise-toggle");
+  b.style.background=viseEnabled?"#166534":"";
+  b.style.borderColor=viseEnabled?"#22c55e":"";
+  b.title=viseEnabled?"Mengene Çarpışma Kontrolü: AÇIK (tıkla → kapat)":"Mengene Çarpışma Kontrolü: KAPALI (tıkla → aç)";
+}
+$("vise-toggle").onclick=()=>{
+  setViseEnabled(!viseEnabled);
+  refreshViseButton();
+};
+refreshViseButton();
+
 window._rover = {
   taiUserInput, taiExec, taiGetChips, taiNorm, taiMsg, taiRenderChips,
   taiMessages, parseGcode, runMillGcode, runLatheGcode, safetyInterceptor,
-  magazine, TOOL_LIBRARY, buildTool, buildMagazineDisk,
+  magazine, TOOL_LIBRARY, buildTool, buildMagazineDisk, takeLastRunQueue,
   get CUTTER_R(){ return CUTTER_R; }, get CUTTER_H(){ return CUTTER_H; },
   get active(){ return active; },
   get W(){ return W; }, get D(){ return D; }, get TOP(){ return TOP; },
@@ -1958,6 +2553,42 @@ let wsConnected = false;
 let wsSessionKey = localStorage.getItem("rover_cnc_session") || "";
 let masterGcode = [];
 let opCounter = 0;
+
+// Local (non-LLM) operations build the move queue directly with no G-code
+// text ever existing — synthesize a readable equivalent so "nc kaydet"
+// captures them the same way it captures LLM-generated operations.
+function millQueueToGcode(queue) {
+  var lines = [], lastX = null, lastY = null, lastZ = null;
+  queue.forEach(function(m) {
+    if (m.type === "tc") { lines.push("T" + String(m.targetSlot + 1).padStart(2, "0")); return; }
+    var gx = m.x, gy = m.z, gz = m.y; // reverse of runMillGcode's y/z swap
+    var line = m.type === "rapid" ? "G0" : "G1";
+    if (lastX === null || Math.abs(gx - lastX) > 1e-6) { line += " X" + gx.toFixed(3); lastX = gx; }
+    if (lastY === null || Math.abs(gy - lastY) > 1e-6) { line += " Y" + gy.toFixed(3); lastY = gy; }
+    if (lastZ === null || Math.abs(gz - lastZ) > 1e-6) { line += " Z" + gz.toFixed(3); lastZ = gz; }
+    lines.push(line);
+  });
+  return lines.join("\n");
+}
+function latheQueueToGcode(queue) {
+  var lines = [], lastX = null, lastZ = null;
+  queue.forEach(function(m) {
+    var gx = m.x * 2, gz = m.z; // internal x is radius; G-code X is diameter
+    var line = m.type === "rapid" ? "G0" : "G1";
+    if (lastX === null || Math.abs(gx - lastX) > 1e-6) { line += " X" + gx.toFixed(3); lastX = gx; }
+    if (lastZ === null || Math.abs(gz - lastZ) > 1e-6) { line += " Z" + gz.toFixed(3); lastZ = gz; }
+    lines.push(line);
+  });
+  return lines.join("\n");
+}
+function recordLastLocalOp() {
+  var R = r();
+  var taken = R.takeLastRunQueue && R.takeLastRunQueue();
+  if (!taken) return;
+  var gcode = taken.type === "lathe" ? latheQueueToGcode(taken.queue) : millQueueToGcode(taken.queue);
+  if (!gcode) return;
+  masterGcode.push({ index: opCounter++, gcode: gcode, timestamp: new Date().toISOString() });
+}
 
 /* ------------------------------------------------------------------ */
 /*  WEBSOCKET CONNECTION                                               */
@@ -2022,11 +2653,25 @@ function wsConnect() {
   });
 
   socket.on("master_gcode", function(data) {
-    if (data.gcode) {
-      downloadNcFile(data.gcode, wsSessionKey);
-    } else {
-      r().taiMsg("Henüz kaydedilmiş G-code operasyonu yok.", "bot");
+    var serverGcode = data.gcode || "";
+    if (masterGcode.length === 0) {
+      // No locally-run (non-LLM) operations to add — server's export is complete as-is.
+      if (serverGcode) { downloadNcFile(serverGcode, wsSessionKey); }
+      else { r().taiMsg("Henüz kaydedilmiş G-code operasyonu yok.", "bot"); }
+      return;
     }
+    // Local commands (delik/cep/örnek parça/vb.) never reach the server, so
+    // its export is missing them — append them here before downloading.
+    var lines = [];
+    if (serverGcode) lines.push(serverGcode.replace(/\bM30\s*$/i, "").trimEnd());
+    else lines.push("(Rover CNC · Local Export)", "(Date: " + new Date().toISOString().slice(0, 16) + ")", "");
+    masterGcode.forEach(function(op) {
+      lines.push("(--- Local Op " + op.index + " ---)");
+      lines.push(op.gcode);
+      lines.push("");
+    });
+    lines.push("M30");
+    downloadNcFile(lines.join("\n"), wsSessionKey);
   });
 
   hookChatInput();
@@ -2173,7 +2818,7 @@ function hookChatInput() {
     var tNorm = R.taiNorm(text);
 
     if (/^(nc|export|indir|download|kaydet)\s*(dosya|file|nc)?$/i.test(tNorm) ||
-        /(nc\s*(indir|export|dosya))|(master\s*gcode)|(dosya\s*indir)/i.test(tNorm)) {
+        /(nc\s*(indir|export|dosya|kaydet))|(master\s*gcode)|(dosya\s*indir)|(\bnc\b.*(indir|export|kaydet|dosya))|((indir|export|kaydet|dosya).*\bnc\b)/i.test(tNorm)) {
       R.taiMsg(text, "user");
       exportMasterGcode();
       return;
@@ -2208,9 +2853,11 @@ function hookChatInput() {
         /(stok|stock)\s*(boyut|olcu|ebat|size|cap|capi|dia|\d)/i.test(tNorm) ||
         /(boyut|olcu|ebat|size)\s*(ayarla|degistir)/i.test(tNorm) ||
         /(takim|tool)\s*\d/i.test(tNorm) ||
+        /\bt0*\d{1,2}\b/i.test(tNorm) ||
         /(magazin|magazine|takim\s*list|tool\s*list)/i.test(tNorm) ||
         (/(takim|tool)/i.test(tNorm) && /(goster|listele|liste)/i.test(tNorm)) ||
         /(ornek|sample).*(goster|listele)/i.test(tNorm) ||
+        /(civata|bolt|basamakli|step|kademeli|stepped|konik|taper).*(flans|flange|blok|block|mil|shaft|pim|pin)/i.test(tNorm) ||
         /(delik|drill|bore)/i.test(tNorm) ||
         /(cep|pocket)\s*(ac)?/i.test(tNorm) ||
         /(kanal|slot)\s*(ac)?/i.test(tNorm) ||
@@ -2224,6 +2871,7 @@ function hookChatInput() {
         if (localResult) {
           R.taiMsg(localResult, "bot");
           R.taiRenderChips();
+          recordLastLocalOp();
           return;
         }
       }

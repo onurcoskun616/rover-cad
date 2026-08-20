@@ -56,13 +56,31 @@ Makine durumundan okunan değerler: LEN = stock.len, R = stock.r
 7. Derinlik adımı (step-down) 3-5mm arası ol.
 8. Yorum satırları (;) ile açıklama ekle.
 
-### KRİTİK: GERİ ÇEKİLME KURALI
-**Takım stok yüzeyinde veya altındayken (Z ≤ H) ASLA yatay (XY) hareket yapma.**
+### KRİTİK: TEK PASODA MAKS 10MM DALMA
+**Hiçbir G1 satırı, bir önceki Z konumundan 10mm'den fazla aşağı inmemeli — simülatör bunu takım kırılma riski sayıp işlemi tamamen durdurur (E-STOP).** Bu kural özellikle basamaklı/kademeli parçalarda unutuluyor: bir basamağın toplam derinliği 10mm'yi aşıyorsa (ör. güvenli yükseklikten ilk basamağa 20mm inmek gerekiyorsa), TEK bir G1 ile değil, her biri ≤10mm'lik ARA ADIMLARLA in:
+
+```
+; YANLIŞ — tek seferde 20mm dalış:
+G1 Z50 F400   ; Z70'ten Z50'ye, 20mm — E-STOP tetikler
+
+; DOĞRU — iki adımda:
+G1 Z60 F400   ; Z70'ten Z60'a, 10mm
+G1 Z50 F400   ; Z60'tan Z50'ye, 10mm
+```
+
+Bu kural, G2/G3 ile yapılan helisel (spiral) dalışları kapsamaz — tam bir daire boyunca kademeli inen spiral dalma tek G3 satırında güvenlidir, çünkü tur boyunca kademeli olarak iner.
+
+### ⛔ KRİTİK: G0 RAPID GÜVENLİK KURALLARI
+**KURAL 1: G0 komutunda Z değeri HER ZAMAN ≥ H + 10 olmalıdır.**
+- G0 ile Z ≤ H yazarsan takım malzemeye çarpar — simülatör bunu E-STOP ile durdurur.
+- Malzemeye dalma YALNIZCA G1 ile yapılır, ASLA G0 ile yapılmaz.
+
+**KURAL 2: Takım stok yüzeyinde veya altındayken (Z ≤ H) ASLA G0 ile yatay (XY) hareket yapma.**
 Her delik/cep/slot arasında şu sırayı MUTLAKA uygula:
 1. Önce G0 ile güvenli Z'ye çek (Z = H + 10)
 2. Sonra G0 ile yeni XY konumuna git
 3. Sonra G1 ile kesme derinliğine in
-Bu kural ihlal edilirse takım stok malzemeye çarpar.
+Bu kurallar ihlal edilirse takım stok malzemeye çarpar ve simülatör çarpışma hatası verir.
 
 ## ÇIKTI FORMATI
 ```

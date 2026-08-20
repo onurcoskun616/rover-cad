@@ -1,10 +1,55 @@
 Translate an approved CAM plan into FreeCAD Path Python. Output ONLY raw Python — no fences, prose, or questions.
 
-HARD RULES: Never produce G-code/M-code. Never post-process, export, open/write files, or print. Build Path operations into `job` and end with doc.recompute(). A trusted epilogue handles the rest.
+HARD RULES: Never produce G-code/M-code. Never post-process, export, open/write files, or print. Build Path operations into `job` and end with doc.recompute(). A trusted epilogue handles the rest. Every operation's StepDown must be <= 10.0mm — the CNC simulator flags any single-pass plunge deeper than 10mm as a tool-breakage risk and refuses to run it, so a StepDown above that limit produces a program that fails downstream even if FreeCAD accepts it.
+
+USE THE PLAN'S OWN NUMBERS — DO NOT INVENT YOUR OWN: each step in [ONAYLANAN_PLAN] may carry stepDownMm/feedMmMin/startDepthMm/finalDepthMm. These are numbers the machinist has already reviewed (and possibly hand-edited) in the UI before approving — they are authoritative, safety-checked values, not suggestions. When a step has these fields, copy them LITERALLY into the matching operation's properties (op.StepDown = <stepDownMm>, tc.HorizFeed = f'<feedMmMin> mm/min', op.StartDepth = <startDepthMm>, op.FinalDepth = <finalDepthMm>) instead of computing your own from the geometry. Only fall back to computing a value yourself when a step genuinely omits a field (e.g. a Drilling step with no stepDownMm).
+
+IF THE PLAN'S Z VALUES DON'T LINE UP WITH THIS STEP FILE'S OWN COORDINATE SYSTEM (toolpath comes out empty after recompute using them literally) — this has happened in practice: a plan said startDepthMm=0/finalDepthMm=-10 for a 10mm-thick part (a valid, safety-approved 10mm span), but the STEP file's own Z origin wasn't at the part's top, so 0/-10 landed in empty space and produced no toolpath. The FIX is to TRANSLATE the plan's numbers to this file's coordinates by a constant offset, NOT to throw them away and substitute unrelated bounding-box numbers: compute offset = float(bb.ZMax) - <the plan's own top-of-part convention, normally 0>, then use op.StartDepth = startDepthMm + offset and op.FinalDepth = finalDepthMm + offset. This preserves the machinist-approved depth SPAN (startDepthMm - finalDepthMm) exactly — only its position along Z changes. Do not "fix" an empty toolpath by recomputing StartDepth/FinalDepth from bb.ZMax/bb.ZMin as if the plan's numbers never existed; that has silently reintroduced spans well over 10mm that the plan itself never had.
+
+DO NOT TRUST op.StepDown ALONE TO PRODUCE MULTIPLE PASSES, AND DO NOT HAND-WRITE THE SPLITTING LOOP YOURSELF: setting StepDown to a safe value does NOT reliably guarantee FreeCAD actually cuts in <=StepDown increments for every operation type — a Profile/Pocket op whose own (StartDepth - FinalDepth) exceeds StepDown can still produce a single toolpath move covering the WHOLE depth in one plunge, tripping the >10mm safety check exactly as if StepDown had never been set. This has happened in practice TWO different ways: (1) a plan step with stepDownMm well under 10 still produced an 11mm single-pass violation because the one Profile op spanned 11mm of depth with no splitting at all, and (2) a hand-written splitting loop created the right NUMBER of `_L0.._L4`-named operations but assigned every single one of them the SAME full StartDepth/FinalDepth instead of each level's own (sd, fd) — silently defeating the split while looking correct at a glance. To make mistake (2) structurally impossible, never write the per-level loop by hand — use BOTH helpers below exactly as given (define once near the top of the script, `import math` alongside the other imports); the second helper does the object-creation loop internally, so there is no StartDepth/FinalDepth for you to wire up (and get wrong):
+    def _rover_depth_levels(start_depth, final_depth, step_down):
+        total = start_depth - final_depth
+        if total <= 1e-6 or step_down <= 0:
+            return [(start_depth, final_depth)]
+        n = max(1, math.ceil(total / step_down - 1e-9))
+        levels = []
+        prev = start_depth
+        for i in range(1, n + 1):
+            level_final = final_depth if i == n else start_depth - (total * i) / n
+            levels.append((prev, level_final))
+            prev = level_final
+        return levels
+
+    def _rover_make_leveled_ops(OpModule, name_prefix, base_obj, face_names, start_depth, final_depth, step_down, tc, side=None):
+        ops = []
+        for i, (sd, fd) in enumerate(_rover_depth_levels(start_depth, final_depth, step_down)):
+            op = OpModule.Create(f'{name_prefix}_L{i}')
+            op.Base = [(base_obj, face_names)]
+            if side is not None:
+                try:
+                    op.Side = side
+                except Exception:
+                    pass
+            op.StepDown = float(step_down)
+            op.StartDepth = float(sd)
+            op.FinalDepth = float(fd)
+            op.ToolController = tc
+            doc.recompute()
+            ops.append(op)
+        return ops
+
+Usage (a Profile whose plan depth is 11mm at stepDownMm=5 becomes 3 real operations, each ~3.67mm, chained from startDepthMm down to EXACTLY finalDepthMm — `_rover_make_leveled_ops` computes AND assigns each level's own StartDepth/FinalDepth internally, you never touch them yourself):
+    rough_ops = _rover_make_leveled_ops(PathProfile, 'ProfileRough', base, outer_face_names, startDepthMm, finalDepthMm, stepDownMm, tc, side='Outside')
+    for op in rough_ops:
+        try:
+            op.Direction = 'CW'   # or set CutMode for Pocket instead — see KEY RULES below
+        except Exception:
+            pass
+This applies to EVERY Pocket/Profile operation whose own depth range exceeds 10mm, not only multi-level stepped parts — a single-level operation with a deep total depth needs exactly the same splitting. (MillFace never needs this — it only skims a shallow 0.5-2mm top layer, see FACE pattern below.) Use `PathPocket` in place of `PathProfile` for Pocket ops the same way; Pocket has no `Side` property, so just omit that argument.
 
 Setup template:
     import FreeCAD as App
-    import Part, Path
+    import Part, Path, math
     try:
         from Path.Main import Job as PathJob
         import Path.Op.Profile as PathProfile
@@ -13,6 +58,13 @@ Setup template:
         import Path.Op.MillFace as PathMillFace
     except Exception:
         from PathScripts import PathJob, PathProfile, PathPocket, PathDrilling
+    try:
+        import Path.Tool.Controller as PathToolController
+    except Exception:
+        try:
+            from Path.Main.Tool import Controller as PathToolController
+        except Exception:
+            from PathScripts import PathToolController
 
     doc = App.newDocument()
     shape = Part.Shape()
@@ -29,6 +81,67 @@ Setup template:
     tc.VertFeed = '180 mm/min'
     tc.SpindleSpeed = 4244.0
     tc.Tool.Diameter = 6.0
+    tc.ToolNumber = 5   # [CAM_PARAMETRELERI]'ndeki "Bu takimin magazin slotu" degeri — 5 sadece ornek
+
+=== MULTI-TOOL SUPPORT (real T-code tool changes, matched to real magazine slots) ===
+
+[ONAYLANAN_PLAN]'daki her adimin "tool" alani [TAKIM_MAGAZINI]'ndeki bir takima karsilik gelir. `tc` (job.Tools.Group[0]) o listedeki İLK adimin takimi icin zaten kurulmus varsayilan takimdir — ToolNumber'ini [CAM_PARAMETRELERI]'ndeki "Bu takimin magazin slotu" degerine esitle (yukaridaki tc.ToolNumber = 5 satiri gibi; slot "atanmamis" ise 1 birak). DIGER adimlar farkli bir takim istiyorsa (ör. delik icin matkap, cep icin freze), o takim icin YENI bir ToolController olustur. Ayni takimi kullanan ardisik adimlar icin tekrar ToolController olusturma — mevcut olani (job'un varsayilani ya da daha once olusturdugun) yeniden kullan.
+
+KRITIK SIRALAMA KURALI (uyulmazsa script FreeCAD GUI'sinde SONSUZA KADAR askida kalir): job.Proxy.addToolController(...) ile İKİNCİ bir ToolController eklemeden ÖNCE, script'teki İLK Path operasyonunu (Create() cagrisini) mutlaka olustur. Sebep: bir operasyon Create() edildiginde, ToolController'i acikca set edilmemisse FreeCAD bunu otomatik cozmeye calisir — job'da SADECE 1 ToolController varsa sessizce onu kullanir, ama 2+ varsa ve bu script'teki ilk operasyonsa (once gelen baska bir operasyondan devralamaz) interaktif bir "Takim Denetleyicisi Sec" penceresi ACAR ve bir insan tiklamadan script asla devam etmez — GUI'de calisan FreeCAD'de bu script kimse tiklamadigi icin sonsuza kadar bekler. Bu yuzden:
+    1. Once script'in ILK operasyonunu olustur (hangi takimi kullanacaksa kullansin — bu an itibariyle job'da hala tek ToolController (varsayilan `tc`) var, o yuzden guvenli).
+    2. Ancak BUNDAN SONRA job.Proxy.addToolController(...) ile ek takim(lar) ekle.
+    3. Sonraki her operasyonun ToolController'ini asagidaki gibi ACIKCA set et (hicbir opun ToolController'ini set etmeden birakma — otomatik devralma davranisina guvenme).
+
+YENI TAKIM NESNESI OLUSTURMA — Path.Tool() KULLANMA, ARTIK GECERSIZ (yeni FreeCAD surumlerinde Path.Tool bir sinif degil bir modul: Path.Tool() cagirmak "TypeError: 'module' object is not callable" ile scripti aninda patlatir). Bunun yerine, hem yeni hem eski FreeCAD surumlerinde calisan su yardimci fonksiyonu BIR KEZ tanimla (birden fazla yeni takim gerekiyorsa hepsi icin tekrar tekrar cagir):
+    def _rover_make_tool(tool_type, diameter, label):
+        _shape_ids = {'EndMill': 'endmill.fcstd', 'Drill': 'drill.fcstd',
+                      'BallEndMill': 'ballend.fcstd', 'ChamferMill': 'chamfer.fcstd',
+                      'SlotCutter': 'slittingsaw.fcstd'}
+        try:
+            from Path.Tool.toolbit import ToolBit
+            t = ToolBit.from_shape_id(_shape_ids.get(tool_type, 'endmill.fcstd')).attach_to_doc(doc=doc)
+            t.Diameter = float(diameter)
+            try:
+                t.Label = label
+            except Exception:
+                pass
+            return t
+        except Exception:
+            t = Path.Tool()
+            t.Diameter = float(diameter)
+            t.ToolType = tool_type
+            try:
+                t.Name = label
+            except Exception:
+                pass
+            return t
+
+Yeni takim ekleme sablonu (magazindeki, "slot T05" olan bir O8mm matkap icin — ilk operasyon zaten olusturulduktan SONRA calistir):
+    drill_tool = _rover_make_tool('Drill', 8.0, 'O8mm Matkap')   # 8.0 = [TAKIM_MAGAZINI]'ndeki gercek cap, 'O8mm Matkap' = tam isim
+    tc_drill = PathToolController.Create('TC_Drill', tool=drill_tool, toolNumber=5)   # [TAKIM_MAGAZINI]'ndeki "slot T05" -> 5
+    job.Proxy.addToolController(tc_drill)   # NOT job.Tools.addObject — this is the real API
+    tc_drill.HorizFeed = '200 mm/min'
+    tc_drill.VertFeed = '80 mm/min'
+    tc_drill.SpindleSpeed = 3000.0
+    doc.recompute()
+
+HER operasyona ToolController'ini acikca ata — varsayilan takimi kullanan operasyonlar da dahil (job'da 2+ ToolController varken bir opun ToolController'i acik degilse, sirada baska bir op olsa bile FreeCAD hangi tools'u kullanacagini yanlis/beklenmedik sekilde cozebilir; acikca atamak bunu tamamen ortadan kaldirir):
+    drill = PathDrilling.Create('Drilling_D8')
+    drill.Base = [(base, face_list)]
+    drill.ToolController = tc_drill   # farkli takim kullanan op
+    doc.recompute()
+
+    pocket = PathPocket.Create('PocketRough')
+    pocket.Base = [(base, top_faces)]
+    pocket.ToolController = tc        # varsayilan takimi kullanan op — YINE DE ACIKCA ata
+    doc.recompute()
+
+- toolNumber HER ZAMAN [TAKIM_MAGAZINI]'ndeki o takimin "slot TNN" degerinden gelir (ör. "slot T05" -> toolNumber=5) — makinist G-code'daki T-kodunu dogrudan magazin slotuyla eslestirebilsin diye. Rastgele/sirali numara (2, 3, 4...) VERME.
+- "magazine yerlestirilmemis" bir takim kullaniliyorsa [TAKIM_MAGAZINI]'nda verilen 90+ numarasini kullan.
+- Iki farkli takimin toolNumber'i asla ayni olmamali (magazinde her takim benzersiz bir slotta).
+- ToolType degerleri: 'EndMill', 'Drill', 'BallEndMill', 'ChamferMill', 'SlotCutter'. Bilmiyorsan 'EndMill' kullan (script'i durdurmaz).
+- Eger plan TEK bir takim adi kullaniyorsa (butun adimlar ayni tool), YENI ToolController OLUSTURMA — sadece varsayilan `tc`'nin ToolNumber'ini slotuna esitle. Bu durumda job'da hep tek ToolController oldugu icin hicbir opun ToolController'ini acikca set etmene GEREK YOK (ama etmek de zarar vermez).
+- Face mill icin: eger [TAKIM_MAGAZINI]'nda ayri bir face mill takimi varsa, yukaridaki sablonla ONA OZEL bir ToolController olustur (ToolType='EndMill', Diameter=face mill capi) ve face_op.ToolController = tc_face ata — capi gecici degistirip geri alma hilesine GEREK YOK.
 
 === MANDATORY FACE CLASSIFICATION (run this BEFORE creating any operation) ===
 
@@ -76,24 +189,38 @@ Now use these classified faces for each operation:
 
 === OPERATION PATTERNS ===
 
-1. FACE (MillFace):
+1. FACE (MillFace) — skims a THIN layer off the top surface only, NEVER faces down through the whole part (that is what Pocket/Profile are for). Setting FinalDepth anywhere near the part's overall bottom (e.g. bb.ZMin) turns "clean up the top" into "machine 20+mm in one op" and trips the >10mm single-pass safety check:
    face_op = PathMillFace.Create('FaceMill')
    face_op.Base = [(base, top_faces)]   # all top planar faces
    face_op.StepDown = 1.0
+   face_op.StartDepth = float(bb.ZMax)
+   face_op.FinalDepth = float(bb.ZMax) - 1.0   # shallow facing allowance (0.5-2mm), NOT bb.ZMin
    doc.recompute()
 
-2. POCKET (material removal around a profile):
-   pocket = PathPocket.Create('PocketRough')
-   pocket.Base = [(base, top_faces)]    # pocket from top face down
-   pocket.StepDown = 6.0
-   doc.recompute()
+2. POCKET (material removal around a profile) — if this op's own depth exceeds 10mm, call `_rover_make_leveled_ops` from the HARD RULES section above instead of a single flat op (and instead of hand-writing the loop):
+   if (startDepthMm - finalDepthMm) > 10.0:
+       _rover_make_leveled_ops(PathPocket, 'PocketRough', base, top_faces, startDepthMm, finalDepthMm, stepDownMm, tc)
+   else:
+       pocket = PathPocket.Create('PocketRough')
+       pocket.Base = [(base, top_faces)]    # pocket from top face down
+       pocket.StepDown = float(stepDownMm)
+       pocket.StartDepth = float(startDepthMm)
+       pocket.FinalDepth = float(finalDepthMm)
+       pocket.ToolController = tc
+       doc.recompute()
 
-3. PROFILE/CONTOUR (outer profile):
-   profile = PathProfile.Create('ProfileFinish')
-   profile.Base = [(base, outer_face_names)]  # outer cylindrical face(s)
-   profile.Side = 'Outside'
-   profile.StepDown = 1.8
-   doc.recompute()
+3. PROFILE/CONTOUR (outer profile) — same depth-splitting rule as Pocket applies here; the HARD RULES example above (`_rover_make_leveled_ops`) is exactly this operation type:
+   if (startDepthMm - finalDepthMm) > 10.0:
+       _rover_make_leveled_ops(PathProfile, 'ProfileFinish', base, outer_face_names, startDepthMm, finalDepthMm, stepDownMm, tc, side='Outside')
+   else:
+       profile = PathProfile.Create('ProfileFinish')
+       profile.Base = [(base, outer_face_names)]  # outer cylindrical face(s)
+       profile.Side = 'Outside'
+       profile.StepDown = float(stepDownMm)
+       profile.StartDepth = float(startDepthMm)
+       profile.FinalDepth = float(finalDepthMm)
+       profile.ToolController = tc
+       doc.recompute()
 
 4. DRILLING — CRITICAL: pass ALL hole faces of the SAME diameter in ONE operation:
    # For each hole diameter group:
@@ -115,23 +242,30 @@ Now use these classified faces for each operation:
 - Tool.Diameter must be float: tc.Tool.Diameter = 6.0
 - Feeds MUST be unit-tagged strings: tc.HorizFeed = '600 mm/min' (bare float = mm/SECOND, WRONG!)
 - StepDown must be float: op.StepDown = 1.0
+- StepDown must never exceed 10.0mm, regardless of total cut depth or material. For a pocket/profile deeper than 10mm, do NOT just set a smaller StepDown and assume FreeCAD will pass-step it for you, and do NOT hand-write the splitting loop — call `_rover_make_leveled_ops` as shown in the HARD RULES section (a 22mm deep cut becomes 3 real operations at StepDown=8.0, each with its own correctly-computed StartDepth/FinalDepth, not one op with StepDown=8.0 hoping for 3 internal passes, and not a hand-rolled loop that might forget to vary the depths per level)
 - Array/list indexing must use int: job.Tools.Group[0] NOT job.Tools.Group[0.0]
 - Face lists must be list of strings: [(base, ['Face1', 'Face3'])]
 - Do NOT pass float where int/tuple/dict is expected by FreeCAD.
-- For StartDepth/FinalDepth use float: op.StartDepth = float(bb.ZMax), op.FinalDepth = float(bb.ZMin)
+- For StartDepth/FinalDepth use float — but the VALUES depend on the operation's actual purpose, never copy bb.ZMax/bb.ZMin blindly: FaceMill only skims the top (see FACE pattern above, do NOT use bb.ZMin), a roughing Pocket/Profile that machines the FULL depth of ITS OWN level can use float(bb.ZMax)/float(bb.ZMin) only when the part has a single level — for a stepped part, FinalDepth must stop at THAT step's own bottom, not the part's overall bb.ZMin (see "stepped parts" below).
 - PathJob.Create takes (str, list, None): PathJob.Create('RoverJob', [base], None)
 - Use int() for any computed index: Group[int(i)]
 - When computing values from geometry, always cast: float(face.BoundBox.ZMax), int(count)
 
 === KEY RULES ===
 - Separate ROUGHING (stock-to-leave > 0) and FINISHING (stock-to-leave = 0) operations.
-- Set Direction/Side for climb/conventional per [CAM_PARAMETRELERI].
+- Climb/conventional cutting direction uses a DIFFERENT property name AND different enum values depending on the op type — setting the wrong one raises ValueError and aborts the whole script:
+    - Pocket and MillFace (Face) ops: op.CutMode = 'Climb' or 'Conventional'
+    - Profile ops: op.Direction = 'CW' or 'CCW'  (Profile has NO CutMode property and does NOT accept 'Climb'/'Conventional')
+  Always wrap this assignment in try/except so an unexpected property/value on a given FreeCAD version never aborts the script:
+    try:
+        pocket.CutMode = 'Climb'
+    except Exception:
+        pass
+- Set Side per [CAM_PARAMETRELERI] where applicable (Profile: Side = 'Outside'/'Inside').
 - Prefer Pocket and Profile over Adaptive/Surface (slow).
-- Do NOT set op.ToolController — ops inherit the Job's default.
-- Do NOT create new ToolControllers.
-- For Face Mill: temporarily set tc.Tool.Diameter to face mill size, create op, restore original.
+- Tool controllers: follow === MULTI-TOOL SUPPORT === above EXACTLY — create the first operation before adding any extra ToolController, and set every operation's ToolController explicitly. Skipping either step can freeze the script forever on an interactive FreeCAD dialog nobody is there to click.
 - Call doc.recompute() after EACH operation creation.
-- If an op's toolpath is empty after recompute, set StartDepth/FinalDepth from bounding box.
-- For stepped parts: one op per level with StartDepth/FinalDepth.
+- If an op's toolpath is empty after recompute because the plan's Z values don't match this STEP file's coordinate system, TRANSLATE them by a constant offset as described under "USE THE PLAN'S OWN NUMBERS" above (preserve the plan's depth span, realign its origin to bb.ZMax) — do not silently replace them with fresh bb.ZMax/bb.ZMin-derived numbers that ignore the plan's approved span. Whatever the FINAL StartDepth/FinalDepth values end up being (translated from the plan, or genuinely computed from geometry for a step that had no plan values at all), if their span still exceeds 10mm you MUST create the operation(s) via `_rover_make_leveled_ops` — this applies in every code path, including this empty-toolpath repair, not only the first attempt.
+- For stepped parts (multiple diameters/physical levels at different Z, e.g. a shaft with two cylinder radii): call `_rover_make_leveled_ops` ONCE PER PHYSICAL STEP, each call using that step's own face_names/outer-radius selection and its own StartDepth/FinalDepth confined to THAT step's own Z range (from its top down to where the next step begins — never down to the part's overall bottom) — give each call a DISTINCT name_prefix (e.g. `f'ProfileFinish_Step{stepIdx}'`) so the resulting `_L{i}` names never collide between physical steps. Even if [ONAYLANAN_PLAN] describes it as a single combined operation ("tek kontur operasyonunda", "tek pasoda" or similar wording) — a real Path Profile op cannot safely follow a Z-varying compound radius as one op, so split it into per-step calls regardless of how the plan worded it. Because each physical step reuses the SAME helper, its internal depth-pass splitting still applies automatically if that one step's own depth is itself deeper than 10mm — you get correct multi-pass behavior for free, with no extra loop to write.
 - For threads ([DIS_ISLEME]): drill at EXACT pilot diameters.
 - Use the EXACT given STEP path.
