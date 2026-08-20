@@ -10,7 +10,11 @@ export function initViewer(container) {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x152238);
 
-  const camera = new THREE.PerspectiveCamera(45, width / height, 1, 5000);
+  // near=1 iken tekerlekle yaklaşıldığında kameraya 1 birimden yakın kalan
+  // yüzeyler kırpılıyor, model ekrandan siliniyordu ("zoom bozuk" hissi).
+  // logarithmicDepthBuffer acik oldugu icin bu kadar genis bir near/far araligi
+  // z-fighting'e yol acmiyor.
+  const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 5000);
   camera.position.set(100, 100, 100);
 
   const renderer = new THREE.WebGLRenderer({ antialias: true, logarithmicDepthBuffer: true });
@@ -28,7 +32,16 @@ export function initViewer(container) {
   container.appendChild(labelRenderer.domElement);
 
   const controls = new OrbitControls(camera, renderer.domElement);
-  controls.enableDamping = true;
+  // Damping'in momentum davranisi her tekerlek tikini birkac kare boyunca
+  // sonumleyerek suruduruyor, hizli art arda scroll'da kamera hedeften gecip
+  // geri seker gibi hissettiriyordu. CNC Simulator'de ayni sebeple kapatilmisti;
+  // kapaliyken zoom her tekerlek hareketine 1:1 karsilik veriyor.
+  controls.enableDamping = false;
+  controls.zoomSpeed = 0.9;
+  // Serbest zoom: yakinda camera.near'in (0.1) uzerinde kalacak kadar bir taban,
+  // uzakta far duzlemin (5000) altinda kalacak bir tavan.
+  controls.minDistance = 0.5;
+  controls.maxDistance = 4000;
 
   scene.add(new THREE.AmbientLight(0xffffff, 0.7));
   const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);

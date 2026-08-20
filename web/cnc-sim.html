@@ -926,8 +926,17 @@ function stockCameraScale(){return Math.max(W||0,D||0,TOP||0,40);}
 function applyStockZoomLimits(){
   if(!controls)return;
   const s=stockCameraScale();
-  controls.minDistance=Math.max(40,s*0.8);
-  controls.maxDistance=Math.max(600,s*6);
+  // minDistance eskiden s*0.8 idi: 156mm'lik bir stokta kamerayı 125 birimden
+  // yakına sokmuyor, tekerleği çevirmeye devam etsen de zoom orada duruyordu.
+  // Açılış kadrajını setView() belirlediği için (s*1.8) burayı gevşetmek
+  // varsayılan görünümü değiştirmez — sadece kullanıcı isterse detaya
+  // inebilmesini sağlar. Taban, kameranın near düzlemini (1) geçip parçayı
+  // kırpmayacak kadar mesafe bırakıyor.
+  controls.minDistance=Math.max(5,s*0.05);
+  // Fog, maxDistance*1.6'ya kadar uzanıyor; kameranın far düzlemi 3000 olduğu
+  // için üst sınırı 1800'de tutuyoruz ki en uzak zoom'da sahne sisin ötesine
+  // taşıp kırpılmasın.
+  controls.maxDistance=Math.min(1800,Math.max(600,s*8));
   if(scene&&scene.fog){scene.fog.near=controls.maxDistance*0.75;scene.fog.far=controls.maxDistance*1.6;}
 }
 function setView(v){const s=stockCameraScale();const d=Math.max(140,s*1.8);const map={iso:[d*.9,d*.7,d*.9],top:[0,d*1.2,1],front:[0,d*.4,d*1.1],right:[d*1.1,d*.4,0]};const p=map[v]||map.iso;camera.position.set(p[0],p[1],p[2]);controls&&controls.update();}
@@ -1446,7 +1455,12 @@ $("l-file").onchange=e=>{
 /* --- CAM sayfasından gelen G-code otomatik yükleme --- */
 {const raw=sessionStorage.getItem("rover_cnc_gcode");
 if(raw){try{const d=JSON.parse(raw);if(d.gcode){
-  const isMill=!d.machineType||d.machineType==="freze"||d.machineType==="mill";
+  /* CAM sihirbazı tezgah tipini kendi etiketiyle gönderir ("Freze (CNC Mill)",
+     "Torna (CNC Lathe)"), bu yüzden tam eşleşme aramak her freze işini torna
+     sekmesinde açıyordu. Backend'in kuralını uygula: torna geçiyorsa torna,
+     aksi halde freze. */
+  const mt=String(d.machineType||"").toLowerCase();
+  const isMill=!(mt.includes("torna")||mt.includes("lathe"));
   if(d.material){const mk=d.material.toLowerCase();const map={"celik":"steel","çelik":"steel","steel":"steel","aluminyum":"aluminum","alüminyum":"aluminum","aluminum":"aluminum","pirinc":"brass","pirinç":"brass","brass":"brass","bakir":"copper","bakır":"copper","copper":"copper","dokme demir":"cast-iron","dökme demir":"cast-iron","cast-iron":"cast-iron","titanyum":"titanium","titanium":"titanium","ahsap":"wood","ahşap":"wood","wood":"wood","plastik":"plastic","plastic":"plastic","pom":"plastic","nylon":"plastic","akrilik":"acrylic","acrylic":"acrylic","pmma":"acrylic"};const matKey=map[mk];if(matKey)setMaterial(matKey);}
   let camStock=null;
   if(isMill){
