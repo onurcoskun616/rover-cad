@@ -627,6 +627,31 @@ function autoFixFaceBoundaryPy() {
     "    except Exception:",
     "        return True",
     "    return False",
+    // The part's genuinely horizontal top faces, by FreeCAD face name. A facing
+    // op pointed at a vertical wall produces nothing — you cannot face-mill the
+    // side of a part — and that is exactly what the live failure turned out to
+    // be: boundary and depths were already correct (Stock, 20->10) and the path
+    // was still empty, while FreeCAD reported the selected face as Face5 at
+    // y=-17.32, z=1.47, a hexagon SIDE wall halfway up the part.
+    "def _rover_top_faces(_base_obj):",
+    "    _names = []",
+    "    try:",
+    "        _sh = _base_obj.Shape",
+    "        _zmax = float(_sh.BoundBox.ZMax)",
+    "        for _i, _f in enumerate(_sh.Faces):",
+    "            try:",
+    "                if type(_f.Surface).__name__ != 'Plane':",
+    "                    continue",
+    "                if abs(float(_f.normalAt(0, 0).z)) < 0.999:",
+    "                    continue",
+    "                if abs(float(_f.BoundBox.ZMax) - _zmax) > 1e-6:",
+    "                    continue",
+    "                _names.append('Face%d' % (_i + 1))",
+    "            except Exception:",
+    "                continue",
+    "    except Exception:",
+    "        pass",
+    "    return _names",
     "def _rover_fix_face_ops(_doc, _grp, _base_obj, _job):",
     "    try:",
     "        _part_top = float(_base_obj.Shape.BoundBox.ZMax)",
@@ -711,6 +736,21 @@ function autoFixFaceBoundaryPy() {
     // "rollback" — which is how an empty FaceMill (one clearance move, no
     // cutting at all) still reached the machine. Undoing a subset of a failed
     // change is not a rollback.
+    // Still nothing? Re-aim the operation at the part's real top faces before
+    // concluding the settings were wrong — a Base pointing at a side wall
+    // defeats every correct boundary and depth above it.
+    "    _rebased = False",
+    "    _top_faces = _rover_top_faces(_base_obj)",
+    "    for _op, _prev, _psd, _pfd in _targets:",
+    "        if _rover_face_cuts(_op) or not _top_faces:",
+    "            continue",
+    "        try:",
+    "            _op.Base = [(_base_obj, _top_faces)]",
+    "            _rebased = True",
+    "        except Exception:",
+    "            pass",
+    "    if _rebased:",
+    "        _doc.recompute()",
     "    _reverted = 0",
     "    _tried = []",
     "    for _op, _prev, _psd, _pfd in _targets:",
@@ -759,9 +799,9 @@ function autoFixFaceBoundaryPy() {
     "            _n = len([1 for _c in _op.Path.Commands if 'X' in _c.Parameters or 'Y' in _c.Parameters])",
     "        except Exception:",
     "            pass",
-    "        print('FACE_OP=%s boundary=%s->%s depth=%s/%s->%.3f/%.3f cuts=%d'",
+    "        print('FACE_OP=%s boundary=%s->%s depth=%s/%s->%.3f/%.3f topfaces=%s cuts=%d'",
     "              % (getattr(_op, 'Label', '?'), _prev, getattr(_op, 'BoundaryShape', '?'),",
-    "                 _psd, _pfd, _stock_top, _final, _n))",
+    "                 _psd, _pfd, _stock_top, _final, ','.join(_top_faces) or 'none', _n))",
     "    print('FACE_FIX=%d reverted=%d (top %.3f -> %.3f)' % (len(_targets), _reverted, _stock_top, _final))",
     "_rover_fix_face_ops(doc, _grp, base, job)",
   ].join("\n");
