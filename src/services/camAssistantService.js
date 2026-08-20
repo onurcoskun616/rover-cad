@@ -553,9 +553,6 @@ function autoFixUnsafeRapidsToFeedPy() {
     "            _p = getattr(_op, 'Path', None)",
     "            if _p is None:",
     "                continue",
-    "            _new_cmds = []",
-    "            _px = _py = _pz = None",
-    "            _changed = False",
     "            _default_feed = 300.0",
     "            try:",
     "                _tc = getattr(_op, 'ToolController', None)",
@@ -563,18 +560,33 @@ function autoFixUnsafeRapidsToFeedPy() {
     "                    _default_feed = float(_tc.VertFeed.Value)",
     "            except Exception:",
     "                pass",
+    "            _new_cmds = []",
+    "            _px = _py = _pz = None",
+    "            _changed = False",
     "            for _c in _p.Commands:",
-    "                _pr = dict(_c.Parameters)",
+    // Position fallback/tracking below is a DELIBERATE line-for-line mirror of
+    // collisionCheckPy's own detection loop (same file, above) — an earlier
+    // version reimplemented this with a subtly different fallback (carrying
+    // forward None instead of defaulting to 0.0, and only conditionally
+    // updating _px/_py/_pz) which silently left _px stuck at None whenever an
+    // operation's first couple of rapids didn't repeat X/Y (e.g. a real
+    // FreeCAD retract move that only specifies Z, matching Path/Op/Base.py's
+    // own `Path.Command("G0", {"Z": obj.ClearanceHeight.Value})` pattern) —
+    // meaning the very next (genuinely unsafe) move was never checked at all.
+    // Verified live: 0 unsafe found here while collisionCheckPy found 3,
+    // reproduced with a standalone Python simulation of that exact command
+    // sequence before switching to this mirrored version.
+    "                _pr = _c.Parameters",
     "                _rapid = _c.Name in ('G0', 'G00')",
     "                if _rapid:",
     "                    _report['rapids'] += 1",
-    "                _nx = float(_pr['X']) if 'X' in _pr else _px",
-    "                _ny = float(_pr['Y']) if 'Y' in _pr else _py",
-    "                _nz = float(_pr['Z']) if 'Z' in _pr else _pz",
+    "                _nx = float(_pr['X']) if 'X' in _pr else (_px if _px is not None else 0.0)",
+    "                _ny = float(_pr['Y']) if 'Y' in _pr else (_py if _py is not None else 0.0)",
+    "                _nz = float(_pr['Z']) if 'Z' in _pr else (_pz if _pz is not None else 0.0)",
     "                _unsafe = False",
-    "                if _rapid and _px is not None and _nx is not None and _ny is not None and _nz is not None:",
+    "                if _rapid and _px is not None and min(_pz, _nz) <= _bb.ZMax + 0.5:",
     "                    _dist = ((_nx-_px)**2 + (_ny-_py)**2 + (_nz-_pz)**2) ** 0.5",
-    "                    if _dist > 0.5 and min(_pz, _nz) <= _bb.ZMax + 0.5:",
+    "                    if _dist > 0.5:",
     "                        _steps = min(15, max(3, int(_dist // 3)))",
     "                        for _s in range(1, _steps):",
     "                            _t = _s / _steps",
@@ -596,9 +608,7 @@ function autoFixUnsafeRapidsToFeedPy() {
     "                    _changed = True",
     "                else:",
     "                    _new_cmds.append(_c)",
-    "                if _nx is not None: _px = _nx",
-    "                if _ny is not None: _py = _ny",
-    "                if _nz is not None: _pz = _nz",
+    "                _px, _py, _pz = _nx, _ny, _nz",
     "            if _changed:",
     "                try:",
     "                    _op.Path = Path.Path(_new_cmds)",
