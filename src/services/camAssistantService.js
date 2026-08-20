@@ -686,6 +686,7 @@ function autoFixFaceBoundaryPy() {
     // surface to face; BoundaryShape decides how wide. Only the second one was
     // ever wrong.
     "        _prev_boundary = getattr(_op, 'BoundaryShape', None)",
+    "        _prev_base = getattr(_op, 'Base', None)",
     "        _prev_sd = _prev_fd = None",
     "        try:",
     "            _prev_sd = float(_op.StartDepth.Value)",
@@ -703,19 +704,31 @@ function autoFixFaceBoundaryPy() {
     "                _op.BoundaryShape = 'Stock'",
     "            except Exception:",
     "                pass",
+    // "Face the whole block" in FreeCAD is an EMPTY Base plus a Stock boundary:
+    // with Base naming a face, MillFace clears that face's own region inset by
+    // the tool radius and the Stock boundary does not widen it — on a 40mm
+    // hexagon under a 25mm cutter that came out as an 18x14mm patch in the
+    // middle of an 80x143 block. An earlier attempt at an empty Base looked
+    // like it produced nothing, but that was while the depths still sat in air
+    // above the part, so it was never actually tested. The fallbacks below
+    // cover it if this turns out to be empty on its own merits.
+    "        try:",
+    "            _op.Base = []",
+    "        except Exception:",
+    "            pass",
     "        for _prop, _val in (('StartDepth', _stock_top), ('FinalDepth', _final)):",
     "            if hasattr(_op, _prop):",
     "                try:",
     "                    setattr(_op, _prop, _val)",
     "                except Exception:",
     "                    pass",
-    "        _targets.append((_op, _prev_boundary, _prev_sd, _prev_fd))",
+    "        _targets.append((_op, _prev_boundary, _prev_base, _prev_sd, _prev_fd))",
     "    if not _targets:",
     "        print('FACE_FIX=0')",
     "        return",
     "    _doc.recompute()",
     "    _again = False",
-    "    for _op, _prev, _psd, _pfd in _targets:",
+    "    for _op, _prev, _pbase, _psd, _pfd in _targets:",
     "        try:",
     "            if (abs(float(_op.StartDepth.Value) - _stock_top) > 1e-6",
     "                    or abs(float(_op.FinalDepth.Value) - _final) > 1e-6):",
@@ -741,7 +754,7 @@ function autoFixFaceBoundaryPy() {
     // defeats every correct boundary and depth above it.
     "    _rebased = False",
     "    _top_faces = _rover_top_faces(_base_obj)",
-    "    for _op, _prev, _psd, _pfd in _targets:",
+    "    for _op, _prev, _pbase, _psd, _pfd in _targets:",
     "        if _rover_face_cuts(_op) or not _top_faces:",
     "            continue",
     "        try:",
@@ -753,17 +766,19 @@ function autoFixFaceBoundaryPy() {
     "        _doc.recompute()",
     "    _reverted = 0",
     "    _tried = []",
-    "    for _op, _prev, _psd, _pfd in _targets:",
+    "    for _op, _prev, _pbase, _psd, _pfd in _targets:",
     "        if _rover_face_cuts(_op):",
     "            continue",
     "        try:",
     "            if _prev is not None:",
     "                _op.BoundaryShape = _prev",
+    "            if _pbase is not None:",
+    "                _op.Base = _pbase",
     "            if _psd is not None:",
     "                _op.StartDepth = _psd",
     "            if _pfd is not None:",
     "                _op.FinalDepth = _pfd",
-    "            _tried.append((_op, _prev, _psd, _pfd))",
+    "            _tried.append((_op, _prev, _pbase, _psd, _pfd))",
     "        except Exception:",
     "            pass",
     "    if _tried:",
@@ -774,7 +789,7 @@ function autoFixFaceBoundaryPy() {
     // that back is not a rollback, it is the original bug. When neither setting
     // cuts, keep the forced one — it is at least aimed at the block's real top.
     "    _refixed = False",
-    "    for _op, _prev, _psd, _pfd in _tried:",
+    "    for _op, _prev, _pbase, _psd, _pfd in _tried:",
     "        if _rover_face_cuts(_op):",
     "            _reverted += 1",
     "            continue",
@@ -793,15 +808,27 @@ function autoFixFaceBoundaryPy() {
     // Per-op diagnostic: without FreeCAD to hand, this is what says whether the
     // forced settings produced a real path, whether the rollback recovered one,
     // and which depths were involved.
-    "    for _op, _prev, _psd, _pfd in _targets:",
+    "    for _op, _prev, _pbase, _psd, _pfd in _targets:",
     "        _n = 0",
+    "        _xs = []",
+    "        _ys = []",
     "        try:",
-    "            _n = len([1 for _c in _op.Path.Commands if 'X' in _c.Parameters or 'Y' in _c.Parameters])",
+    "            for _c in _op.Path.Commands:",
+    "                if 'X' in _c.Parameters or 'Y' in _c.Parameters:",
+    "                    _n += 1",
+    "                if 'X' in _c.Parameters:",
+    "                    _xs.append(float(_c.Parameters['X']))",
+    "                if 'Y' in _c.Parameters:",
+    "                    _ys.append(float(_c.Parameters['Y']))",
     "        except Exception:",
     "            pass",
-    "        print('FACE_OP=%s boundary=%s->%s depth=%s/%s->%.3f/%.3f topfaces=%s cuts=%d'",
+    // The number of moves says the op is alive; the swept extent says whether
+    // it is facing the block or a patch in the middle of it.
+    "        _span = '%.0fx%.0f' % (max(_xs) - min(_xs), max(_ys) - min(_ys)) if _xs and _ys else '-'",
+    "        _nbase = len(getattr(_op, 'Base', []) or [])",
+    "        print('FACE_OP=%s boundary=%s->%s depth=%s/%s->%.3f/%.3f topfaces=%s base=%d cuts=%d span=%s'",
     "              % (getattr(_op, 'Label', '?'), _prev, getattr(_op, 'BoundaryShape', '?'),",
-    "                 _psd, _pfd, _stock_top, _final, ','.join(_top_faces) or 'none', _n))",
+    "                 _psd, _pfd, _stock_top, _final, ','.join(_top_faces) or 'none', _nbase, _n, _span))",
     "    print('FACE_FIX=%d reverted=%d (top %.3f -> %.3f)' % (len(_targets), _reverted, _stock_top, _final))",
     "_rover_fix_face_ops(doc, _grp, base, job)",
   ].join("\n");
