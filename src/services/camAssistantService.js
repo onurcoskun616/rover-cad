@@ -366,6 +366,55 @@ function plungeCheckPy(isTorna) {
   ].join("\n");
 }
 
+// Trusted epilogue (NOT model output): flag operations whose toolpaths are
+// byte-for-byte identical to an earlier one. detectDuplicateDepthSplit() below
+// spots the same mistake, but only among operations that ALSO tripped the
+// plunge limit — so a level split that collapsed onto shallow, legal depths
+// sailed straight through. Live case: ProfileRough_L0/_L1 and
+// ProfileFinish_L0/_L1/_L2 all cut the exact same contour at Z3 then Z0,
+// five times, because FreeCAD's opExecute reset every level's StartDepth and
+// FinalDepth back to the same defaults during recompute. The part still came
+// out, so nothing complained — it just air-cut four extra times and never
+// stepped down. Identical paths are never intentional: two operations that
+// remove the same material are always a level split that did not take.
+function duplicateOpCheckPy() {
+  return [
+    "import json as _json_dup, hashlib as _hashlib_dup",
+    "_dup_ops = []",
+    "_seen_paths = {}",
+    "for _op in _grp:",
+    "    _p = getattr(_op, 'Path', None)",
+    "    if _p is None:",
+    "        continue",
+    "    _lbl = str(getattr(_op, 'Label', _op.Name))",
+    "    _sig = []",
+    "    for _c in _p.Commands:",
+    "        _pr = _c.Parameters",
+    "        _sig.append(_c.Name + ':' + ','.join(",
+    "            '%s%.4f' % (_k, float(_pr[_k])) for _k in sorted(_pr) if _k in 'XYZIJK'))",
+    "    if len(_sig) < 2:",
+    "        continue",
+    "    _h = _hashlib_dup.md5('|'.join(_sig).encode('utf-8')).hexdigest()",
+    "    if _h in _seen_paths:",
+    "        _dup_ops.append({'op': _lbl, 'sameAs': _seen_paths[_h]})",
+    "    else:",
+    "        _seen_paths[_h] = _lbl",
+    'print("DUPLICATE_OPS=" + _json_dup.dumps(_dup_ops))',
+  ].join("\n");
+}
+
+/** Read the "DUPLICATE_OPS=[...]" line duplicateOpCheckPy() prints. */
+export function parseDuplicateOps(text) {
+  const match = String(text ?? "").match(/DUPLICATE_OPS=(\[.*\])/);
+  if (!match) return [];
+  try {
+    const parsed = JSON.parse(match[1]);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
 // Read the "PLUNGE_VIOLATIONS=[...]" line the trusted epilogue prints (see
 // plungeCheckPy above) out of the FreeCAD tool's combined stdout text.
 export function parsePlungeViolations(text) {
@@ -861,6 +910,11 @@ function buildSafetyChecks(isTorna) {
     label: "Takim kontrolcusu atamalari dogrulandi (interaktif secim beklemesi yok)",
     ok: true,
   });
+  checks.push({
+    key: "duplicateOps",
+    label: "Hicbir operasyon bir digeriyle ayni toolpath'i tekrarlamiyor (seviye bolmesi tuttu)",
+    ok: true,
+  });
   return checks;
 }
 
@@ -947,6 +1001,7 @@ function previewEpiloguePy(previewJsonPath, defaultFeed, isTorna) {
     "print('PREVIEW_JSON=' + _out)",
     plungeCheckPy(isTorna),
     collisionCheckPy(),
+    duplicateOpCheckPy(),
   ].join("\n");
 }
 
@@ -976,6 +1031,7 @@ function postEpiloguePy(gcodePath, postName, isTorna) {
     autoFixDeepPlungesPy(),
     plungeCheckPy(isTorna),
     collisionCheckPy(),
+    duplicateOpCheckPy(),
     // Report which magazine slot each operation runs on, so a post that drops
     // tool changes (grbl_post does — real GRBL has no automatic changer) can
     // still be matched back to the right tool downstream. Keyed by Label
@@ -1187,7 +1243,8 @@ async function generateAndRunPathCode({ abs, geometry, answers, plan, threadGuid
     if (text.includes(successMarker)) {
       const plungeViolations = parsePlungeViolations(text);
       const collisionViolations = parseCollisionViolations(text);
-      if (plungeViolations.length || collisionViolations.length) {
+      const duplicateOps = parseDuplicateOps(text);
+      if (plungeViolations.length || collisionViolations.length || duplicateOps.length) {
         const problems = [];
         if (plungeViolations.length) {
           const detail = plungeViolations
@@ -1212,6 +1269,18 @@ async function generateAndRunPathCode({ abs, geometry, answers, plan, threadGuid
               "final_depth+offset), sonra bu OTELENMIS degerleri _rover_make_leveled_ops'a ver.";
           }
           problems.push(plungeHint);
+        }
+        if (duplicateOps.length) {
+          const detail = duplicateOps.map((d) => `${d.op} == ${d.sameAs}`).join("; ");
+          console.warn(`Ayni toolpath tekrari (attempt ${attempt}): ${detail}`);
+          problems.push(
+            `Su operasyonlar bir oncekiyle BIREBIR AYNI toolpath'i uretiyor: ${detail}. ` +
+            "Ayni malzemeyi iki kez kaldiran operasyon her zaman tutmamis bir seviye bolmesidir: " +
+            "StartDepth/FinalDepth atamalarin recompute sirasinda FreeCAD'in kendi varsayilanlarina " +
+            "geri donmus, boylece her seviye ayni araliga cokmus. COZUM: seviyeleri " +
+            "_rover_make_leveled_ops ile olustur — o fonksiyon degerleri atadiktan SONRA geri okuyup " +
+            "tutmadiysa yeniden atar. Kendi bolme dongunu yaziyorsan ayni geri-okuma kontrolunu sen ekle.",
+          );
         }
         let rapidDefuseDiag = "";
         if (collisionViolations.length) {

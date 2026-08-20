@@ -35,6 +35,16 @@ DO NOT TRUST op.StepDown ALONE TO PRODUCE MULTIPLE PASSES, AND DO NOT HAND-WRITE
             op.FinalDepth = float(fd)
             op.ToolController = tc
             doc.recompute()
+            # FreeCAD's own opExecute can reset StartDepth/FinalDepth to the
+            # operation's defaults during that recompute. When it does, EVERY
+            # level lands on the same default range and the "split" becomes N
+            # identical passes over the same contour — the levels never step
+            # down at all. Re-assert and recompute again when they did not stick.
+            if (abs(float(op.StartDepth.Value) - float(sd)) > 1e-6
+                    or abs(float(op.FinalDepth.Value) - float(fd)) > 1e-6):
+                op.StartDepth = float(sd)
+                op.FinalDepth = float(fd)
+                doc.recompute()
             ops.append(op)
         return ops
 
@@ -205,7 +215,16 @@ Now use these classified faces for each operation:
 
 1. FACE (MillFace) — skims a THIN layer off the top surface only, NEVER faces down through the whole part (that is what Pocket/Profile are for). Setting FinalDepth anywhere near the part's overall bottom (e.g. bb.ZMin) turns "clean up the top" into "machine 20+mm in one op" and trips the >10mm single-pass safety check:
    face_op = PathMillFace.Create('FaceMill')
-   face_op.Base = [(base, top_faces)]   # all top planar faces
+   # Face the RAW BLOCK's top, NOT the part's own top face. Pinning Base to
+   # top_faces makes MillFace clear only that little island: on a 98x156 block
+   # holding a ~57x51 part it emitted a handful of disconnected diagonal strokes
+   # that came out looking like a letter scratched into the plate, and it left
+   # the rest of the block's top untouched.
+   face_op.Base = []
+   try:
+       face_op.BoundaryShape = 'Stock'
+   except Exception:
+       pass
    face_op.StepDown = 1.0
    _stock_top = float(bb.ZMax)
    try:
@@ -215,9 +234,19 @@ Now use these classified faces for each operation:
    # Start at the RAW BLOCK's top and come down to the finished top surface —
    # that gap IS the excess material facing exists to remove. When the block has
    # no excess (stock top == part top) fall back to a shallow skim.
-   face_op.StartDepth = _stock_top
-   face_op.FinalDepth = float(bb.ZMax) if _stock_top > float(bb.ZMax) + 1e-6 else float(bb.ZMax) - 1.0
+   _face_sd = _stock_top
+   _face_fd = float(bb.ZMax) if _stock_top > float(bb.ZMax) + 1e-6 else float(bb.ZMax) - 1.0
+   face_op.StartDepth = _face_sd
+   face_op.FinalDepth = _face_fd
    doc.recompute()
+   # FreeCAD's own opExecute can reset these to the operation's defaults on the
+   # first recompute — that is what collapsed facing into a single pass at the
+   # part's top instead of stepping down from the block's top. Re-assert and
+   # recompute again whenever the values did not stick.
+   if abs(float(face_op.StartDepth.Value) - _face_sd) > 1e-6 or abs(float(face_op.FinalDepth.Value) - _face_fd) > 1e-6:
+       face_op.StartDepth = _face_sd
+       face_op.FinalDepth = _face_fd
+       doc.recompute()
 
 2. POCKET (material removal around a profile) — if this op's own depth exceeds 10mm, call `_rover_make_leveled_ops` from the HARD RULES section above instead of a single flat op (and instead of hand-writing the loop):
    if (startDepthMm - finalDepthMm) > 10.0:
