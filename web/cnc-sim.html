@@ -1378,6 +1378,11 @@ function runMillGcode(parsed, stockDims){
   }
   {const safeY=TOP+8;let nFix=0;
   for(const m of q){if(m.type!=="rapid"||m.y===undefined)continue;const sH=safetyInterceptor._maxHeightInRadius(m.x,m.z,CUTTER_R);if(m.y<=sH+0.5){m.y=safeY;nFix++;}}
+  let px=mill.x,py=mill.y,pz=mill.z;
+  for(let i=0;i<q.length;i++){const m=q[i];if(m.type==="tc")continue;
+  if(m.type==="rapid"&&m.y!==undefined){const chk=safetyInterceptor._pathCollision(px,py,pz,m.x,m.y,m.z,CUTTER_R);
+  if(chk.hit){q.splice(i,0,{type:"rapid",x:px,y:safeY,z:pz});m.y=Math.max(m.y,safeY);nFix++;i++;}}
+  if(m.x!==undefined)px=m.x;if(m.y!==undefined)py=m.y;if(m.z!==undefined)pz=m.z;}
   if(nFix)taiMsg(`⚠️ ${nFix} rapid hareket güvenli yüksekliğe (Z=${safeY}mm) otomatik düzeltildi.`,"bot");}
   {const maxP=10;let nSplit=0,py=mill.y;
   for(let i=0;i<q.length;i++){const m=q[i];if(m.type==="tc")continue;
