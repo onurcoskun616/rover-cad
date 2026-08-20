@@ -1379,6 +1379,15 @@ function runMillGcode(parsed, stockDims){
   {const safeY=TOP+8;let nFix=0;
   for(const m of q){if(m.type!=="rapid"||m.y===undefined)continue;const sH=safetyInterceptor._maxHeightInRadius(m.x,m.z,CUTTER_R);if(m.y<=sH+0.5){m.y=safeY;nFix++;}}
   if(nFix)taiMsg(`⚠️ ${nFix} rapid hareket güvenli yüksekliğe (Z=${safeY}mm) otomatik düzeltildi.`,"bot");}
+  {const maxP=10;let nSplit=0,py=mill.y;
+  for(let i=0;i<q.length;i++){const m=q[i];if(m.type==="tc")continue;
+  if(m.type==="feed"&&py!==undefined&&m.y!==undefined){const drop=py-m.y;
+  if(drop>maxP){const sH=safetyInterceptor._maxHeightInRadius(m.x,m.z,CUTTER_R);if(m.y<sH){
+  const steps=Math.ceil(drop/maxP),stepY=drop/steps,nm=[];
+  for(let s=1;s<=steps;s++)nm.push({type:"feed",x:m.x,y:py-stepY*s,z:m.z});
+  q.splice(i,1,...nm);nSplit++;i+=steps-1;}}}
+  if(m.y!==undefined)py=m.y;}
+  if(nSplit)taiMsg(`⚠️ ${nSplit} derin dalma hareketi güvenli adımlara (≤${maxP}mm) bölündü.`,"bot");}
   const sfErrs=safetyInterceptor.validateMill(q,W,D,TOP,true,mill.x,mill.y,mill.z);
   if(sfErrs.length){safetyInterceptor._eStop(mill,taiMsg,sfErrs);return;}
   captureProgramSummary("mill",q);
@@ -1401,8 +1410,13 @@ function runLatheGcode(parsed, stockDims){
       m.z=clamp(m.z+zOff, -20, STOCK_LEN);
     }
   } else if(stockDims){resizeLatheStock(stockDims.len,stockDims.r);}
-  {const safeX=STOCK_R+5;let nFix=0;
-  for(const m of q){if(m.type!=="rapid")continue;const inS=m.z>=-0.5&&m.z<=STOCK_LEN+0.5;if(inS&&m.x<STOCK_R-0.5){m.x=safeX;nFix++;}}
+  {const safeX=STOCK_R+5;let nFix=0,px=lathe.s.x,pz=lathe.s.z;
+  for(let i=0;i<q.length;i++){const m=q[i];if(m.type!=="rapid"){px=m.x;pz=m.z;continue;}
+  const inS=m.z>=-0.5&&m.z<=STOCK_LEN+0.5;
+  if(inS&&m.x<STOCK_R-0.5){m.x=safeX;nFix++;}
+  const pInS=pz>=-0.5&&pz<=STOCK_LEN+0.5;
+  if(px<STOCK_R-0.5&&pInS&&Math.abs(m.z-pz)>0.5){q.splice(i,0,{type:"rapid",x:safeX,z:pz});nFix++;i++;}
+  px=m.x;pz=m.z;}
   if(nFix)taiMsg(`⚠️ ${nFix} rapid hareket güvenli yarıçapa (X=${safeX}mm) otomatik düzeltildi.`,"bot");}
   const sfErrsL=safetyInterceptor.validateLathe(q,STOCK_LEN,STOCK_R,true,lathe.s.x,lathe.s.z);
   if(sfErrsL.length){safetyInterceptor._eStop(lathe,taiMsg,sfErrsL);return;}
