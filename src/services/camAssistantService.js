@@ -659,17 +659,41 @@ export function parseRapidDefuseReport(text) {
 // Inserted into BOTH previewEpiloguePy and postEpiloguePy right after `_grp`
 // is established, so the fix reaches the preview's safety check AND the
 // actual exported G-code (post_mod.export reads the same `_grp` afterward).
+//
+// Position tracking is CONTINUOUS across the whole `_grp`, not reset per
+// operation — a real E-STOP was traced to exactly this gap: the exported
+// G-code's very first command was a bare `G1 Z16.0` (no prior move in that
+// operation to compute a delta against, so this function's old per-op reset
+// never even looked at it), but the CNC Simülatör tracks position as ONE
+// continuous stream starting from wherever the tool actually sits (a safe
+// height well above the stock) — from there, Z16 was a genuine ~34mm single
+// -move drop, which the simulator's OWN independent plunge check correctly
+// caught and E-STOPped on, silently (the alarm posts into the chat panel,
+// easy to miss), leaving CYCLE START a no-op with no visible explanation.
+// The starting reference is seeded from the part's own bb.ZMax + a generous
+// safe margin (mirroring the simulator's own "reset to well above the
+// stock" assumption) so even the very first command of the very first
+// operation gets evaluated against a sensible baseline. Verified with a
+// Python simulation reproducing this exact scenario (bare Z16.0 first move,
+// implied ~34mm drop) before shipping: old logic never touches it, new logic
+// splits it into compliant steps; cross-operation-boundary drops (op A ends
+// deep, op B's first move continues deeper with no rapid in between) are
+// also now correctly caught.
 function autoFixDeepPlungesPy() {
   return [
-    "def _rover_split_deep_plunges(_grp):",
+    "def _rover_split_deep_plunges(_grp, _base_obj):",
     "    import math as _math",
     `    _max_plunge = ${MAX_PLUNGE_MM}`,
+    "    try:",
+    "        _px = _py = None",
+    "        _pz = float(_base_obj.Shape.BoundBox.ZMax) + 20.0",
+    "    except Exception:",
+    "        _px = _py = _pz = None",
     "    for _op in _grp:",
     "        _p = getattr(_op, 'Path', None)",
     "        if _p is None:",
     "            continue",
     "        _new_cmds = []",
-    "        _px = _py = _pz = None",
     "        _changed = False",
     "        for _c in _p.Commands:",
     "            _pr = dict(_c.Parameters)",
@@ -701,7 +725,7 @@ function autoFixDeepPlungesPy() {
     "            if 'Z' in _pr: _pz = float(_pr['Z'])",
     "        if _changed:",
     "            _op.Path = Path.Path(_new_cmds)",
-    "_rover_split_deep_plunges(_grp)",
+    "_rover_split_deep_plunges(_grp, base)",
   ].join("\n");
 }
 
