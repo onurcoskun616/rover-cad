@@ -613,6 +613,20 @@ function preparePathCodePy(code, answers) {
 // hand-edits Path.Commands in memory and a later recompute would undo its work.
 function autoFixFaceBoundaryPy() {
   return [
+    // A facing op that emits only a clearance move (no X/Y anywhere) removed
+    // nothing. On a read failure assume it cuts, so a property we could not
+    // inspect never triggers a rollback.
+    "def _rover_face_cuts(_op):",
+    "    try:",
+    "        _p = getattr(_op, 'Path', None)",
+    "        if _p is None:",
+    "            return False",
+    "        for _c in _p.Commands:",
+    "            if 'X' in _c.Parameters or 'Y' in _c.Parameters:",
+    "                return True",
+    "    except Exception:",
+    "        return True",
+    "    return False",
     "def _rover_fix_face_ops(_doc, _grp, _base_obj, _job):",
     "    try:",
     "        _part_top = float(_base_obj.Shape.BoundBox.ZMax)",
@@ -640,27 +654,32 @@ function autoFixFaceBoundaryPy() {
     "            continue",
     "        if not hasattr(_op, 'BoundaryShape'):",
     "            continue",
+    // BoundaryShape is the knob that decides how far the clearing reaches:
+    // 'Face Region' stops at the selected face's own outline, 'Stock' runs out
+    // to the block. Base stays exactly as the model set it — an earlier version
+    // cleared it too, on the theory that pinning Base to the part's top faces
+    // was what confined the operation, and that produced a FaceMill with no
+    // toolpath at all (a lone clearance move and nothing else). Base names the
+    // surface to face; BoundaryShape decides how wide. Only the second one was
+    // ever wrong.
+    "        _prev_boundary = getattr(_op, 'BoundaryShape', None)",
     "        try:",
     "            _op.BoundaryShape = 'Stock'",
     "        except Exception:",
     "            continue",
-    "        try:",
-    "            _op.Base = []",
-    "        except Exception:",
-    "            pass",
     "        for _prop, _val in (('StartDepth', _stock_top), ('FinalDepth', _final)):",
     "            if hasattr(_op, _prop):",
     "                try:",
     "                    setattr(_op, _prop, _val)",
     "                except Exception:",
     "                    pass",
-    "        _targets.append(_op)",
+    "        _targets.append((_op, _prev_boundary))",
     "    if not _targets:",
     "        print('FACE_FIX=0')",
     "        return",
     "    _doc.recompute()",
     "    _again = False",
-    "    for _op in _targets:",
+    "    for _op, _prev in _targets:",
     "        try:",
     "            if (abs(float(_op.StartDepth.Value) - _stock_top) > 1e-6",
     "                    or abs(float(_op.FinalDepth.Value) - _final) > 1e-6):",
@@ -671,7 +690,22 @@ function autoFixFaceBoundaryPy() {
     "            pass",
     "    if _again:",
     "        _doc.recompute()",
-    "    print('FACE_FIX=%d (top %.3f -> %.3f)' % (len(_targets), _stock_top, _final))",
+    // Never ship a facing operation that cuts nothing. If forcing the boundary
+    // left the op with no XY motion at all, put the original boundary back: a
+    // narrower face pass still removes material, an empty one is strictly worse
+    // than what the model wrote.
+    "    _reverted = 0",
+    "    for _op, _prev in _targets:",
+    "        if _prev is None or _rover_face_cuts(_op):",
+    "            continue",
+    "        try:",
+    "            _op.BoundaryShape = _prev",
+    "            _reverted += 1",
+    "        except Exception:",
+    "            pass",
+    "    if _reverted:",
+    "        _doc.recompute()",
+    "    print('FACE_FIX=%d reverted=%d (top %.3f -> %.3f)' % (len(_targets), _reverted, _stock_top, _final))",
     "_rover_fix_face_ops(doc, _grp, base, job)",
   ].join("\n");
 }
