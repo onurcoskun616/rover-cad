@@ -663,6 +663,12 @@ function autoFixFaceBoundaryPy() {
     // surface to face; BoundaryShape decides how wide. Only the second one was
     // ever wrong.
     "        _prev_boundary = getattr(_op, 'BoundaryShape', None)",
+    "        _prev_sd = _prev_fd = None",
+    "        try:",
+    "            _prev_sd = float(_op.StartDepth.Value)",
+    "            _prev_fd = float(_op.FinalDepth.Value)",
+    "        except Exception:",
+    "            pass",
     "        try:",
     "            _op.BoundaryShape = 'Stock'",
     "        except Exception:",
@@ -673,13 +679,13 @@ function autoFixFaceBoundaryPy() {
     "                    setattr(_op, _prop, _val)",
     "                except Exception:",
     "                    pass",
-    "        _targets.append((_op, _prev_boundary))",
+    "        _targets.append((_op, _prev_boundary, _prev_sd, _prev_fd))",
     "    if not _targets:",
     "        print('FACE_FIX=0')",
     "        return",
     "    _doc.recompute()",
     "    _again = False",
-    "    for _op, _prev in _targets:",
+    "    for _op, _prev, _psd, _pfd in _targets:",
     "        try:",
     "            if (abs(float(_op.StartDepth.Value) - _stock_top) > 1e-6",
     "                    or abs(float(_op.FinalDepth.Value) - _final) > 1e-6):",
@@ -694,17 +700,40 @@ function autoFixFaceBoundaryPy() {
     // left the op with no XY motion at all, put the original boundary back: a
     // narrower face pass still removes material, an empty one is strictly worse
     // than what the model wrote.
+    // Roll back EVERYTHING this function changed, not just the boundary. An
+    // earlier version restored BoundaryShape alone and left the forced depths
+    // in place, so a face op that came out empty stayed empty after the
+    // "rollback" — which is how an empty FaceMill (one clearance move, no
+    // cutting at all) still reached the machine. Undoing a subset of a failed
+    // change is not a rollback.
     "    _reverted = 0",
-    "    for _op, _prev in _targets:",
-    "        if _prev is None or _rover_face_cuts(_op):",
+    "    for _op, _prev, _psd, _pfd in _targets:",
+    "        if _rover_face_cuts(_op):",
     "            continue",
     "        try:",
-    "            _op.BoundaryShape = _prev",
+    "            if _prev is not None:",
+    "                _op.BoundaryShape = _prev",
+    "            if _psd is not None:",
+    "                _op.StartDepth = _psd",
+    "            if _pfd is not None:",
+    "                _op.FinalDepth = _pfd",
     "            _reverted += 1",
     "        except Exception:",
     "            pass",
     "    if _reverted:",
     "        _doc.recompute()",
+    // Per-op diagnostic: without FreeCAD to hand, this is what says whether the
+    // forced settings produced a real path, whether the rollback recovered one,
+    // and which depths were involved.
+    "    for _op, _prev, _psd, _pfd in _targets:",
+    "        _n = 0",
+    "        try:",
+    "            _n = len([1 for _c in _op.Path.Commands if 'X' in _c.Parameters or 'Y' in _c.Parameters])",
+    "        except Exception:",
+    "            pass",
+    "        print('FACE_OP=%s boundary=%s->%s depth=%s/%s->%.3f/%.3f cuts=%d'",
+    "              % (getattr(_op, 'Label', '?'), _prev, getattr(_op, 'BoundaryShape', '?'),",
+    "                 _psd, _pfd, _stock_top, _final, _n))",
     "    print('FACE_FIX=%d reverted=%d (top %.3f -> %.3f)' % (len(_targets), _reverted, _stock_top, _final))",
     "_rover_fix_face_ops(doc, _grp, base, job)",
   ].join("\n");
@@ -1358,6 +1387,14 @@ async function generateAndRunPathCode({ abs, geometry, answers, plan, threadGuid
     }
 
     if (text.includes(successMarker)) {
+      // Facing is the one operation with no downstream check of its own — an
+      // empty one exports as valid G-code and only shows up as untouched stock
+      // in the simulator. Surface what the face fix actually did.
+      for (const line of String(text).split("\n")) {
+        if (line.startsWith("FACE_OP=") || line.startsWith("FACE_FIX=")) {
+          console.log(`  ${line.trim()}`);
+        }
+      }
       const plungeViolations = parsePlungeViolations(text);
       const collisionViolations = parseCollisionViolations(text);
       const duplicateOps = parseDuplicateOps(text);
