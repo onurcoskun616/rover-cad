@@ -1196,6 +1196,16 @@ function previewEpiloguePy(previewJsonPath, defaultFeed, isTorna) {
     autoFixClearanceHeightsPy(),
     autoFixUnsafeRapidsToFeedPy(),
     autoFixDeepPlungesPy(),
+    // Report the safety checks BEFORE building the preview JSON. They used to
+    // print last, after the toolpath extraction and its EST_MINUTES/PREVIEW_JSON
+    // output — so if the tool's captured stdout ever came back clipped, the
+    // check lines were the first thing lost, and every parser below reads a
+    // missing marker as an empty violation list. That is how a job with twelve
+    // byte-identical profile operations passed a check that finds them
+    // correctly when run directly. Cheap to emit early; expensive to miss.
+    plungeCheckPy(isTorna),
+    collisionCheckPy(),
+    duplicateOpCheckPy(),
     `_default_feed = float(${feed})`,
     "_rapid_rate = 3000.0  # mm/min assumed rapid rate for time estimate",
     "_paths = []",
@@ -1239,9 +1249,6 @@ function previewEpiloguePy(previewJsonPath, defaultFeed, isTorna) {
     "    _json.dump({'toolpaths': _paths, 'estimatedMinutes': round(_total_min, 2), 'opMinutes': _op_minutes}, _f)",
     "print('EST_MINUTES=' + str(round(_total_min, 2)))",
     "print('PREVIEW_JSON=' + _out)",
-    plungeCheckPy(isTorna),
-    collisionCheckPy(),
-    duplicateOpCheckPy(),
   ].join("\n");
 }
 
@@ -1493,6 +1500,19 @@ async function generateAndRunPathCode({ abs, geometry, answers, plan, threadGuid
       const plungeViolations = parsePlungeViolations(text);
       const collisionViolations = parseCollisionViolations(text);
       const duplicateOps = parseDuplicateOps(text);
+      // Every parser above returns [] both when a check found nothing AND when
+      // its marker never arrived, so a check that silently failed to report is
+      // indistinguishable from a clean run — which is exactly how twelve
+      // identical profile operations shipped past a duplicate check that
+      // detects them correctly. Absence of a report is not a pass; say so.
+      const missing = ["PLUNGE_VIOLATIONS=", "COLLISION_VIOLATIONS=", "DUPLICATE_OPS="]
+        .filter((marker) => !String(text).includes(marker));
+      if (missing.length) {
+        console.warn(
+          `UYARI: guvenlik kontrolu rapor vermedi (${missing.join(", ")}) — ` +
+          "bu kontroller bu calistirma icin DOGRULANMADI, temiz cikti sayilmamali.",
+        );
+      }
       if (plungeViolations.length || collisionViolations.length || duplicateOps.length) {
         const problems = [];
         if (plungeViolations.length) {
