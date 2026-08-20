@@ -73,8 +73,13 @@ export const config = {
     model: process.env.CLAUDE_CLI_MODEL ?? "",
     // Same reasoning as freecadMcp.callTimeoutMs above: generating the Python
     // for a complex multi-operation 3D CAM plan is a large completion and can
-    // legitimately take longer than a simple 2D part's code.
-    timeoutMs: Number(process.env.CLAUDE_CLI_TIMEOUT_MS ?? 300000),
+    // legitimately take longer than a simple 2D part's code. 300000 (5min)
+    // still timed out repeatedly in live use (not a one-off) even for small
+    // parts — the cam-code-system-prompt.txt system prompt itself has grown
+    // substantially over this project's iterations (depth-splitting helpers,
+    // multi-tool support, coordinate-translation guidance), adding real
+    // prompt-processing time on top of the completion itself.
+    timeoutMs: Number(process.env.CLAUDE_CLI_TIMEOUT_MS ?? 480000),
   },
   openai: {
     apiKey: process.env.OPENAI_API_KEY ?? "",
