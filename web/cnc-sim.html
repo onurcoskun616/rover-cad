@@ -619,8 +619,40 @@ new ResizeObserver(latheResize).observe(latheCanvas);
 /* ============================  FREZE (3B)  ========================== */
 /* ==================================================================== */
 let W=200, D=140, TOP=60;
-const COLS=150, ROWS=105, MARGIN=6;
+// Kenar payi. Tek bir MARGIN hem hucre indeksi (ROWS-MARGIN) hem de fiziksel
+// pay (MARGIN_MM) olarak kullaniliyordu; hucre boyutu sabit oldugu surece bu
+// ikisi ayni seyi ifade ediyordu. Izgara stokla degistigi icin artik etmiyor:
+// pay sessizce daralirdi. Bu yuzden fiziksel pay mm cinsinden sabitlendi
+// (eski izgarada 6 hucre ~8mm ediyordu) ve hucre karsiligi ondan turetiliyor.
+const MARGIN_MM=8;
+let MARGIN_C=6, MARGIN_R=6;
+// Talas haritasi cozunurlugu. Sabit 150x105 idi: stok ne olursa olsun ayni
+// hucre SAYISI, dolayisiyla stok uzadikca hucreler uzuyordu. 87x151mm blokta
+// bu, X'te 0.58mm ama Y'de 1.45mm'lik hucreler demekti — egik kenarlar 1.45mm
+// kademelere yuvarlaniyor, ustelik hucreler kare olmadigi icin capraz kenarlar
+// ekstra tirtikli goruluyordu. Artik hucre BOYUTU sabit: izgara stokla birlikte
+// buyuyor, hucreler kare kaliyor. Eski degerler taban olarak korunuyor, boylece
+// kucuk stoklarda cozunurluk asla dusmuyor; toplam hucre sayisi ise
+// computeVertexNormals her karede tum agi taradigi icin tavanla sinirli.
+const CELL_MM=0.7, GRID_MIN_C=150, GRID_MIN_R=105, GRID_MAX_CELLS=70000;
+function gridForStock(w, d){
+  let c=Math.max(GRID_MIN_C, Math.round(w/CELL_MM)+1);
+  let r=Math.max(GRID_MIN_R, Math.round(d/CELL_MM)+1);
+  if(c*r>GRID_MAX_CELLS){
+    const k=Math.sqrt(GRID_MAX_CELLS/(c*r));
+    c=Math.max(GRID_MIN_C, Math.round(c*k));
+    r=Math.max(GRID_MIN_R, Math.round(r*k));
+  }
+  return {c, r};
+}
+let {c:COLS, r:ROWS}=gridForStock(W, D);
 let dx=W/(COLS-1), dz=D/(ROWS-1);
+// Fiziksel payin hucre karsiligi; izgara her degistiginde yenilenir.
+function refreshMarginCells(){
+  MARGIN_C=Math.max(1, Math.min(Math.round(COLS/4), Math.round(MARGIN_MM/dx)));
+  MARGIN_R=Math.max(1, Math.min(Math.round(ROWS/4), Math.round(MARGIN_MM/dz)));
+}
+refreshMarginCells();
 const mill={
   x:0,y:90,z:0, tx:0,ty:90,tz:0,
   spindleOn:false, spindleRpm:6000, actualRpm:0, feed:400, feedOverride:1,
@@ -862,7 +894,9 @@ function updateCoolant(dt){for(const c of coolantPool){if(c.life>0){c.life-=dt*1
 function resizeMillStock(newW, newD, newTop){
   if(W===newW && D===newD && TOP===newTop) return;
   W=newW; D=newD; TOP=newTop;
+  ({c:COLS, r:ROWS}=gridForStock(W, D));
   dx=W/(COLS-1); dz=D/(ROWS-1);
+  refreshMarginCells();
   heights=new Float32Array(COLS*ROWS).fill(TOP);
   buildWorkpiece();
   buildVise();
@@ -947,8 +981,8 @@ function carve(tx,tz,ty){
   const ixC=Math.round((tx+W/2)/dx), iyC=Math.round((tz+D/2)/dz);
   const rx=Math.ceil(CUTTER_R/dx), rz=Math.ceil(CUTTER_R/dz);
   let cut=false;const pos=planeGeo.attributes.position;
-  for(let iy=Math.max(MARGIN,iyC-rz);iy<=Math.min(ROWS-1-MARGIN,iyC+rz);iy++){
-    for(let ix=Math.max(MARGIN,ixC-rx);ix<=Math.min(COLS-1-MARGIN,ixC+rx);ix++){
+  for(let iy=Math.max(MARGIN_R,iyC-rz);iy<=Math.min(ROWS-1-MARGIN_R,iyC+rz);iy++){
+    for(let ix=Math.max(MARGIN_C,ixC-rx);ix<=Math.min(COLS-1-MARGIN_C,ixC+rx);ix++){
       const wx=colX(ix),wz=colZ(iy);if(Math.hypot(wx-tx,wz-tz)>CUTTER_R)continue;
       const vi=iy*COLS+ix;const h=heights[vi];
       if(h>ty+.05){const nh=Math.max(ty,0);heights[vi]=nh;pos.setY(vi,nh);cut=true;}
@@ -957,7 +991,7 @@ function carve(tx,tz,ty){
   if(cut){pos.needsUpdate=true;mill.dirty=true;}
   return cut;
 }
-function computeRemoved(){let s=0,n=0;for(let iy=MARGIN;iy<ROWS-MARGIN;iy++)for(let ix=MARGIN;ix<COLS-MARGIN;ix++){s+=TOP-heights[iy*COLS+ix];n++;}return clamp((s/n)/TOP,0,1);}
+function computeRemoved(){let s=0,n=0;for(let iy=MARGIN_R;iy<ROWS-MARGIN_R;iy++)for(let ix=MARGIN_C;ix<COLS-MARGIN_C;ix++){s+=TOP-heights[iy*COLS+ix];n++;}return clamp((s/n)/TOP,0,1);}
 
 let millProgramText=null,latheProgramText=null;
 function millStartCycle(){
@@ -977,7 +1011,7 @@ function millStartCycle(){
   mill.queue=q;mill.moveActive=q.shift();mill.running=true;
 }
 function millStop(){mill.queue=[];mill.moveActive={type:"rapid",x:mill.x,y:TOP+30,z:mill.z};mill.running=false;mill.paused=false;toolYOff=0;if(magGroup)magGroup.visible=false;toolGroup.visible=true;}
-function millGoto(x,y,z){if(mill.emergency||mill.mode!=="MANUAL")return;mill.moveActive={type:"rapid",x:clamp(x,-W/2+MARGIN*dx,W/2-MARGIN*dx),y:clamp(y,0,120),z:clamp(z,-D/2+MARGIN*dz,D/2-MARGIN*dz)};}
+function millGoto(x,y,z){if(mill.emergency||mill.mode!=="MANUAL")return;mill.moveActive={type:"rapid",x:clamp(x,-W/2+MARGIN_MM,W/2-MARGIN_MM),y:clamp(y,0,120),z:clamp(z,-D/2+MARGIN_MM,D/2-MARGIN_MM)};}
 
 function updateMill(dt){
   const tr=mill.spindleOn?mill.spindleRpm:0;mill.actualRpm+=(tr-mill.actualRpm)*Math.min(1,dt*3);if(mill.actualRpm<1)mill.actualRpm=tr===0?0:mill.actualRpm;
@@ -986,8 +1020,8 @@ function updateMill(dt){
     const feedRate=(mill.feed/60)*mill.feedOverride, rapid=260;
     if(mill.mode==="MANUAL"&&!mill.moveActive&&(mill.jog.x||mill.jog.y||mill.jog.z)){
       const rate=mill.spindleOn?feedRate:rapid*.4;
-      mill.x=clamp(mill.x+mill.jog.x*rate*dt,-W/2+MARGIN*dx,W/2-MARGIN*dx);
-      mill.z=clamp(mill.z+mill.jog.z*rate*dt,-D/2+MARGIN*dz,D/2-MARGIN*dz);
+      mill.x=clamp(mill.x+mill.jog.x*rate*dt,-W/2+MARGIN_MM,W/2-MARGIN_MM);
+      mill.z=clamp(mill.z+mill.jog.z*rate*dt,-D/2+MARGIN_MM,D/2-MARGIN_MM);
       mill.y=clamp(mill.y+mill.jog.y*rate*dt,0,120);
     }
     if(mill.moveActive){const m=mill.moveActive;
@@ -1364,8 +1398,8 @@ function runMillGcode(parsed, stockDims){
   if(stockDims){
     resizeMillStock(stockDims.w,stockDims.d,stockDims.h);
     for(const m of q){
-      m.x=clamp(m.x, -W/2+MARGIN*dx, W/2-MARGIN*dx);
-      if(m.z!==undefined) m.z=clamp(m.z, -D/2+MARGIN*dz, D/2-MARGIN*dz);
+      m.x=clamp(m.x, -W/2+MARGIN_MM, W/2-MARGIN_MM);
+      if(m.z!==undefined) m.z=clamp(m.z, -D/2+MARGIN_MM, D/2-MARGIN_MM);
       if(m.y!==undefined) m.y=clamp(m.y, 0, TOP+40);
     }
   } else if(bounds.xMax>bounds.xMin){
@@ -1380,8 +1414,8 @@ function runMillGcode(parsed, stockDims){
     resizeMillStock(Math.round(newW),Math.round(newD),newTop);
     const cx=(bounds.xMax+bounds.xMin)/2, cz=(bounds.zMax+bounds.zMin)/2;
     for(const m of q){
-      m.x=clamp(m.x-cx, -W/2+MARGIN*dx, W/2-MARGIN*dx);
-      if(m.z!==undefined) m.z=clamp(m.z-cz, -D/2+MARGIN*dz, D/2-MARGIN*dz);
+      m.x=clamp(m.x-cx, -W/2+MARGIN_MM, W/2-MARGIN_MM);
+      if(m.z!==undefined) m.z=clamp(m.z-cz, -D/2+MARGIN_MM, D/2-MARGIN_MM);
       if(m.y!==undefined) m.y=clamp(m.y, 0, TOP+40);
     }
   }
@@ -1647,8 +1681,8 @@ function tpMillFace(depth){
   const safeY=TOP+8,q=[],step=CUTTER_R*1.25;
   mill.spindleOn=true;mill.mode="AUTO";mill.paused=false;
   const y=Math.max(0,TOP-depth);
-  const x0=-W/2+MARGIN*dx+CUTTER_R,x1=W/2-MARGIN*dx-CUTTER_R;
-  const z0=-D/2+MARGIN*dz+CUTTER_R,z1=D/2-MARGIN*dz-CUTTER_R;
+  const x0=-W/2+MARGIN_MM+CUTTER_R,x1=W/2-MARGIN_MM-CUTTER_R;
+  const z0=-D/2+MARGIN_MM+CUTTER_R,z1=D/2-MARGIN_MM-CUTTER_R;
   q.push({type:"rapid",x:x0,y:safeY,z:z0});
   q.push({type:"feed",x:x0,y:y,z:z0});
   let z=z0,dir=1;
@@ -1660,7 +1694,7 @@ function tpMillFace(depth){
 function tpMillContour(depth,inset){
   const safeY=TOP+8,q=[],stepD=4,ins=inset||CUTTER_R;
   mill.spindleOn=true;mill.mode="AUTO";mill.paused=false;
-  const x0=-W/2+MARGIN*dx+ins,x1=W/2-MARGIN*dx-ins,z0=-D/2+MARGIN*dz+ins,z1=D/2-MARGIN*dz-ins;
+  const x0=-W/2+MARGIN_MM+ins,x1=W/2-MARGIN_MM-ins,z0=-D/2+MARGIN_MM+ins,z1=D/2-MARGIN_MM-ins;
   for(let d=stepD;d<=depth+0.01;d+=stepD){
     const y=Math.max(0,TOP-Math.min(d,depth));
     q.push({type:"rapid",x:x0,y:safeY,z:z0});
@@ -1678,7 +1712,7 @@ function tpMillChamfer(depth,cw){
   const safeY=TOP+8,q=[],w=cw||depth;
   mill.spindleOn=true;mill.mode="AUTO";mill.paused=false;
   const y=TOP-depth;
-  const x0=-W/2+MARGIN*dx+w,x1=W/2-MARGIN*dx-w,z0=-D/2+MARGIN*dz+w,z1=D/2-MARGIN*dz-w;
+  const x0=-W/2+MARGIN_MM+w,x1=W/2-MARGIN_MM-w,z0=-D/2+MARGIN_MM+w,z1=D/2-MARGIN_MM-w;
   q.push({type:"rapid",x:x0,y:safeY,z:z0});
   q.push({type:"feed",x:x0,y:y,z:z0});
   q.push({type:"feed",x:x1,y:y,z:z0});
