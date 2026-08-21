@@ -1400,6 +1400,86 @@ function brandGcodeHeader(gcodePath) {
  * Heidenhain Klartext, …), read the generated Fanuc G-code, transform it, and
  * overwrite the file.
  */
+// grbl_post writes G-code that GRBL tolerates but a standards-conforming
+// controller does not. Three defects showed up the first time a file reached a
+// real Mach3 router, and none of them are Mach3-specific — they are wrong on
+// LinuxCNC and every Fanuc-style control too, and the CNC simulator never
+// caught them because it is as permissive as GRBL:
+//
+//   1. Arc words. In G17 only I and J define the arc centre; K belongs to
+//      G18/G19. grbl_post emits "K0.000" on every G2/G3 anyway (36 lines in the
+//      failing file), and RS274NGC calls that an error.
+//   2. Spindle. The file ends with M5 but never issues M3 or an S speed, so the
+//      spindle is never commanded to start — the router would plunge with a
+//      stationary cutter.
+//   3. Work offset. No G54, so which offset applies is left to whatever the
+//      control happens to have active.
+//
+// Fixed here rather than in a Mach3-only dialect because the output is simply
+// incorrect as it stands; every controller benefits. Runs BEFORE the dialect
+// transforms so they translate already-valid code.
+function normalizeForRealControllers(gcodePath, answers) {
+  let raw;
+  try {
+    raw = fs.readFileSync(gcodePath, "utf-8");
+  } catch {
+    return;
+  }
+  const rpm = Number(answers?.spindleRpm) > 0 ? Math.round(Number(answers.spindleRpm)) : null;
+  const lines = raw.split(/\r?\n/);
+  const hasSpindleOn = lines.some((l) => /(?:^|\s)M0?[34]\b/.test(l.replace(/\(.*?\)/g, "")));
+  const hasWcs = lines.some((l) => /(?:^|\s)G5[4-9]\b/.test(l.replace(/\(.*?\)/g, "")));
+
+  const out = [];
+  let plane = "G17"; // RS274NGC default
+  let strippedK = 0;
+  let spindleDone = hasSpindleOn;
+  let wcsDone = hasWcs;
+
+  for (let line of lines) {
+    const code = line.replace(/\(.*?\)/g, "");
+    if (/(?:^|\s)G19\b/.test(code)) plane = "G19";
+    else if (/(?:^|\s)G18\b/.test(code)) plane = "G18";
+    else if (/(?:^|\s)G17\b/.test(code)) plane = "G17";
+
+    if (plane === "G17" && /^\s*G0?[23]\b/.test(code) && /(?:^|\s)K-?[\d.]+/.test(code)) {
+      line = line.replace(/\s*K-?[\d.]+/g, "");
+      strippedK += 1;
+    }
+    out.push(line);
+
+    // G54 rides with the preamble's modal setup line.
+    if (!wcsDone && /^\s*G17\b/.test(code)) {
+      out.push("G54");
+      wcsDone = true;
+    }
+    // Spindle starts once the first tool is in the spindle; with no tool change
+    // at all, right after the modal setup instead.
+    if (!spindleDone && /^\s*T\d+\s+M0?6\b/i.test(code)) {
+      out.push(rpm ? `M3 S${rpm}` : "M3");
+      spindleDone = true;
+    }
+  }
+  if (!spindleDone) {
+    const at = out.findIndex((l) => /^\s*G17\b/.test(l.replace(/\(.*?\)/g, "")));
+    if (at >= 0) out.splice(at + 1, 0, rpm ? `M3 S${rpm}` : "M3");
+    spindleDone = at >= 0;
+  }
+
+  const next = out.join("\n");
+  if (next === raw) return;
+  try {
+    fs.writeFileSync(gcodePath, next, "utf-8");
+    console.log(
+      `G-code kontrolcu uyumu: ${strippedK} yay satirindan K kaldirildi` +
+      `${hasSpindleOn ? "" : `, spindle baslatma eklendi (${rpm ? `M3 S${rpm}` : "M3"})`}` +
+      `${hasWcs ? "" : ", G54 eklendi"}`,
+    );
+  } catch (err) {
+    console.warn("G-code kontrolcu uyumu uygulanamadi:", err.message);
+  }
+}
+
 function applyControllerTransform(gcodePath, postName, stepPath, answers) {
   const partName = path.basename(stepPath || "PART", path.extname(stepPath || ""));
   let label;
@@ -1754,6 +1834,7 @@ export async function generateCamGcodeFromPlan(stepPath, answers, plan, context 
     }
     // Before any dialect transform, so injected changes get translated too.
     ensureToolChanges(gcodePath, parseToolMap(text));
+    normalizeForRealControllers(gcodePath, answers);
     applyControllerTransform(gcodePath, postName, abs, answers);
     // Last: the dialect transforms rewrite the file wholesale.
     brandGcodeHeader(gcodePath);
@@ -1779,6 +1860,7 @@ export async function generateCamGcodeFromPlan(stepPath, answers, plan, context 
   }
   if (!fs.existsSync(gcodePath)) throw new Error("G-code dosyasi olusmadi");
   ensureToolChanges(gcodePath, parseToolMap(runText));
+  normalizeForRealControllers(gcodePath, answers);
   applyControllerTransform(gcodePath, postName, abs, answers);
   brandGcodeHeader(gcodePath);
   return { gcodePath, safetyChecks: buildSafetyChecks(isTornaMachine(answers)) };
