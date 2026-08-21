@@ -2064,7 +2064,14 @@ export async function generateCamGcodeFromPlan(stepPath, answers, plan, context 
     // code is re-run verbatim here, so re-verify before handing out the file.
     const violations = parsePlungeViolations(text);
     const collisions = parseCollisionViolations(text);
-    if (violations.length || collisions.length) {
+    // Duplicate operations were checked only inside generateAndRunPathCode's
+    // retry loop, so an approved preview whose stored code is re-run here got
+    // exported without ever being asked the question. That is how a file with
+    // twelve identical contour operations — the same pass cut ten extra times,
+    // each one down to full depth — reached a real router. The export is the
+    // last gate before the machine; it has to ask everything the preview asks.
+    const dupes = parseDuplicateOps(text);
+    if (violations.length || collisions.length || dupes.length) {
       try { fs.unlinkSync(gcodePath); } catch { /* not present; fine */ }
       const parts = [];
       if (violations.length) {
@@ -2072,6 +2079,11 @@ export async function generateCamGcodeFromPlan(stepPath, answers, plan, context 
       }
       if (collisions.length) {
         parts.push(collisions.map((v) => `${v.op}: (${v.x}, ${v.y}, ${v.z})`).join("; "));
+      }
+      if (dupes.length) {
+        parts.push(
+          `ayni toolpath tekrari: ${dupes.map((d) => `${d.op} == ${d.sameAs}`).join("; ")}`,
+        );
       }
       throw new Error(`Guvenlik kontrolu basarisiz: ${parts.join(" | ")}. Onizlemeyi yeniden olusturun.`);
     }
