@@ -452,6 +452,64 @@ export function parseCollisionViolations(text) {
   }
 }
 
+// Trusted epilogue (NOT model output): PREVENTIVE, deterministic fix for a
+// real live defect — a machinist reported the tool cutting a visible groove
+// at the STOCK CENTER before ever machining the actual part, traced to the
+// exported G-code's very own lead-in: `G1 Z11.500` / `G1 Z5.000` right after
+// "(Begin operation: ProfileRough)", BOTH pure Z-only moves with no X/Y at
+// all, followed only THEN by `G0 X17.879 Y18.934` relocating to the real
+// target. FreeCAD (or a too-low ClearanceHeight/SafeHeight, itself computed
+// relative to StartDepth rather than the real stock top — see
+// autoFixClearanceHeightsPy below) generated a lead-in that descends BEFORE
+// ever moving to the operation's real X/Y — meaning it engages material at
+// whatever position the tool happened to be at (often (0,0), the WCS
+// origin), not the intended cut location. Converting that descent to a safe
+// FEED (autoFixUnsafeRapidsToFeedPy below) only fixes the CRASH risk — it
+// still cuts at the wrong spot, just slowly. The only correct fix is
+// positional: relocate X/Y to the real target FIRST, while still at
+// whatever height the lead-in started from, THEN replay the original Z-only
+// moves (now at the correct, already-established position). G-code in this
+// project is always absolute (G17 G90), so reordering never changes what a
+// Z-only move actually does once X/Y is established — it only changes WHEN.
+// Runs FIRST in the epilogue chain, before any collision-detection-based fix
+// below, so those operate on an already-correctly-ordered toolpath. Leading
+// non-motion commands (operation-start comments, M3/T-code) are left exactly
+// where they are — only the first block of Z-only motion commands preceding
+// the operation's first X/Y-bearing move gets hoisted after it. Verified
+// with a Python simulation reproducing the exact reported command sequence,
+// plus regression checks for already-correctly-ordered operations and
+// leading comment/M-code preservation.
+function autoFixPrematureDescentPy() {
+  return [
+    "def _rover_fix_premature_descent(_grp):",
+    "    for _op in _grp:",
+    "        _p = getattr(_op, 'Path', None)",
+    "        if _p is None:",
+    "            continue",
+    "        _cmds = list(_p.Commands)",
+    "        _xy_idx = None",
+    "        _pending = []",
+    "        for _i, _c in enumerate(_cmds):",
+    "            _pr = _c.Parameters",
+    "            if 'X' in _pr or 'Y' in _pr:",
+    "                _xy_idx = _i",
+    "                break",
+    "            if 'X' in _pr or 'Y' in _pr or 'Z' in _pr:",
+    "                _pending.append(_i)",
+    "        if _xy_idx is None or not _pending:",
+    "            continue",
+    "        _moved = set(_pending) | {_xy_idx}",
+    "        _prefix = _cmds[:_pending[0]]",
+    "        _xy_cmd = _cmds[_xy_idx]",
+    "        _zonly_cmds = [_cmds[i] for i in _pending]",
+    "        _rest = [c for i, c in enumerate(_cmds) if i > _pending[0] - 1 and i not in _moved]",
+    "        _new_cmds = _prefix + [_xy_cmd] + _zonly_cmds + _rest",
+    "        if _new_cmds != _cmds:",
+    "            _op.Path = Path.Path(_new_cmds)",
+    "_rover_fix_premature_descent(_grp)",
+  ].join("\n");
+}
+
 // Trusted epilogue (NOT model output): PREVENTIVE, deterministic fix for the
 // "rapid passes through the part" collision violation. The error message has
 // always pointed at the real cause ("yanlis/eksik ... ClearanceHeight/
@@ -537,12 +595,13 @@ function autoFixUnsafeRapidsToFeedPy() {
   return [
     "def _rover_defuse_unsafe_rapids(_grp, _base_obj):",
     "    import json as _json3",
-    "    _report = {'bbOk': False, 'ops': 0, 'rapids': 0, 'unsafe': 0, 'converted': 0, 'assignErrors': [], 'otherErrors': []}",
+    "    _report = {'bbOk': False, 'ops': 0, 'rapids': 0, 'unsafe': 0, 'converted': 0, 'clamped': 0, 'opsModified': 0, 'assignErrors': [], 'otherErrors': []}",
     "    try:",
     "        _solid = _base_obj.Shape",
     "        _bb = _solid.BoundBox",
     "        _report['bbOk'] = True",
     "        _report['bbZMax'] = round(float(_bb.ZMax), 3)",
+    "        _safe_z = float(_bb.ZMax) + 5.0",
     "    except Exception as _e:",
     "        _report['otherErrors'].append('boundbox: ' + str(_e))",
     "        print('RAPID_DEFUSE_REPORT=' + _json3.dumps(_report))",
@@ -562,6 +621,7 @@ function autoFixUnsafeRapidsToFeedPy() {
     "                pass",
     "            _new_cmds = []",
     "            _px = _py = _pz = None",
+    "            _xy_established = False",
     "            _changed = False",
     "            for _c in _p.Commands:",
     // Position fallback/tracking below is a DELIBERATE line-for-line mirror of
@@ -580,6 +640,8 @@ function autoFixUnsafeRapidsToFeedPy() {
     "                _rapid = _c.Name in ('G0', 'G00')",
     "                if _rapid:",
     "                    _report['rapids'] += 1",
+    "                if 'X' in _pr or 'Y' in _pr:",
+    "                    _xy_established = True",
     "                _nx = float(_pr['X']) if 'X' in _pr else (_px if _px is not None else 0.0)",
     "                _ny = float(_pr['Y']) if 'Y' in _pr else (_py if _py is not None else 0.0)",
     "                _nz = float(_pr['Z']) if 'Z' in _pr else (_pz if _pz is not None else 0.0)",
@@ -601,10 +663,28 @@ function autoFixUnsafeRapidsToFeedPy() {
     "                                _report['otherErrors'].append('isInside: ' + str(_e))",
     "                if _unsafe:",
     "                    _report['unsafe'] += 1",
-    "                    _params = dict(_pr)",
-    "                    if 'F' not in _params:",
-    "                        _params['F'] = _default_feed",
-    "                    _new_cmds.append(Path.Command('G1', _params))",
+    "                    if not _xy_established:",
+    // No X or Y has EVER been explicitly given yet in this operation — this
+    // Z-only move (or one carrying forward a phantom never-visited X/Y) is
+    // never a real cutting target. Converting it to a feed would cut material
+    // at whatever position the tool happens to be sitting at (often (0,0),
+    // the WCS origin) — a real live defect, not a hypothetical: it carved a
+    // visible groove at the stock center before the actual part was ever
+    // touched. Raise it to a safe height and keep it a rapid instead — never
+    // touch material at the wrong spot, at any speed. autoFixPrematureDescentPy
+    // above should already prevent most of these by reordering the lead-in,
+    // but this is the last line of defense for whatever it doesn't catch.
+    "                        _params = dict(_pr)",
+    "                        _params['Z'] = _safe_z",
+    "                        _new_cmds.append(Path.Command(_c.Name, _params))",
+    "                        _nz = _safe_z",
+    "                        _report['clamped'] += 1",
+    "                    else:",
+    "                        _params = dict(_pr)",
+    "                        if 'F' not in _params:",
+    "                            _params['F'] = _default_feed",
+    "                        _new_cmds.append(Path.Command('G1', _params))",
+    "                        _report['converted'] += 1",
     "                    _changed = True",
     "                else:",
     "                    _new_cmds.append(_c)",
@@ -612,7 +692,7 @@ function autoFixUnsafeRapidsToFeedPy() {
     "            if _changed:",
     "                try:",
     "                    _op.Path = Path.Path(_new_cmds)",
-    "                    _report['converted'] += 1",
+    "                    _report['opsModified'] += 1",
     "                except Exception as _e:",
     "                    _report['assignErrors'].append(str(getattr(_op, 'Label', _op.Name)) + ': ' + str(_e))",
     "        except Exception as _e:",
@@ -792,6 +872,7 @@ function previewEpiloguePy(previewJsonPath, defaultFeed, isTorna) {
     "    _grp = list(job.Operations.Group)",
     "except Exception as _e:",
     "    raise RuntimeError('job.Operations bulunamadi: ' + str(_e))",
+    autoFixPrematureDescentPy(),
     autoFixClearanceHeightsPy(),
     autoFixUnsafeRapidsToFeedPy(),
     autoFixDeepPlungesPy(),
@@ -864,6 +945,7 @@ function postEpiloguePy(gcodePath, postName, isTorna) {
     "if post_mod is None:",
     "    raise RuntimeError('post-processor modulu bulunamadi')",
     "_grp = list(job.Operations.Group)",
+    autoFixPrematureDescentPy(),
     autoFixClearanceHeightsPy(),
     autoFixUnsafeRapidsToFeedPy(),
     autoFixDeepPlungesPy(),
@@ -1046,7 +1128,7 @@ async function generateAndRunPathCode({ abs, geometry, answers, plan, threadGuid
           rapidDefuseDiag = report
             ? ` [Teshis: autoFixUnsafeRapidsToFeedPy calisti mi=${report.bbOk}, bb.ZMax=${report.bbZMax}, ` +
               `${report.ops} op tarandi, ${report.rapids} rapid komut goruldu, ${report.unsafe} tanesi guvensiz ` +
-              `bulundu, ${report.converted} operasyonda G1'e cevrildi.` +
+              `bulundu, ${report.converted} G1'e cevrildi, ${report.clamped} guvenli yukseklige cekildi.` +
               (report.assignErrors?.length ? ` Atama hatalari: ${report.assignErrors.join(" | ")}.` : "") +
               (report.otherErrors?.length ? ` Diger hatalar: ${report.otherErrors.join(" | ")}.` : "") +
               "]"
