@@ -4,6 +4,13 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>CNC Simülatör · Torna & Freze</title>
+<script>
+  // Production default stays fully deterministic (no LLM G-code generation —
+  // see the ENABLE_LLM flag below). Add ?mod=llm to the URL to try the LLM
+  // chat mode side-by-side for comparison; leave the URL as-is for the
+  // deterministic-only mode machinists actually run G-code from.
+  window.ROVER_ENABLE_LLM = new URLSearchParams(location.search).get("mod") === "llm";
+</script>
 <script src="https://cdn.tailwindcss.com"></script>
 <script type="importmap">
 { "imports": {
@@ -1964,7 +1971,7 @@ function taiGetChips(){
 }
 
 function taiRenderChips(){
-  taiBadge.textContent=isMill()?"FREZE":"TORNA";
+  taiBadge.textContent=(isMill()?"FREZE":"TORNA")+(window.ROVER_ENABLE_LLM?" · LLM MODU":"");
   taiChips.innerHTML="";
   const R=window._rover||{taiGetChips,taiUserInput};
   (R.taiGetChips||taiGetChips)().forEach(c=>{const b=document.createElement("button");b.className="tai-chip";b.textContent=c.l;b.onclick=()=>(R.taiUserInput||taiUserInput)(c.c);taiChips.appendChild(b);});
