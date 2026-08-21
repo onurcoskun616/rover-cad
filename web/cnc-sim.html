@@ -1849,8 +1849,10 @@ function sampleHexPocket(){
     q.push({type:"rapid",x:0,y:safeY,z:0});
     for(let ring=1;ring<=3;ring++){
       const cr=ring*(r/3)-CUTTER_R*0.3;
-      const pts=6*ring;
-      for(let i=0;i<=pts;i++){const a=(i/pts)*Math.PI*2;q.push({type:"feed",x:Math.cos(a)*cr,y:y,z:Math.sin(a)*cr});}
+      // 6 vertices per ring (not 6*ring) so every ring traces an actual
+      // hexagon — connecting 18 points evenly spaced around a circle (the
+      // old ring===3 case) is visually a smooth circle, not a hexagon.
+      for(let i=0;i<=6;i++){const a=(i/6)*Math.PI*2;q.push({type:"feed",x:Math.cos(a)*cr,y:y,z:Math.sin(a)*cr});}
     }
   }
   q.push({type:"rapid",x:0,y:safeY,z:0});
