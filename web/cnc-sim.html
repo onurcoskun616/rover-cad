@@ -634,7 +634,7 @@ let MARGIN_C=6, MARGIN_R=6;
 // buyuyor, hucreler kare kaliyor. Eski degerler taban olarak korunuyor, boylece
 // kucuk stoklarda cozunurluk asla dusmuyor; toplam hucre sayisi ise
 // computeVertexNormals her karede tum agi taradigi icin tavanla sinirli.
-const CELL_MM=0.5, GRID_MIN_C=150, GRID_MIN_R=105, GRID_MAX_CELLS=120000;
+const CELL_MM=0.4, GRID_MIN_C=150, GRID_MIN_R=105, GRID_MAX_CELLS=120000;
 function gridForStock(w, d){
   let c=Math.max(GRID_MIN_C, Math.round(w/CELL_MM)+1);
   let r=Math.max(GRID_MIN_R, Math.round(d/CELL_MM)+1);
