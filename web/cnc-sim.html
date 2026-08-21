@@ -634,7 +634,7 @@ let MARGIN_C=6, MARGIN_R=6;
 // buyuyor, hucreler kare kaliyor. Eski degerler taban olarak korunuyor, boylece
 // kucuk stoklarda cozunurluk asla dusmuyor; toplam hucre sayisi ise
 // computeVertexNormals her karede tum agi taradigi icin tavanla sinirli.
-const CELL_MM=0.7, GRID_MIN_C=150, GRID_MIN_R=105, GRID_MAX_CELLS=70000;
+const CELL_MM=0.5, GRID_MIN_C=150, GRID_MIN_R=105, GRID_MAX_CELLS=120000;
 function gridForStock(w, d){
   let c=Math.max(GRID_MIN_C, Math.round(w/CELL_MM)+1);
   let r=Math.max(GRID_MIN_R, Math.round(d/CELL_MM)+1);
@@ -660,6 +660,7 @@ const mill={
   spinAngle:0, jog:{x:0,y:0,z:0}, queue:[], moveActive:null, dirty:false, muted:false, coolantMode:"off"
 };
 let heights=new Float32Array(COLS*ROWS).fill(TOP);
+let removedSum=0;   // carve() icinde birikir; computeRemoved bunu okur
 
 let renderer,scene,camera,controls,plane,planeGeo,toolGroup,chipPool=[],raf3d;
 let CUTTER_R=13, CUTTER_H=26;
@@ -898,6 +899,7 @@ function resizeMillStock(newW, newD, newTop){
   dx=W/(COLS-1); dz=D/(ROWS-1);
   refreshMarginCells();
   heights=new Float32Array(COLS*ROWS).fill(TOP);
+  resetRemoved();
   buildWorkpiece();
   buildVise();
   mill.x=0; mill.y=TOP+30; mill.z=0;
@@ -985,13 +987,20 @@ function carve(tx,tz,ty){
     for(let ix=Math.max(MARGIN_C,ixC-rx);ix<=Math.min(COLS-1-MARGIN_C,ixC+rx);ix++){
       const wx=colX(ix),wz=colZ(iy);if(Math.hypot(wx-tx,wz-tz)>CUTTER_R)continue;
       const vi=iy*COLS+ix;const h=heights[vi];
-      if(h>ty+.05){const nh=Math.max(ty,0);heights[vi]=nh;pos.setY(vi,nh);cut=true;}
+      // Kaldirilan malzemeyi burada biriktir. Eskiden her karede computeRemoved
+      // tum izgarayi bastan tariyordu — sirf HUD'daki yuzde icin O(hucre) is.
+      // Bu tarama, izgara cozunurlugunu artirmanin onundeki asil engeldi.
+      if(h>ty+.05){const nh=Math.max(ty,0);removedSum+=h-nh;heights[vi]=nh;pos.setY(vi,nh);cut=true;}
     }
   }
   if(cut){pos.needsUpdate=true;mill.dirty=true;}
   return cut;
 }
-function computeRemoved(){let s=0,n=0;for(let iy=MARGIN_R;iy<ROWS-MARGIN_R;iy++)for(let ix=MARGIN_C;ix<COLS-MARGIN_C;ix++){s+=TOP-heights[iy*COLS+ix];n++;}return clamp((s/n)/TOP,0,1);}
+// carve() icindeki hucre araligiyla BIREBIR ayni ic bolge; ikisi ayrisirsa
+// yuzde sessizce kayar.
+function removedCellCount(){return Math.max(1,(ROWS-2*MARGIN_R)*(COLS-2*MARGIN_C));}
+function resetRemoved(){removedSum=0;mill.removed=0;}
+function computeRemoved(){return clamp((removedSum/removedCellCount())/TOP,0,1);}
 
 let millProgramText=null,latheProgramText=null;
 function millStartCycle(){
@@ -1067,7 +1076,7 @@ $("mbtn-spindle").onclick=()=>{if(!mill.emergency)mill.spindleOn=!mill.spindleOn
 $("mbtn-cycle").onclick=()=>millStartCycle(); $("mbtn-hold").onclick=()=>mill.paused=!mill.paused;
 $("mbtn-emg").onclick=()=>{mill.emergency=true;mill.running=false;mill.spindleOn=false;mill.coolantMode="off";mill.queue=[];mill.moveActive=null;mill.alarm="EMG";toolYOff=0;if(magGroup)magGroup.visible=false;toolGroup.visible=true;};
 $("mbtn-reset").onclick=()=>{mill.alarm=null;mill.emergency=false;};
-$("mbtn-newp").onclick=()=>{heights=new Float32Array(COLS*ROWS).fill(TOP);const pos=planeGeo.attributes.position;for(let i=0;i<pos.count;i++)pos.setY(i,TOP);pos.needsUpdate=true;planeGeo.computeVertexNormals();mill.removed=0;mill.running=false;mill.queue=[];mill.moveActive=null;mill.x=0;mill.y=TOP+30;mill.z=0;toolYOff=0;if(magGroup)magGroup.visible=false;toolGroup.visible=true;millProgramText=null;$("m-file-info").classList.add("hidden");};
+$("mbtn-newp").onclick=()=>{heights=new Float32Array(COLS*ROWS).fill(TOP);resetRemoved();const pos=planeGeo.attributes.position;for(let i=0;i<pos.count;i++)pos.setY(i,TOP);pos.needsUpdate=true;planeGeo.computeVertexNormals();mill.removed=0;mill.running=false;mill.queue=[];mill.moveActive=null;mill.x=0;mill.y=TOP+30;mill.z=0;toolYOff=0;if(magGroup)magGroup.visible=false;toolGroup.visible=true;millProgramText=null;$("m-file-info").classList.add("hidden");};
 $("m-play").onclick=()=>{mill.mode="AUTO";millStartCycle();};
 $("m-pause").onclick=()=>mill.paused=!mill.paused;
 $("m-stop").onclick=()=>millStop();
