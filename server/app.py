@@ -184,6 +184,98 @@ def strip_gcode_for_summary(text: str) -> str:
     return GCODE_RE.sub("[G-code operasyonu]", text).strip()
 
 # ---------------------------------------------------------------------------
+# G-code safety net for the free-text LLM path
+#
+# Every deterministic shape (delik, cep, kanal, altıgen cep, örnek parçalar,
+# ...) is now generated client-side by a parametric toolpath function that
+# always produces well-formed, geometrically-correct G-code — the LLM only
+# supplies the numbers. This chat path is what's left over: genuinely novel
+# requests with no matching deterministic generator, where the LLM writes
+# the G-code text — coordinates and all — itself. Nothing else validates
+# that text before it reaches the simulator or gets saved as "the"
+# operation, which is exactly how a line like "G1 X-15 -25 Z57 F200"
+# (missing the Y before -25 — silently misinterpreted by real controllers)
+# made it into a saved session. Mirrors the same two checks
+# camAssistantService.js's trusted epilogue runs on FreeCAD's own toolpath
+# (collisionCheckPy, plus basic command well-formedness) instead of trusting
+# generated G-code blindly.
+# ---------------------------------------------------------------------------
+
+GCODE_WORD_RE = re.compile(r"([A-Za-z])\s*([+-]?\d*\.?\d+)")
+
+
+def validate_gcode_syntax(gcode_text: str) -> list[str]:
+    """Flag lines with a token that isn't a valid <letter><number> G-code
+    word — e.g. a coordinate missing its axis letter, which real controllers
+    either reject or silently misinterpret rather than erroring cleanly."""
+    problems = []
+    for lineno, raw in enumerate(gcode_text.splitlines(), 1):
+        line = re.sub(r"\([^)]*\)", "", raw.split(";", 1)[0]).strip()
+        if not line:
+            continue
+        residual = GCODE_WORD_RE.sub("", line).strip()
+        if residual:
+            problems.append(
+                f"Satır {lineno}: eksen harfi eksik/tanınmayan token "
+                f"{residual!r} — \"{raw.strip()}\""
+            )
+    return problems
+
+
+def validate_gcode_collision_mill(gcode_text: str, stock: dict, tool_start: dict) -> list[str]:
+    """Sample straight-line G0 rapid segments against the stock's bounding
+    box, same approach as camAssistantService.js's collisionCheckPy: a rapid
+    whose path dips into material is a crash risk regardless of where it's
+    headed. Only meaningful for mill (X/Y/Z); lathe gets syntax checks only."""
+    w = float(stock.get("w", 200) or 200)
+    d = float(stock.get("d", 140) or 140)
+    h = float(stock.get("h", 60) or 60)
+    x_lo, x_hi = -w / 2, w / 2
+    y_lo, y_hi = -d / 2, d / 2
+    z_hi = h
+
+    def inside(x, y, z, margin=0.05):
+        return (x_lo - margin <= x <= x_hi + margin and
+                y_lo - margin <= y <= y_hi + margin and
+                -margin <= z <= z_hi + margin)
+
+    px = float(tool_start.get("x", 0) or 0)
+    py = float(tool_start.get("y", 0) or 0)
+    pz = float(tool_start.get("z", z_hi + 20) or (z_hi + 20))
+
+    problems = []
+    for lineno, raw in enumerate(gcode_text.splitlines(), 1):
+        line = re.sub(r"\([^)]*\)", "", raw.split(";", 1)[0]).strip()
+        m = re.match(r"^(G0?0|G0?1)\b", line, re.IGNORECASE)
+        if not m:
+            continue
+        is_rapid = m.group(1).upper() in ("G0", "G00")
+        words = {L.upper(): float(v) for L, v in GCODE_WORD_RE.findall(line)}
+        nx, ny, nz = words.get("X", px), words.get("Y", py), words.get("Z", pz)
+        if is_rapid and px is not None and min(pz, nz) <= z_hi + 0.5:
+            dist = ((nx - px) ** 2 + (ny - py) ** 2 + (nz - pz) ** 2) ** 0.5
+            if dist > 0.5:
+                steps = min(15, max(3, int(dist // 3)))
+                for s in range(1, steps):
+                    t = s / steps
+                    sx, sy, sz = px + (nx - px) * t, py + (ny - py) * t, pz + (nz - pz) * t
+                    if inside(sx, sy, sz):
+                        problems.append(
+                            f"Satır {lineno}: hızlı hareket (G0) parçanın içinden "
+                            f"geçiyor (X{sx:.1f} Y{sy:.1f} Z{sz:.1f}) — \"{raw.strip()}\""
+                        )
+                        break
+        px, py, pz = nx, ny, nz
+    return problems
+
+
+def validate_gcode_block(gcode_text: str, machine_type: str, stock: dict, tool_start: dict) -> list[str]:
+    problems = validate_gcode_syntax(gcode_text)
+    if not problems and machine_type == "mill":
+        problems += validate_gcode_collision_mill(gcode_text, stock, tool_start)
+    return problems
+
+# ---------------------------------------------------------------------------
 # Session & conversation management
 # ---------------------------------------------------------------------------
 
@@ -404,23 +496,66 @@ def on_chat_message(data):
         emit("chat_response", {"error": str(e)})
         return
 
+    tool_start = machine_state.get("tool", {}) or {}
     gcode_blocks = extract_gcode_blocks(llm_response)
-    has_gcode = len(gcode_blocks) > 0
+
+    # Deterministic safety net: unlike the parametric generators (delik/cep/
+    # kanal/örnek parça — all client-side, no LLM involved), this path is the
+    # LLM writing raw G-code coordinates itself. Validate every block before
+    # it's ever run or saved; give the LLM ONE chance to fix a rejected block
+    # with the exact problem lines fed back, same bounded-retry shape as
+    # camAssistantService.js's FreeCAD code-gen retry loop.
+    valid_blocks, rejected_notes = [], []
+    for block in gcode_blocks:
+        problems = validate_gcode_block(block, mt, stock, tool_start)
+        if not problems:
+            valid_blocks.append(block)
+            continue
+        retry_msg = (
+            "Ürettiğin G-code güvenlik/sözdizimi kontrolünden geçemedi, "
+            "aşağıdaki sorunları düzelterek SADECE düzeltilmiş <gcode> bloğunu "
+            "tekrar üret:\n- " + "\n- ".join(problems)
+        )
+        try:
+            fixed_response = call_model(
+                llm_messages + [
+                    {"role": "assistant", "content": llm_response},
+                    {"role": "user", "content": retry_msg},
+                ]
+            )
+            fixed_blocks = extract_gcode_blocks(fixed_response)
+            fixed_block = fixed_blocks[0] if fixed_blocks else None
+        except Exception as e:
+            log.error("LLM retry error: %s", e)
+            fixed_block = None
+        fixed_problems = validate_gcode_block(fixed_block, mt, stock, tool_start) if fixed_block else problems
+        if fixed_block and not fixed_problems:
+            valid_blocks.append(fixed_block)
+        else:
+            rejected_notes.append(fixed_problems or problems)
+
+    has_gcode = len(valid_blocks) > 0
     summary = strip_gcode_for_summary(llm_response) if has_gcode else None
 
     save_message(session_id, "assistant", llm_response, summary=summary,
                  has_gcode=has_gcode)
 
     op_indices = []
-    for block in gcode_blocks:
+    for block in valid_blocks:
         idx = save_operation(session_id, block, summary or "")
         op_indices.append(idx)
 
     display_text = GCODE_RE.sub("", llm_response).strip()
+    if rejected_notes:
+        flat = [p for group in rejected_notes for p in group][:6]
+        display_text += (
+            "\n\n⚠ Üretilen G-code güvenlik kontrolünden geçemedi, ÇALIŞTIRILMADI:\n- "
+            + "\n- ".join(flat)
+        )
 
     emit("chat_response", {
         "text": display_text,
-        "gcodeBlocks": gcode_blocks,
+        "gcodeBlocks": valid_blocks,
         "opIndices": op_indices,
         "hasGcode": has_gcode,
     })
