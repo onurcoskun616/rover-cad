@@ -471,14 +471,24 @@ export function parseCollisionViolations(text) {
 // moves (now at the correct, already-established position). G-code in this
 // project is always absolute (G17 G90), so reordering never changes what a
 // Z-only move actually does once X/Y is established — it only changes WHEN.
-// Runs FIRST in the epilogue chain, before any collision-detection-based fix
-// below, so those operate on an already-correctly-ordered toolpath. Leading
-// non-motion commands (operation-start comments, M3/T-code) are left exactly
-// where they are — only the first block of Z-only motion commands preceding
-// the operation's first X/Y-bearing move gets hoisted after it. Verified
-// with a Python simulation reproducing the exact reported command sequence,
-// plus regression checks for already-correctly-ordered operations and
-// leading comment/M-code preservation.
+// Runs AFTER autoFixClearanceHeightsPy but BEFORE any collision-detection-based
+// fix below, so those operate on an already-correctly-ordered toolpath. It
+// must come after autoFixClearanceHeightsPy specifically because that function
+// can call doc.recompute() — and a recompute regenerates every operation's
+// Path.Commands from FreeCAD's parametric engine, silently discarding any
+// hand-edit to _op.Path made before it. Running this reorder first (as
+// originally shipped) meant the recompute right after it wiped the reorder
+// out on every job where ClearanceHeight actually needed raising — the
+// exact, live-confirmed failure mode: the lead-in stayed unreordered, and
+// the reorder's absence only became visible several steps later once
+// autoFixUnsafeRapidsToFeedPy converted the now-still-misplaced descent into
+// a feed move, cutting a stray mark at the wrong (fallback (0,0)-ish)
+// position. Leading non-motion commands (operation-start comments, M3/T-code)
+// are left exactly where they are — only the first block of Z-only motion
+// commands preceding the operation's first X/Y-bearing move gets hoisted
+// after it. Verified with a Python simulation reproducing the exact reported
+// command sequence, plus regression checks for already-correctly-ordered
+// operations and leading comment/M-code preservation.
 function autoFixPrematureDescentPy() {
   return [
     "def _rover_fix_premature_descent(_grp):",
@@ -528,12 +538,21 @@ function autoFixPrematureDescentPy() {
 // then the document is recomputed ONCE so FreeCAD regenerates that
 // operation's retract/approach rapids at a genuinely safe height (with the
 // deeper move into material becoming the FEED move it always should have
-// been, which the plunge check already handles separately). Must run BEFORE
-// autoFixDeepPlungesPy below: that function hand-edits Path.Commands
-// in-memory without recomputing, and a recompute() afterward would silently
-// regenerate — and so undo — its split. Verified with a Python simulation
-// mirroring Path/Op/Base.py's real "Path.Command('G0', {'Z':
-// obj.ClearanceHeight.Value})" retract pattern before shipping.
+// been, which the plunge check already handles separately). Must run FIRST,
+// before every other autoFix* below: this is the only one of them that calls
+// doc.recompute(), and recompute regenerates every operation's Path.Commands
+// from FreeCAD's parametric engine — silently discarding any hand-edit made
+// to _op.Path beforehand. autoFixPrematureDescentPy, autoFixUnsafeRapidsToFeedPy
+// and autoFixDeepPlungesPy all hand-edit Path.Commands in-memory without
+// recomputing, so a recompute() after any of them would undo its fix. (This
+// ordering bug bit the reorder specifically: it originally ran before this
+// function, so its hoist got wiped by the recompute right after it — the
+// lead-in stayed misplaced, and only became visible once the still-unordered
+// descent tripped the rapid-to-feed conversion further down the chain and
+// carved a stray mark at the fallback position instead of the real target.)
+// Verified with a Python simulation mirroring Path/Op/Base.py's real
+// "Path.Command('G0', {'Z': obj.ClearanceHeight.Value})" retract pattern
+// before shipping.
 function autoFixClearanceHeightsPy() {
   return [
     "def _rover_fix_clearance_heights(_grp, _base_obj):",
@@ -868,8 +887,8 @@ function previewEpiloguePy(previewJsonPath, defaultFeed, isTorna) {
     "    _grp = list(job.Operations.Group)",
     "except Exception as _e:",
     "    raise RuntimeError('job.Operations bulunamadi: ' + str(_e))",
-    autoFixPrematureDescentPy(),
     autoFixClearanceHeightsPy(),
+    autoFixPrematureDescentPy(),
     autoFixUnsafeRapidsToFeedPy(),
     autoFixDeepPlungesPy(),
     `_default_feed = float(${feed})`,
@@ -941,8 +960,8 @@ function postEpiloguePy(gcodePath, postName, isTorna) {
     "if post_mod is None:",
     "    raise RuntimeError('post-processor modulu bulunamadi')",
     "_grp = list(job.Operations.Group)",
-    autoFixPrematureDescentPy(),
     autoFixClearanceHeightsPy(),
+    autoFixPrematureDescentPy(),
     autoFixUnsafeRapidsToFeedPy(),
     autoFixDeepPlungesPy(),
     plungeCheckPy(isTorna),
