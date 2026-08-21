@@ -780,8 +780,12 @@ function initMill(){
   // ("gidip gelme"). Damping kapatılınca zoom her tekerlek hareketine 1:1,
   // anında karşılık veriyor; zoomSpeed düşürülerek de her "tık" daha ince
   // bir adım oluyor (hassas ayar).
-  controls.enableDamping=false;
-  controls.zoomSpeed=0.6;
+  // Bkz. viewer.js'teki ayni ayar: "gidip gelme" hissinin kaynagi damping degil,
+  // damping'e verilen BUYUK adimdi. Adim kuculunce ayni sonumleme sicramayi
+  // yumusatan kisa bir gecise donusuyor. Tik basina: 0.95^0.35 = %1.8 (onceden %3.0).
+  controls.enableDamping=true;
+  controls.dampingFactor=0.15;
+  controls.zoomSpeed=0.35;
   // Tekerlek, kameranin yorunge HEDEFINE dogru yaklastiriyordu: imlec parcanin
   // kosesindeyken bile zoom merkeze cekiyor, istenen yeri buyutmek icin once
   // pan yapmak gerekiyordu. zoomToCursor ile yakinlasma imlecin altindaki

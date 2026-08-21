@@ -36,8 +36,18 @@ export function initViewer(container) {
   // sonumleyerek suruduruyor, hizli art arda scroll'da kamera hedeften gecip
   // geri seker gibi hissettiriyordu. CNC Simulator'de ayni sebeple kapatilmisti;
   // kapaliyken zoom her tekerlek hareketine 1:1 karsilik veriyor.
-  controls.enableDamping = false;
-  controls.zoomSpeed = 0.9;
+  // Damping bir kez kapatilmisti: her tekerlek tiki birkac kare boyunca
+  // sonumlenerek suruyor, hizli art arda scroll'da kamera hedeften gecip geri
+  // seker gibi hissettiriyordu. O "gidip gelme" hissi asil olarak ADIM BOYU
+  // buyuk oldugu icin olusuyordu — buyuk bir dolly'yi kareler boyunca yaymak
+  // savrulma gibi duruyor. Adim kucuksa ayni sonumleme, sicramayi yumusatan
+  // kisa bir gecise donusuyor. Bu yuzden ikisi birlikte degistirildi: damping
+  // geri acildi ama varsayilan 0.05'ten daha toparlak bir katsayiyla (uzun
+  // suzulme yerine kisa yaslanma), zoomSpeed ise 0.9'dan 0.35'e cekildi.
+  // Tik basina mesafe degisimi: 0.95^0.35 = %1.8 (onceden %4.5).
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.15;
+  controls.zoomSpeed = 0.35;
   // Tekerlek, kameranin yorunge HEDEFINE dogru yaklastiriyordu: imlec parcanin
   // bir kosesindeyken bile zoom merkeze cekiyor, bakilan yeri buyutmek icin
   // once pan yapmak gerekiyordu. zoomToCursor ile yakinlasma imlecin altindaki
