@@ -996,6 +996,25 @@ function carve(tx,tz,ty){
   if(cut){pos.needsUpdate=true;mill.dirty=true;}
   return cut;
 }
+// Talas kaldirma karede BIR KEZ, takimin o anki noktasinda yapiliyordu. Oysa
+// takim her karede rate*dt kadar ATLIYOR: F4244'te 60fps'de ~1.18mm, yani
+// 0.5mm'lik hucrelerin ustunden ikiser ucer atlayarak geciyor. Atlanan hucreler
+// hic kesilmiyor ve duvarlarda testere disi kaliyordu. Onemlisi, bu izgara
+// inceldikce KOTULESIR: atlama boyu ilerlemeye bagli, hucre ise kuculuyor —
+// yani cozunurluk artirmak tek basina sorunu buyutuyordu. Bu yuzden hareket,
+// en fazla yarim hucrelik adimlara bolunerek supuruluyor. Ust sinir, cok uzun
+// bir rapid'in kareyi kilitlememesi icin.
+function carveSweep(x0,z0,y0,x1,z1,y1){
+  const d=Math.hypot(x1-x0,z1-z0,y1-y0);
+  const maxStep=Math.max(0.05,Math.min(dx,dz)*0.5);
+  const n=Math.min(96,Math.max(1,Math.ceil(d/maxStep)));
+  let cut=false;
+  for(let i=1;i<=n;i++){
+    const t=i/n;
+    if(carve(x0+(x1-x0)*t, z0+(z1-z0)*t, y0+(y1-y0)*t)) cut=true;
+  }
+  return cut;
+}
 // carve() icindeki hucre araligiyla BIREBIR ayni ic bolge; ikisi ayrisirsa
 // yuzde sessizce kayar.
 function removedCellCount(){return Math.max(1,(ROWS-2*MARGIN_R)*(COLS-2*MARGIN_C));}
@@ -1026,6 +1045,8 @@ function updateMill(dt){
   const tr=mill.spindleOn?mill.spindleRpm:0;mill.actualRpm+=(tr-mill.actualRpm)*Math.min(1,dt*3);if(mill.actualRpm<1)mill.actualRpm=tr===0?0:mill.actualRpm;
   mill.spinAngle+=(mill.actualRpm/60)*dt*Math.PI*2;
   if(!mill.emergency&&!mill.paused){
+    // Kesme, bu karede katedilen yol boyunca yapilacagi icin hareket ONCESI konum.
+    const pvx=mill.x, pvy=mill.y, pvz=mill.z;
     const feedRate=(mill.feed/60)*mill.feedOverride, rapid=260;
     if(mill.mode==="MANUAL"&&!mill.moveActive&&(mill.jog.x||mill.jog.y||mill.jog.z)){
       const rate=mill.spindleOn?feedRate:rapid*.4;
@@ -1049,9 +1070,9 @@ function updateMill(dt){
       const ex=m.x-mill.x,ey=m.y-mill.y,ez=m.z-mill.z,dist=Math.hypot(ex,ey,ez),stepv=rate*dt;
       if(dist<=stepv||dist<1e-4){mill.x=m.x;mill.y=m.y;mill.z=m.z;mill.moveActive=mill.queue.shift()||null;if(!mill.moveActive&&mill.running)mill.running=false;}
       else{mill.x+=ex/dist*stepv;mill.y+=ey/dist*stepv;mill.z+=ez/dist*stepv;}}}
-    // talaş kaldırma
+    // talaş kaldırma — bu karede katedilen YOL boyunca, tek nokta degil
     let cutting=false;
-    if(mill.actualRpm>60){const cut=carve(mill.x,mill.z,mill.y);if(cut){cutting=true;if(Math.random()<.8)spawnChip(mill.x,mill.y+2,mill.z);}}
+    if(mill.actualRpm>60){const cut=carveSweep(pvx,pvz,pvy,mill.x,mill.z,mill.y);if(cut){cutting=true;if(Math.random()<.8)spawnChip(mill.x,mill.y+2,mill.z);}}
     mill.cutting=cutting;
   } else mill.cutting=false;
   if(mill.dirty){planeGeo.computeVertexNormals();mill.dirty=false;mill.removed=computeRemoved();}
