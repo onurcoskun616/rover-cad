@@ -38,6 +38,11 @@ export function initViewer(container) {
   // kapaliyken zoom her tekerlek hareketine 1:1 karsilik veriyor.
   controls.enableDamping = false;
   controls.zoomSpeed = 0.9;
+  // Tekerlek, kameranin yorunge HEDEFINE dogru yaklastiriyordu: imlec parcanin
+  // bir kosesindeyken bile zoom merkeze cekiyor, bakilan yeri buyutmek icin
+  // once pan yapmak gerekiyordu. zoomToCursor ile yakinlasma imlecin altindaki
+  // noktaya dogru oluyor. Hem CAD hem Montaj bu ayni goruntuleyiciyi kullaniyor.
+  controls.zoomToCursor = true;
   // Serbest zoom: yakinda camera.near'in (0.1) uzerinde kalacak kadar bir taban,
   // uzakta far duzlemin (5000) altinda kalacak bir tavan.
   controls.minDistance = 0.5;

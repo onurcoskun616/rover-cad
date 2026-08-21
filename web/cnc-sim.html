@@ -782,6 +782,11 @@ function initMill(){
   // bir adım oluyor (hassas ayar).
   controls.enableDamping=false;
   controls.zoomSpeed=0.6;
+  // Tekerlek, kameranin yorunge HEDEFINE dogru yaklastiriyordu: imlec parcanin
+  // kosesindeyken bile zoom merkeze cekiyor, istenen yeri buyutmek icin once
+  // pan yapmak gerekiyordu. zoomToCursor ile yakinlasma imlecin altindaki
+  // noktaya dogru oluyor — bakilan yer kadrajda kaliyor.
+  controls.zoomToCursor=true;
   controls.target.set(0,20,0);
   applyStockZoomLimits();
   setView("iso");
