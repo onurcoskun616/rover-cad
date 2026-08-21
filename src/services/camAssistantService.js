@@ -8,6 +8,7 @@ import { config } from "../config.js";
 import { sanitizeFreeCADCode } from "./exportService.js";
 import { resolveStepPath, describeStepGeometry } from "./camService.js";
 import { camParamsBlock } from "./camWizardService.js";
+import { listMagazineTools, slotNumberForTool } from "./cncMagazineService.js";
 import {
   detectThreads,
   detectThreadMethod,
@@ -1326,8 +1327,28 @@ export function parseToolMap(text) {
 // already writes, and only where the tool actually changes. A file that DOES
 // carry tool changes is left untouched — that post meant what it wrote.
 // `M6` rides along for real controls that expect it; the simulator ignores it.
-function ensureToolChanges(gcodePath, toolMap) {
+// Elle degisim yorumunda slotun hangi takim oldugunu yaz — operatorun eline
+// "T4" degil "T4 (O20mm Parmak Freze)" gecsin. Magazin okunamazsa slot numarasi
+// tek basina da is gorur, o yuzden hata yutuluyor.
+function slotName(slot) {
+  try {
+    const tool = listMagazineTools().find((t) => slotNumberForTool(t.id) === slot);
+    return tool ? ` (${tool.name})` : "";
+  } catch {
+    return "";
+  }
+}
+
+function ensureToolChanges(gcodePath, toolMap, answers) {
   if (!Array.isArray(toolMap) || !toolMap.length) return;
+  // M6 tezgaha "takimi degistir" der. Otomatik degistiricisi olmayan bir
+  // router'da Mach3'un varsayilani M6'da durup Cycle Start beklemek; iki
+  // takimli bir isin ilk M6'si daha 8. satirda geldigi icin program hic
+  // kimildamadan durur ve "yukledi ama calismadi" gibi gorunur. Elle degisimde
+  // T yazilir (simulator takimi yine bundan tanir, gercek kontrol de bekleyen
+  // takimi kaydeder) ama M6 yazilmaz; operatore hangi takimi takacagi yorum
+  // satiriyla soylenir.
+  const manual = !String(answers?.toolChanger ?? "").toLowerCase().includes("atc");
   let raw;
   try {
     raw = fs.readFileSync(gcodePath, "utf-8");
@@ -1355,14 +1376,24 @@ function ensureToolChanges(gcodePath, toolMap) {
     if (!marker) continue;
     const slot = slotByLabel.get(marker[1]);
     if (!slot || slot === currentSlot) continue;
-    out.push(`T${slot} M6`);
+    if (manual) {
+      // Ilk operasyonda takim zaten spindle'da olur; "degisim" degil, takilacak
+      // takimin ne oldugunu soylemek gerekir.
+      out.push(`(${currentSlot === null ? "TAKIM" : "TAKIM DEGISIMI"}: T${slot}${slotName(slot)} -- elle takin)`);
+      out.push(`T${slot}`);
+    } else {
+      out.push(`T${slot} M6`);
+    }
     currentSlot = slot;
     injected += 1;
   }
   if (!injected) return;
   try {
     fs.writeFileSync(gcodePath, out.join("\n"), "utf-8");
-    console.log(`${injected} takim degisimi G-code'a eklendi:`, path.basename(gcodePath));
+    console.log(
+      `${injected} takim ${manual ? "secimi (elle degisim: M6 yazilmadi)" : "degisimi"} G-code'a eklendi:`,
+      path.basename(gcodePath),
+    );
   } catch (err) {
     console.warn("Takim degisimi eklenemedi:", err.message);
   }
@@ -1833,7 +1864,7 @@ export async function generateCamGcodeFromPlan(stepPath, answers, plan, context 
       throw new Error(`Guvenlik kontrolu basarisiz: ${parts.join(" | ")}. Onizlemeyi yeniden olusturun.`);
     }
     // Before any dialect transform, so injected changes get translated too.
-    ensureToolChanges(gcodePath, parseToolMap(text));
+    ensureToolChanges(gcodePath, parseToolMap(text), answers);
     normalizeForRealControllers(gcodePath, answers);
     applyControllerTransform(gcodePath, postName, abs, answers);
     // Last: the dialect transforms rewrite the file wholesale.
@@ -1859,7 +1890,7 @@ export async function generateCamGcodeFromPlan(stepPath, answers, plan, context 
     throw err;
   }
   if (!fs.existsSync(gcodePath)) throw new Error("G-code dosyasi olusmadi");
-  ensureToolChanges(gcodePath, parseToolMap(runText));
+  ensureToolChanges(gcodePath, parseToolMap(runText), answers);
   normalizeForRealControllers(gcodePath, answers);
   applyControllerTransform(gcodePath, postName, abs, answers);
   brandGcodeHeader(gcodePath);

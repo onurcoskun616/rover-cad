@@ -92,6 +92,15 @@ const MACHINE_CLASS_OPTIONS = [
   "Hobi / masaustu CNC",
   "Endustriyel CNC",
 ];
+// M6, tezgaha takim degistirmesini soyler. Otomatik degistiricisi olmayan bir
+// router'da Mach3'un varsayilani M6'da durup Cycle Start beklemektir — iki
+// takimli bir programda ilk M6 daha ilk satirlarda geldigi icin program hic
+// hareket etmeden duruyor gibi gorunur. Elle degisimde T (takim secimi) yazilir
+// ama M6 yazilmaz; hangi takimin takilacagi yorum satiriyla belirtilir.
+const TOOL_CHANGER_OPTIONS = [
+  "Yok (elle degisim)",
+  "Otomatik degistirici (ATC)",
+];
 const ENTRY_METHOD_OPTIONS = [
   "Ramp (acili giris)",
   "Helix (helisel giris)",
@@ -395,6 +404,16 @@ function buildApplicableSteps({ geometry, threads, answers }) {
       "Takim yaricap kompanzasyonu (torna: kesici ucu yaricapi)",
       CUTTER_COMP_OPTIONS,
       pick(a, "cutterComp", CUTTER_COMP_OPTIONS[0]),
+    ),
+    // Varsayilan tezgah sinifina gore: hobi/masaustu CNC'lerde otomatik
+    // degistirici olmaz, endustriyel tezgahlarda genelde olur.
+    selectField(
+      "toolChanger",
+      "Takim degistirici",
+      TOOL_CHANGER_OPTIONS,
+      pick(a, "toolChanger", String(a.machineClass || "").toLowerCase().includes("endustriyel")
+        ? TOOL_CHANGER_OPTIONS[1]
+        : TOOL_CHANGER_OPTIONS[0]),
     ),
   );
   if (threads?.hasThread) {
