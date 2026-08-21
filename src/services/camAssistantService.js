@@ -1485,8 +1485,12 @@ function normalizeForRealControllers(gcodePath, answers) {
       wcsDone = true;
     }
     // Spindle starts once the first tool is in the spindle; with no tool change
-    // at all, right after the modal setup instead.
-    if (!spindleDone && /^\s*T\d+\s+M0?6\b/i.test(code)) {
+    // at all, right after the modal setup instead. The tool line is matched with
+    // M6 OPTIONAL: manual-change jobs emit a bare "T1" (no M6, so the control
+    // does not stop), and an M6-only match sent the spindle command up into the
+    // preamble — spinning the cutter to full speed BEFORE the line telling the
+    // operator to fit the tool by hand.
+    if (!spindleDone && /^\s*T\d+\s*(M0?6\s*)?$/i.test(code)) {
       out.push(rpm ? `M3 S${rpm}` : "M3");
       spindleDone = true;
     }
