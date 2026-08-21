@@ -1368,6 +1368,33 @@ function ensureToolChanges(gcodePath, toolMap) {
   }
 }
 
+// The post-processor stamps its own toolchain into the file header ("Exported
+// by FreeCAD", "Post Processor: Path.Post.scripts.grbl_post"). This is the
+// product's output, so it carries the product's name; the post-processor line
+// keeps the dialect, which is what a machinist actually needs from it, without
+// the module path. Everything below the header is untouched — only these two
+// comment lines are rewritten, and only when they are actually there.
+function brandGcodeHeader(gcodePath) {
+  let raw;
+  try {
+    raw = fs.readFileSync(gcodePath, "utf-8");
+  } catch {
+    return;
+  }
+  const branded = raw
+    .replace(/^\(Exported by .*\)$/m, "(Exported by TOPKAPIAI)")
+    .replace(
+      /^\(Post Processor: *(?:Path\.Post\.scripts\.|PathScripts\.post\.)?([A-Za-z0-9_]+?)(?:_post)?\)$/m,
+      "(Post Processor: $1)",
+    );
+  if (branded === raw) return;
+  try {
+    fs.writeFileSync(gcodePath, branded, "utf-8");
+  } catch (err) {
+    console.warn("G-code basligi markalanamadi:", err.message);
+  }
+}
+
 /**
  * If the selected controller needs a dialect-specific format (Sinumerik cycles,
  * Heidenhain Klartext, …), read the generated Fanuc G-code, transform it, and
@@ -1728,6 +1755,8 @@ export async function generateCamGcodeFromPlan(stepPath, answers, plan, context 
     // Before any dialect transform, so injected changes get translated too.
     ensureToolChanges(gcodePath, parseToolMap(text));
     applyControllerTransform(gcodePath, postName, abs, answers);
+    // Last: the dialect transforms rewrite the file wholesale.
+    brandGcodeHeader(gcodePath);
     return { gcodePath, safetyChecks: buildSafetyChecks(isTornaMachine(answers)) };
   }
 
@@ -1751,5 +1780,6 @@ export async function generateCamGcodeFromPlan(stepPath, answers, plan, context 
   if (!fs.existsSync(gcodePath)) throw new Error("G-code dosyasi olusmadi");
   ensureToolChanges(gcodePath, parseToolMap(runText));
   applyControllerTransform(gcodePath, postName, abs, answers);
+  brandGcodeHeader(gcodePath);
   return { gcodePath, safetyChecks: buildSafetyChecks(isTornaMachine(answers)) };
 }
