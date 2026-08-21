@@ -56,16 +56,51 @@ export function magazineToolLabel(t) {
   return `${t.name} (O${t.dia}mm, ${t.flutes ?? 2} agiz, ${t.material || "Karbur"})`;
 }
 
-// Magazine tools sorted by how close their diameter is to the recommended one.
+// Tools that can actually mill a profile or pocket. A drill or a chamfer mill
+// in the magazine is real and stays selectable, but it must never be the
+// DEFAULT answer to "main endmill diameter" — which is what a purely
+// diameter-based sort produced the moment the built-ins became visible: the
+// recommended O8mm matched "O8 Matkap" exactly, so the wizard offered a drill
+// as the part's roughing/finishing cutter.
+const MILLING_TYPES = new Set(["endmill", "roughing", "ballmill"]);
+
+// Magazine tools for the wizard's cutter picker: milling tools first, then by
+// how close each diameter is to the recommended one.
 export function suitableMagazineTools(recommendedDiameter) {
   const rec = num(recommendedDiameter);
+  const rank = (t) => (MILLING_TYPES.has(t.type) ? 0 : 1);
   return listMagazineTools()
     .slice()
-    .sort((a, b) => Math.abs(a.dia - rec) - Math.abs(b.dia - rec));
+    .sort((a, b) => rank(a) - rank(b) || Math.abs(a.dia - rec) - Math.abs(b.dia - rec));
 }
 
+// The simulator ships 12 stock tools that live in cnc-sim.html's own
+// TOOL_LIBRARY and are never written to this store — only user-added tools are.
+// That left the CAM Assistant's wizard reading an empty magazine and telling the
+// machinist "Magazinde kayitli takim yok; once CNC Simulator > Magazin'den takim
+// ekleyin" while the simulator right next to it was happily showing T01 O6 /
+// T02 O10 / T05 O26. Mirroring the built-ins here makes both sides agree on one
+// magazine, which is what slotNumberForTool's "builtin:N" refs already assumed.
+// Kept in the same shape normalizeTool() produces (flutes/material defaulted the
+// same way) so a built-in and a custom tool are interchangeable downstream.
+// Read-only by design: add/update/remove only ever touch the stored custom list.
+const BUILTIN_TOOLS = [
+  { name: "O6 Parmak Freze", type: "endmill", dia: 6, fluteLen: 20, totalLen: 50, maxRpm: 12000 },
+  { name: "O10 Parmak Freze", type: "endmill", dia: 10, fluteLen: 25, totalLen: 60, maxRpm: 10000 },
+  { name: "O16 Parmak Freze", type: "endmill", dia: 16, fluteLen: 30, totalLen: 70, maxRpm: 9000 },
+  { name: "O20 Parmak Freze", type: "endmill", dia: 20, fluteLen: 35, totalLen: 75, maxRpm: 8000 },
+  { name: "O26 Parmak Freze", type: "endmill", dia: 26, fluteLen: 26, totalLen: 70, maxRpm: 7000 },
+  { name: "O32 Kaba Freze", type: "roughing", dia: 32, fluteLen: 35, totalLen: 80, maxRpm: 6000 },
+  { name: "O8 Matkap", type: "drill", dia: 8, fluteLen: 40, totalLen: 80, maxRpm: 6000 },
+  { name: "O12 Matkap", type: "drill", dia: 12, fluteLen: 50, totalLen: 90, maxRpm: 5000 },
+  { name: "O5 Top Freze", type: "ballmill", dia: 5, fluteLen: 15, totalLen: 45, maxRpm: 15000 },
+  { name: "O10 Top Freze", type: "ballmill", dia: 10, fluteLen: 20, totalLen: 55, maxRpm: 12000 },
+  { name: "O3 Pah Freze", type: "chamfer", dia: 3, fluteLen: 10, totalLen: 40, maxRpm: 18000 },
+  { name: "O6 Pah Freze", type: "chamfer", dia: 6, fluteLen: 12, totalLen: 45, maxRpm: 15000 },
+].map((t, i) => ({ id: `builtin:${i + 1}`, ...normalizeTool(t) }));
+
 export function listMagazineTools() {
-  return readJson("cnc-magazine-tools", []);
+  return [...BUILTIN_TOOLS, ...readJson("cnc-magazine-tools", [])];
 }
 
 export function addMagazineTool(data) {
@@ -106,6 +141,16 @@ export function removeMagazineTool(id) {
 export function listMagazineLayout() {
   const raw = readJson("cnc-magazine-layout", []);
   const slots = new Array(CAPACITY).fill(null);
+  // Nothing saved yet -> mirror the simulator's own loadDefaults(), which seats
+  // the built-ins in T01..T12. Without this every stock tool reads as "not
+  // placed in the magazine" and the CAM Assistant falls back to placeholder
+  // T90+ numbers, while the simulator is showing those same tools in T01..T12.
+  // A saved layout is honoured exactly as stored — including the nulls that
+  // record slots the machinist deliberately emptied.
+  if (!Array.isArray(raw) || raw.length === 0) {
+    for (let i = 0; i < BUILTIN_TOOLS.length && i < CAPACITY; i++) slots[i] = BUILTIN_TOOLS[i].id;
+    return slots;
+  }
   for (let i = 0; i < CAPACITY; i++) slots[i] = raw[i] ?? null;
   return slots;
 }

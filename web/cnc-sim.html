@@ -619,8 +619,40 @@ new ResizeObserver(latheResize).observe(latheCanvas);
 /* ============================  FREZE (3B)  ========================== */
 /* ==================================================================== */
 let W=200, D=140, TOP=60;
-const COLS=150, ROWS=105, MARGIN=6;
+// Kenar payi. Tek bir MARGIN hem hucre indeksi (ROWS-MARGIN) hem de fiziksel
+// pay (MARGIN_MM) olarak kullaniliyordu; hucre boyutu sabit oldugu surece bu
+// ikisi ayni seyi ifade ediyordu. Izgara stokla degistigi icin artik etmiyor:
+// pay sessizce daralirdi. Bu yuzden fiziksel pay mm cinsinden sabitlendi
+// (eski izgarada 6 hucre ~8mm ediyordu) ve hucre karsiligi ondan turetiliyor.
+const MARGIN_MM=8;
+let MARGIN_C=6, MARGIN_R=6;
+// Talas haritasi cozunurlugu. Sabit 150x105 idi: stok ne olursa olsun ayni
+// hucre SAYISI, dolayisiyla stok uzadikca hucreler uzuyordu. 87x151mm blokta
+// bu, X'te 0.58mm ama Y'de 1.45mm'lik hucreler demekti — egik kenarlar 1.45mm
+// kademelere yuvarlaniyor, ustelik hucreler kare olmadigi icin capraz kenarlar
+// ekstra tirtikli goruluyordu. Artik hucre BOYUTU sabit: izgara stokla birlikte
+// buyuyor, hucreler kare kaliyor. Eski degerler taban olarak korunuyor, boylece
+// kucuk stoklarda cozunurluk asla dusmuyor; toplam hucre sayisi ise
+// computeVertexNormals her karede tum agi taradigi icin tavanla sinirli.
+const CELL_MM=0.4, GRID_MIN_C=150, GRID_MIN_R=105, GRID_MAX_CELLS=120000;
+function gridForStock(w, d){
+  let c=Math.max(GRID_MIN_C, Math.round(w/CELL_MM)+1);
+  let r=Math.max(GRID_MIN_R, Math.round(d/CELL_MM)+1);
+  if(c*r>GRID_MAX_CELLS){
+    const k=Math.sqrt(GRID_MAX_CELLS/(c*r));
+    c=Math.max(GRID_MIN_C, Math.round(c*k));
+    r=Math.max(GRID_MIN_R, Math.round(r*k));
+  }
+  return {c, r};
+}
+let {c:COLS, r:ROWS}=gridForStock(W, D);
 let dx=W/(COLS-1), dz=D/(ROWS-1);
+// Fiziksel payin hucre karsiligi; izgara her degistiginde yenilenir.
+function refreshMarginCells(){
+  MARGIN_C=Math.max(1, Math.min(Math.round(COLS/4), Math.round(MARGIN_MM/dx)));
+  MARGIN_R=Math.max(1, Math.min(Math.round(ROWS/4), Math.round(MARGIN_MM/dz)));
+}
+refreshMarginCells();
 const mill={
   x:0,y:90,z:0, tx:0,ty:90,tz:0,
   spindleOn:false, spindleRpm:6000, actualRpm:0, feed:400, feedOverride:1,
@@ -628,6 +660,7 @@ const mill={
   spinAngle:0, jog:{x:0,y:0,z:0}, queue:[], moveActive:null, dirty:false, muted:false, coolantMode:"off"
 };
 let heights=new Float32Array(COLS*ROWS).fill(TOP);
+let removedSum=0;   // carve() icinde birikir; computeRemoved bunu okur
 
 let renderer,scene,camera,controls,plane,planeGeo,toolGroup,chipPool=[],raf3d;
 let CUTTER_R=13, CUTTER_H=26;
@@ -747,8 +780,17 @@ function initMill(){
   // ("gidip gelme"). Damping kapatılınca zoom her tekerlek hareketine 1:1,
   // anında karşılık veriyor; zoomSpeed düşürülerek de her "tık" daha ince
   // bir adım oluyor (hassas ayar).
-  controls.enableDamping=false;
-  controls.zoomSpeed=0.6;
+  // Bkz. viewer.js'teki ayni ayar: "gidip gelme" hissinin kaynagi damping degil,
+  // damping'e verilen BUYUK adimdi. Adim kuculunce ayni sonumleme sicramayi
+  // yumusatan kisa bir gecise donusuyor. Tik basina: 0.95^0.35 = %1.8 (onceden %3.0).
+  controls.enableDamping=true;
+  controls.dampingFactor=0.15;
+  controls.zoomSpeed=0.35;
+  // Tekerlek, kameranin yorunge HEDEFINE dogru yaklastiriyordu: imlec parcanin
+  // kosesindeyken bile zoom merkeze cekiyor, istenen yeri buyutmek icin once
+  // pan yapmak gerekiyordu. zoomToCursor ile yakinlasma imlecin altindaki
+  // noktaya dogru oluyor — bakilan yer kadrajda kaliyor.
+  controls.zoomToCursor=true;
   controls.target.set(0,20,0);
   applyStockZoomLimits();
   setView("iso");
@@ -862,8 +904,11 @@ function updateCoolant(dt){for(const c of coolantPool){if(c.life>0){c.life-=dt*1
 function resizeMillStock(newW, newD, newTop){
   if(W===newW && D===newD && TOP===newTop) return;
   W=newW; D=newD; TOP=newTop;
+  ({c:COLS, r:ROWS}=gridForStock(W, D));
   dx=W/(COLS-1); dz=D/(ROWS-1);
+  refreshMarginCells();
   heights=new Float32Array(COLS*ROWS).fill(TOP);
+  resetRemoved();
   buildWorkpiece();
   buildVise();
   mill.x=0; mill.y=TOP+30; mill.z=0;
@@ -926,8 +971,17 @@ function stockCameraScale(){return Math.max(W||0,D||0,TOP||0,40);}
 function applyStockZoomLimits(){
   if(!controls)return;
   const s=stockCameraScale();
-  controls.minDistance=Math.max(40,s*0.8);
-  controls.maxDistance=Math.max(600,s*6);
+  // minDistance eskiden s*0.8 idi: 156mm'lik bir stokta kamerayı 125 birimden
+  // yakına sokmuyor, tekerleği çevirmeye devam etsen de zoom orada duruyordu.
+  // Açılış kadrajını setView() belirlediği için (s*1.8) burayı gevşetmek
+  // varsayılan görünümü değiştirmez — sadece kullanıcı isterse detaya
+  // inebilmesini sağlar. Taban, kameranın near düzlemini (1) geçip parçayı
+  // kırpmayacak kadar mesafe bırakıyor.
+  controls.minDistance=Math.max(5,s*0.05);
+  // Fog, maxDistance*1.6'ya kadar uzanıyor; kameranın far düzlemi 3000 olduğu
+  // için üst sınırı 1800'de tutuyoruz ki en uzak zoom'da sahne sisin ötesine
+  // taşıp kırpılmasın.
+  controls.maxDistance=Math.min(1800,Math.max(600,s*8));
   if(scene&&scene.fog){scene.fog.near=controls.maxDistance*0.75;scene.fog.far=controls.maxDistance*1.6;}
 }
 function setView(v){const s=stockCameraScale();const d=Math.max(140,s*1.8);const map={iso:[d*.9,d*.7,d*.9],top:[0,d*1.2,1],front:[0,d*.4,d*1.1],right:[d*1.1,d*.4,0]};const p=map[v]||map.iso;camera.position.set(p[0],p[1],p[2]);controls&&controls.update();}
@@ -938,17 +992,43 @@ function carve(tx,tz,ty){
   const ixC=Math.round((tx+W/2)/dx), iyC=Math.round((tz+D/2)/dz);
   const rx=Math.ceil(CUTTER_R/dx), rz=Math.ceil(CUTTER_R/dz);
   let cut=false;const pos=planeGeo.attributes.position;
-  for(let iy=Math.max(MARGIN,iyC-rz);iy<=Math.min(ROWS-1-MARGIN,iyC+rz);iy++){
-    for(let ix=Math.max(MARGIN,ixC-rx);ix<=Math.min(COLS-1-MARGIN,ixC+rx);ix++){
+  for(let iy=Math.max(MARGIN_R,iyC-rz);iy<=Math.min(ROWS-1-MARGIN_R,iyC+rz);iy++){
+    for(let ix=Math.max(MARGIN_C,ixC-rx);ix<=Math.min(COLS-1-MARGIN_C,ixC+rx);ix++){
       const wx=colX(ix),wz=colZ(iy);if(Math.hypot(wx-tx,wz-tz)>CUTTER_R)continue;
       const vi=iy*COLS+ix;const h=heights[vi];
-      if(h>ty+.05){const nh=Math.max(ty,0);heights[vi]=nh;pos.setY(vi,nh);cut=true;}
+      // Kaldirilan malzemeyi burada biriktir. Eskiden her karede computeRemoved
+      // tum izgarayi bastan tariyordu — sirf HUD'daki yuzde icin O(hucre) is.
+      // Bu tarama, izgara cozunurlugunu artirmanin onundeki asil engeldi.
+      if(h>ty+.05){const nh=Math.max(ty,0);removedSum+=h-nh;heights[vi]=nh;pos.setY(vi,nh);cut=true;}
     }
   }
   if(cut){pos.needsUpdate=true;mill.dirty=true;}
   return cut;
 }
-function computeRemoved(){let s=0,n=0;for(let iy=MARGIN;iy<ROWS-MARGIN;iy++)for(let ix=MARGIN;ix<COLS-MARGIN;ix++){s+=TOP-heights[iy*COLS+ix];n++;}return clamp((s/n)/TOP,0,1);}
+// Talas kaldirma karede BIR KEZ, takimin o anki noktasinda yapiliyordu. Oysa
+// takim her karede rate*dt kadar ATLIYOR: F4244'te 60fps'de ~1.18mm, yani
+// 0.5mm'lik hucrelerin ustunden ikiser ucer atlayarak geciyor. Atlanan hucreler
+// hic kesilmiyor ve duvarlarda testere disi kaliyordu. Onemlisi, bu izgara
+// inceldikce KOTULESIR: atlama boyu ilerlemeye bagli, hucre ise kuculuyor —
+// yani cozunurluk artirmak tek basina sorunu buyutuyordu. Bu yuzden hareket,
+// en fazla yarim hucrelik adimlara bolunerek supuruluyor. Ust sinir, cok uzun
+// bir rapid'in kareyi kilitlememesi icin.
+function carveSweep(x0,z0,y0,x1,z1,y1){
+  const d=Math.hypot(x1-x0,z1-z0,y1-y0);
+  const maxStep=Math.max(0.05,Math.min(dx,dz)*0.5);
+  const n=Math.min(96,Math.max(1,Math.ceil(d/maxStep)));
+  let cut=false;
+  for(let i=1;i<=n;i++){
+    const t=i/n;
+    if(carve(x0+(x1-x0)*t, z0+(z1-z0)*t, y0+(y1-y0)*t)) cut=true;
+  }
+  return cut;
+}
+// carve() icindeki hucre araligiyla BIREBIR ayni ic bolge; ikisi ayrisirsa
+// yuzde sessizce kayar.
+function removedCellCount(){return Math.max(1,(ROWS-2*MARGIN_R)*(COLS-2*MARGIN_C));}
+function resetRemoved(){removedSum=0;mill.removed=0;}
+function computeRemoved(){return clamp((removedSum/removedCellCount())/TOP,0,1);}
 
 let millProgramText=null,latheProgramText=null;
 function millStartCycle(){
@@ -968,17 +1048,19 @@ function millStartCycle(){
   mill.queue=q;mill.moveActive=q.shift();mill.running=true;
 }
 function millStop(){mill.queue=[];mill.moveActive={type:"rapid",x:mill.x,y:TOP+30,z:mill.z};mill.running=false;mill.paused=false;toolYOff=0;if(magGroup)magGroup.visible=false;toolGroup.visible=true;}
-function millGoto(x,y,z){if(mill.emergency||mill.mode!=="MANUAL")return;mill.moveActive={type:"rapid",x:clamp(x,-W/2+MARGIN*dx,W/2-MARGIN*dx),y:clamp(y,0,120),z:clamp(z,-D/2+MARGIN*dz,D/2-MARGIN*dz)};}
+function millGoto(x,y,z){if(mill.emergency||mill.mode!=="MANUAL")return;mill.moveActive={type:"rapid",x:clamp(x,-W/2+MARGIN_MM,W/2-MARGIN_MM),y:clamp(y,0,120),z:clamp(z,-D/2+MARGIN_MM,D/2-MARGIN_MM)};}
 
 function updateMill(dt){
   const tr=mill.spindleOn?mill.spindleRpm:0;mill.actualRpm+=(tr-mill.actualRpm)*Math.min(1,dt*3);if(mill.actualRpm<1)mill.actualRpm=tr===0?0:mill.actualRpm;
   mill.spinAngle+=(mill.actualRpm/60)*dt*Math.PI*2;
   if(!mill.emergency&&!mill.paused){
+    // Kesme, bu karede katedilen yol boyunca yapilacagi icin hareket ONCESI konum.
+    const pvx=mill.x, pvy=mill.y, pvz=mill.z;
     const feedRate=(mill.feed/60)*mill.feedOverride, rapid=260;
     if(mill.mode==="MANUAL"&&!mill.moveActive&&(mill.jog.x||mill.jog.y||mill.jog.z)){
       const rate=mill.spindleOn?feedRate:rapid*.4;
-      mill.x=clamp(mill.x+mill.jog.x*rate*dt,-W/2+MARGIN*dx,W/2-MARGIN*dx);
-      mill.z=clamp(mill.z+mill.jog.z*rate*dt,-D/2+MARGIN*dz,D/2-MARGIN*dz);
+      mill.x=clamp(mill.x+mill.jog.x*rate*dt,-W/2+MARGIN_MM,W/2-MARGIN_MM);
+      mill.z=clamp(mill.z+mill.jog.z*rate*dt,-D/2+MARGIN_MM,D/2-MARGIN_MM);
       mill.y=clamp(mill.y+mill.jog.y*rate*dt,0,120);
     }
     if(mill.moveActive){const m=mill.moveActive;
@@ -997,9 +1079,9 @@ function updateMill(dt){
       const ex=m.x-mill.x,ey=m.y-mill.y,ez=m.z-mill.z,dist=Math.hypot(ex,ey,ez),stepv=rate*dt;
       if(dist<=stepv||dist<1e-4){mill.x=m.x;mill.y=m.y;mill.z=m.z;mill.moveActive=mill.queue.shift()||null;if(!mill.moveActive&&mill.running)mill.running=false;}
       else{mill.x+=ex/dist*stepv;mill.y+=ey/dist*stepv;mill.z+=ez/dist*stepv;}}}
-    // talaş kaldırma
+    // talaş kaldırma — bu karede katedilen YOL boyunca, tek nokta degil
     let cutting=false;
-    if(mill.actualRpm>60){const cut=carve(mill.x,mill.z,mill.y);if(cut){cutting=true;if(Math.random()<.8)spawnChip(mill.x,mill.y+2,mill.z);}}
+    if(mill.actualRpm>60){const cut=carveSweep(pvx,pvz,pvy,mill.x,mill.z,mill.y);if(cut){cutting=true;if(Math.random()<.8)spawnChip(mill.x,mill.y+2,mill.z);}}
     mill.cutting=cutting;
   } else mill.cutting=false;
   if(mill.dirty){planeGeo.computeVertexNormals();mill.dirty=false;mill.removed=computeRemoved();}
@@ -1024,7 +1106,7 @@ $("mbtn-spindle").onclick=()=>{if(!mill.emergency)mill.spindleOn=!mill.spindleOn
 $("mbtn-cycle").onclick=()=>millStartCycle(); $("mbtn-hold").onclick=()=>mill.paused=!mill.paused;
 $("mbtn-emg").onclick=()=>{mill.emergency=true;mill.running=false;mill.spindleOn=false;mill.coolantMode="off";mill.queue=[];mill.moveActive=null;mill.alarm="EMG";toolYOff=0;if(magGroup)magGroup.visible=false;toolGroup.visible=true;};
 $("mbtn-reset").onclick=()=>{mill.alarm=null;mill.emergency=false;};
-$("mbtn-newp").onclick=()=>{heights=new Float32Array(COLS*ROWS).fill(TOP);const pos=planeGeo.attributes.position;for(let i=0;i<pos.count;i++)pos.setY(i,TOP);pos.needsUpdate=true;planeGeo.computeVertexNormals();mill.removed=0;mill.running=false;mill.queue=[];mill.moveActive=null;mill.x=0;mill.y=TOP+30;mill.z=0;toolYOff=0;if(magGroup)magGroup.visible=false;toolGroup.visible=true;millProgramText=null;$("m-file-info").classList.add("hidden");};
+$("mbtn-newp").onclick=()=>{heights=new Float32Array(COLS*ROWS).fill(TOP);resetRemoved();const pos=planeGeo.attributes.position;for(let i=0;i<pos.count;i++)pos.setY(i,TOP);pos.needsUpdate=true;planeGeo.computeVertexNormals();mill.removed=0;mill.running=false;mill.queue=[];mill.moveActive=null;mill.x=0;mill.y=TOP+30;mill.z=0;toolYOff=0;if(magGroup)magGroup.visible=false;toolGroup.visible=true;millProgramText=null;$("m-file-info").classList.add("hidden");};
 $("m-play").onclick=()=>{mill.mode="AUTO";millStartCycle();};
 $("m-pause").onclick=()=>mill.paused=!mill.paused;
 $("m-stop").onclick=()=>millStop();
@@ -1355,8 +1437,8 @@ function runMillGcode(parsed, stockDims){
   if(stockDims){
     resizeMillStock(stockDims.w,stockDims.d,stockDims.h);
     for(const m of q){
-      m.x=clamp(m.x, -W/2+MARGIN*dx, W/2-MARGIN*dx);
-      if(m.z!==undefined) m.z=clamp(m.z, -D/2+MARGIN*dz, D/2-MARGIN*dz);
+      m.x=clamp(m.x, -W/2+MARGIN_MM, W/2-MARGIN_MM);
+      if(m.z!==undefined) m.z=clamp(m.z, -D/2+MARGIN_MM, D/2-MARGIN_MM);
       if(m.y!==undefined) m.y=clamp(m.y, 0, TOP+40);
     }
   } else if(bounds.xMax>bounds.xMin){
@@ -1371,11 +1453,28 @@ function runMillGcode(parsed, stockDims){
     resizeMillStock(Math.round(newW),Math.round(newD),newTop);
     const cx=(bounds.xMax+bounds.xMin)/2, cz=(bounds.zMax+bounds.zMin)/2;
     for(const m of q){
-      m.x=clamp(m.x-cx, -W/2+MARGIN*dx, W/2-MARGIN*dx);
-      if(m.z!==undefined) m.z=clamp(m.z-cz, -D/2+MARGIN*dz, D/2-MARGIN*dz);
+      m.x=clamp(m.x-cx, -W/2+MARGIN_MM, W/2-MARGIN_MM);
+      if(m.z!==undefined) m.z=clamp(m.z-cz, -D/2+MARGIN_MM, D/2-MARGIN_MM);
       if(m.y!==undefined) m.y=clamp(m.y, 0, TOP+40);
     }
   }
+  {const safeY=TOP+8;let nFix=0;
+  for(const m of q){if(m.type!=="rapid"||m.y===undefined)continue;const sH=safetyInterceptor._maxHeightInRadius(m.x,m.z,CUTTER_R);if(m.y<=sH+0.5){m.y=safeY;nFix++;}}
+  let px=mill.x,py=mill.y,pz=mill.z;
+  for(let i=0;i<q.length;i++){const m=q[i];if(m.type==="tc")continue;
+  if(m.type==="rapid"&&m.y!==undefined){const chk=safetyInterceptor._pathCollision(px,py,pz,m.x,m.y,m.z,CUTTER_R);
+  if(chk.hit){q.splice(i,0,{type:"rapid",x:px,y:safeY,z:pz});m.y=Math.max(m.y,safeY);nFix++;i++;}}
+  if(m.x!==undefined)px=m.x;if(m.y!==undefined)py=m.y;if(m.z!==undefined)pz=m.z;}
+  if(nFix)taiMsg(`⚠️ ${nFix} rapid hareket güvenli yüksekliğe (Z=${safeY}mm) otomatik düzeltildi.`,"bot");}
+  {const maxP=10;let nSplit=0,py=mill.y;
+  for(let i=0;i<q.length;i++){const m=q[i];if(m.type==="tc")continue;
+  if(m.type==="feed"&&py!==undefined&&m.y!==undefined){const drop=py-m.y;
+  if(drop>maxP){const sH=safetyInterceptor._maxHeightInRadius(m.x,m.z,CUTTER_R);if(m.y<sH){
+  const steps=Math.ceil(drop/maxP),stepY=drop/steps,nm=[];
+  for(let s=1;s<=steps;s++)nm.push({type:"feed",x:m.x,y:py-stepY*s,z:m.z});
+  q.splice(i,1,...nm);nSplit++;i+=steps-1;}}}
+  if(m.y!==undefined)py=m.y;}
+  if(nSplit)taiMsg(`⚠️ ${nSplit} derin dalma hareketi güvenli adımlara (≤${maxP}mm) bölündü.`,"bot");}
   const sfErrs=safetyInterceptor.validateMill(q,W,D,TOP,true,mill.x,mill.y,mill.z);
   if(sfErrs.length){safetyInterceptor._eStop(mill,taiMsg,sfErrs);return;}
   captureProgramSummary("mill",q);
@@ -1398,6 +1497,14 @@ function runLatheGcode(parsed, stockDims){
       m.z=clamp(m.z+zOff, -20, STOCK_LEN);
     }
   } else if(stockDims){resizeLatheStock(stockDims.len,stockDims.r);}
+  {const safeX=STOCK_R+5;let nFix=0,px=lathe.s.x,pz=lathe.s.z;
+  for(let i=0;i<q.length;i++){const m=q[i];if(m.type!=="rapid"){px=m.x;pz=m.z;continue;}
+  const inS=m.z>=-0.5&&m.z<=STOCK_LEN+0.5;
+  if(inS&&m.x<STOCK_R-0.5){m.x=safeX;nFix++;}
+  const pInS=pz>=-0.5&&pz<=STOCK_LEN+0.5;
+  if(px<STOCK_R-0.5&&pInS&&Math.abs(m.z-pz)>0.5){q.splice(i,0,{type:"rapid",x:safeX,z:pz});nFix++;i++;}
+  px=m.x;pz=m.z;}
+  if(nFix)taiMsg(`⚠️ ${nFix} rapid hareket güvenli yarıçapa (X=${safeX}mm) otomatik düzeltildi.`,"bot");}
   const sfErrsL=safetyInterceptor.validateLathe(q,STOCK_LEN,STOCK_R,true,lathe.s.x,lathe.s.z);
   if(sfErrsL.length){safetyInterceptor._eStop(lathe,taiMsg,sfErrsL);return;}
   captureProgramSummary("lathe",q);
@@ -1421,7 +1528,12 @@ $("l-file").onchange=e=>{
 /* --- CAM sayfasından gelen G-code otomatik yükleme --- */
 {const raw=sessionStorage.getItem("rover_cnc_gcode");
 if(raw){try{const d=JSON.parse(raw);if(d.gcode){
-  const isMill=!d.machineType||d.machineType==="freze"||d.machineType==="mill";
+  /* CAM sihirbazı tezgah tipini kendi etiketiyle gönderir ("Freze (CNC Mill)",
+     "Torna (CNC Lathe)"), bu yüzden tam eşleşme aramak her freze işini torna
+     sekmesinde açıyordu. Backend'in kuralını uygula: torna geçiyorsa torna,
+     aksi halde freze. */
+  const mt=String(d.machineType||"").toLowerCase();
+  const isMill=!(mt.includes("torna")||mt.includes("lathe"));
   if(d.material){const mk=d.material.toLowerCase();const map={"celik":"steel","çelik":"steel","steel":"steel","aluminyum":"aluminum","alüminyum":"aluminum","aluminum":"aluminum","pirinc":"brass","pirinç":"brass","brass":"brass","bakir":"copper","bakır":"copper","copper":"copper","dokme demir":"cast-iron","dökme demir":"cast-iron","cast-iron":"cast-iron","titanyum":"titanium","titanium":"titanium","ahsap":"wood","ahşap":"wood","wood":"wood","plastik":"plastic","plastic":"plastic","pom":"plastic","nylon":"plastic","akrilik":"acrylic","acrylic":"acrylic","pmma":"acrylic"};const matKey=map[mk];if(matKey)setMaterial(matKey);}
   let camStock=null;
   if(isMill){
@@ -1608,8 +1720,8 @@ function tpMillFace(depth){
   const safeY=TOP+8,q=[],step=CUTTER_R*1.25;
   mill.spindleOn=true;mill.mode="AUTO";mill.paused=false;
   const y=Math.max(0,TOP-depth);
-  const x0=-W/2+MARGIN*dx+CUTTER_R,x1=W/2-MARGIN*dx-CUTTER_R;
-  const z0=-D/2+MARGIN*dz+CUTTER_R,z1=D/2-MARGIN*dz-CUTTER_R;
+  const x0=-W/2+MARGIN_MM+CUTTER_R,x1=W/2-MARGIN_MM-CUTTER_R;
+  const z0=-D/2+MARGIN_MM+CUTTER_R,z1=D/2-MARGIN_MM-CUTTER_R;
   q.push({type:"rapid",x:x0,y:safeY,z:z0});
   q.push({type:"feed",x:x0,y:y,z:z0});
   let z=z0,dir=1;
@@ -1621,7 +1733,7 @@ function tpMillFace(depth){
 function tpMillContour(depth,inset){
   const safeY=TOP+8,q=[],stepD=4,ins=inset||CUTTER_R;
   mill.spindleOn=true;mill.mode="AUTO";mill.paused=false;
-  const x0=-W/2+MARGIN*dx+ins,x1=W/2-MARGIN*dx-ins,z0=-D/2+MARGIN*dz+ins,z1=D/2-MARGIN*dz-ins;
+  const x0=-W/2+MARGIN_MM+ins,x1=W/2-MARGIN_MM-ins,z0=-D/2+MARGIN_MM+ins,z1=D/2-MARGIN_MM-ins;
   for(let d=stepD;d<=depth+0.01;d+=stepD){
     const y=Math.max(0,TOP-Math.min(d,depth));
     q.push({type:"rapid",x:x0,y:safeY,z:z0});
@@ -1639,7 +1751,7 @@ function tpMillChamfer(depth,cw){
   const safeY=TOP+8,q=[],w=cw||depth;
   mill.spindleOn=true;mill.mode="AUTO";mill.paused=false;
   const y=TOP-depth;
-  const x0=-W/2+MARGIN*dx+w,x1=W/2-MARGIN*dx-w,z0=-D/2+MARGIN*dz+w,z1=D/2-MARGIN*dz-w;
+  const x0=-W/2+MARGIN_MM+w,x1=W/2-MARGIN_MM-w,z0=-D/2+MARGIN_MM+w,z1=D/2-MARGIN_MM-w;
   q.push({type:"rapid",x:x0,y:safeY,z:z0});
   q.push({type:"feed",x:x0,y:y,z:z0});
   q.push({type:"feed",x:x1,y:y,z:z0});
