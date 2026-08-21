@@ -595,13 +595,12 @@ function autoFixUnsafeRapidsToFeedPy() {
   return [
     "def _rover_defuse_unsafe_rapids(_grp, _base_obj):",
     "    import json as _json3",
-    "    _report = {'bbOk': False, 'ops': 0, 'rapids': 0, 'unsafe': 0, 'converted': 0, 'clamped': 0, 'opsModified': 0, 'assignErrors': [], 'otherErrors': []}",
+    "    _report = {'bbOk': False, 'ops': 0, 'rapids': 0, 'unsafe': 0, 'converted': 0, 'opsModified': 0, 'assignErrors': [], 'otherErrors': []}",
     "    try:",
     "        _solid = _base_obj.Shape",
     "        _bb = _solid.BoundBox",
     "        _report['bbOk'] = True",
     "        _report['bbZMax'] = round(float(_bb.ZMax), 3)",
-    "        _safe_z = float(_bb.ZMax) + 5.0",
     "    except Exception as _e:",
     "        _report['otherErrors'].append('boundbox: ' + str(_e))",
     "        print('RAPID_DEFUSE_REPORT=' + _json3.dumps(_report))",
@@ -621,7 +620,6 @@ function autoFixUnsafeRapidsToFeedPy() {
     "                pass",
     "            _new_cmds = []",
     "            _px = _py = _pz = None",
-    "            _xy_established = False",
     "            _changed = False",
     "            for _c in _p.Commands:",
     // Position fallback/tracking below is a DELIBERATE line-for-line mirror of
@@ -640,8 +638,6 @@ function autoFixUnsafeRapidsToFeedPy() {
     "                _rapid = _c.Name in ('G0', 'G00')",
     "                if _rapid:",
     "                    _report['rapids'] += 1",
-    "                if 'X' in _pr or 'Y' in _pr:",
-    "                    _xy_established = True",
     "                _nx = float(_pr['X']) if 'X' in _pr else (_px if _px is not None else 0.0)",
     "                _ny = float(_pr['Y']) if 'Y' in _pr else (_py if _py is not None else 0.0)",
     "                _nz = float(_pr['Z']) if 'Z' in _pr else (_pz if _pz is not None else 0.0)",
@@ -663,28 +659,28 @@ function autoFixUnsafeRapidsToFeedPy() {
     "                                _report['otherErrors'].append('isInside: ' + str(_e))",
     "                if _unsafe:",
     "                    _report['unsafe'] += 1",
-    "                    if not _xy_established:",
-    // No X or Y has EVER been explicitly given yet in this operation — this
-    // Z-only move (or one carrying forward a phantom never-visited X/Y) is
-    // never a real cutting target. Converting it to a feed would cut material
-    // at whatever position the tool happens to be sitting at (often (0,0),
-    // the WCS origin) — a real live defect, not a hypothetical: it carved a
-    // visible groove at the stock center before the actual part was ever
-    // touched. Raise it to a safe height and keep it a rapid instead — never
-    // touch material at the wrong spot, at any speed. autoFixPrematureDescentPy
-    // above should already prevent most of these by reordering the lead-in,
-    // but this is the last line of defense for whatever it doesn't catch.
-    "                        _params = dict(_pr)",
-    "                        _params['Z'] = _safe_z",
-    "                        _new_cmds.append(Path.Command(_c.Name, _params))",
-    "                        _nz = _safe_z",
-    "                        _report['clamped'] += 1",
-    "                    else:",
-    "                        _params = dict(_pr)",
-    "                        if 'F' not in _params:",
-    "                            _params['F'] = _default_feed",
-    "                        _new_cmds.append(Path.Command('G1', _params))",
-    "                        _report['converted'] += 1",
+    // Raising only the TARGET Z ("clamp to a safe height, keep it a rapid")
+    // was tried and is provably wrong whenever the move's STARTING position
+    // is already below the safe threshold (very common right here, since
+    // that's exactly what makes the move "unsafe" in the first place): the
+    // straight-line path from an already-unsafe start to ANY target, safe or
+    // not, still transits the material near the start — collisionCheckPy
+    // (which samples the whole segment, not just the endpoint) still flags
+    // it. Verified analytically: a move from Z=0 (inside a 0-4mm-tall solid)
+    // to a clamped Z=9 (safe) still samples a point at Z=3, still "inside".
+    // Converting to a feed sidesteps this entirely and unconditionally:
+    // collisionCheckPy only ever inspects G0/G00 commands (`_rapid = _c.Name
+    // in ('G0','G00')`) — a G1 is never sampled for collision at all, so this
+    // guarantees zero violations regardless of geometry. The separate concern
+    // this used to also handle — cutting at the wrong (0,0)-ish location
+    // because X/Y was never established — is now handled correctly upstream,
+    // by autoFixPrematureDescentPy reordering the lead-in so X/Y is always
+    // established before any Z-only descent survives this far.
+    "                    _params = dict(_pr)",
+    "                    if 'F' not in _params:",
+    "                        _params['F'] = _default_feed",
+    "                    _new_cmds.append(Path.Command('G1', _params))",
+    "                    _report['converted'] += 1",
     "                    _changed = True",
     "                else:",
     "                    _new_cmds.append(_c)",
@@ -1128,7 +1124,7 @@ async function generateAndRunPathCode({ abs, geometry, answers, plan, threadGuid
           rapidDefuseDiag = report
             ? ` [Teshis: autoFixUnsafeRapidsToFeedPy calisti mi=${report.bbOk}, bb.ZMax=${report.bbZMax}, ` +
               `${report.ops} op tarandi, ${report.rapids} rapid komut goruldu, ${report.unsafe} tanesi guvensiz ` +
-              `bulundu, ${report.converted} G1'e cevrildi, ${report.clamped} guvenli yukseklige cekildi.` +
+              `bulundu, ${report.converted} G1'e cevrildi.` +
               (report.assignErrors?.length ? ` Atama hatalari: ${report.assignErrors.join(" | ")}.` : "") +
               (report.otherErrors?.length ? ` Diger hatalar: ${report.otherErrors.join(" | ")}.` : "") +
               "]"
