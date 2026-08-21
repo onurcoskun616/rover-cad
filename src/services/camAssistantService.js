@@ -665,9 +665,17 @@ function autoFixFaceBoundaryPy() {
     "            _stock_top = max(_stock_top, float(_stk.Shape.BoundBox.ZMax))",
     "    except Exception:",
     "        pass",
-    // No excess above the part means there is nothing to face off, so fall back
-    // to the shallow skim rather than emitting a zero-depth operation.
-    "    _final = _part_top if _stock_top > _part_top + 1e-6 else _part_top - 1.0",
+    // Facing runs from the block's top down to the finished top surface. If the
+    // block is no taller than the part there is nothing above it to remove, and
+    // an earlier version fell back to "skim 1mm" — which cuts 1mm INTO the
+    // finished part and delivers it undersize. A facing pass with no material
+    // to take is not a shallow pass, it is no pass: leave such an operation
+    // alone and say so, rather than inventing depth out of the part itself.
+    "    _has_excess = _stock_top > _part_top + 1e-6",
+    "    _final = _part_top",
+    "    if not _has_excess:",
+    "        print('FACE_FIX=0 (blok parcadan yuksek degil: yuzeylenecek malzeme yok)')",
+    "        return",
     "    _targets = []",
     "    for _op in _grp:",
     "        _cls = ''",
