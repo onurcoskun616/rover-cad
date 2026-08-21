@@ -260,6 +260,21 @@ def get_all_operations(session_id: int) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def get_latest_operation(session_id: int) -> dict | None:
+    """Most recent operation for a session. A `session_key` lives indefinitely
+    in the browser's localStorage, so get_all_operations() can span days/weeks
+    of unrelated testing (different stock sizes, even lathe ops mixed with
+    mill ops) — .nc exports must reflect only the operation the user just ran,
+    not that whole history."""
+    conn = get_db()
+    row = conn.execute(
+        "SELECT * FROM operations WHERE session_id = ? ORDER BY op_index DESC LIMIT 1",
+        (session_id,),
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
 def build_llm_context(session_id: int, machine_state: dict) -> list[dict]:
     """Build message list for LLM. Uses summaries for old messages with G-code."""
     conn = get_db()
@@ -421,25 +436,25 @@ def on_get_master_gcode(data):
     if not row:
         emit("master_gcode", {"gcode": "", "count": 0})
         return
-    ops = get_all_operations(row["id"])
     conn.close()
+
+    op = get_latest_operation(row["id"])
+    if not op:
+        emit("master_gcode", {"gcode": "", "count": 0})
+        return
 
     lines = [
         f"(Rover CNC · Exported {datetime.now().strftime('%Y-%m-%d %H:%M')})",
         f"(Session: {session_key})",
-        f"(Operations: {len(ops)})",
+        f"(--- Op {op['op_index']}: {op['description'][:60]} ---)",
+        op["gcode_raw"],
         "",
+        "M30",
     ]
-    for op in ops:
-        lines.append(f"(--- Op {op['op_index']}: {op['description'][:60]} ---)")
-        lines.append(op["gcode_raw"])
-        lines.append("")
-
-    lines.append("M30")
 
     emit("master_gcode", {
         "gcode": "\n".join(lines),
-        "count": len(ops),
+        "count": 1,
     })
 
 # ---------------------------------------------------------------------------
@@ -474,15 +489,15 @@ def export_nc(session_key):
     if not row:
         conn.close()
         return "session not found", 404
-    ops = get_all_operations(row["id"])
     conn.close()
 
+    op = get_latest_operation(row["id"])
     lines = [
         f"(Rover CNC · {datetime.now().strftime('%Y-%m-%d %H:%M')})",
         f"(Session: {session_key})",
         "",
     ]
-    for op in ops:
+    if op:
         lines.append(f"(--- Op {op['op_index']} ---)")
         lines.append(op["gcode_raw"])
         lines.append("")

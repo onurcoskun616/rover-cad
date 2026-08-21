@@ -2695,7 +2695,9 @@ function recordLastLocalOp() {
   if (!taken) return;
   var gcode = taken.type === "lathe" ? latheQueueToGcode(taken.queue) : millQueueToGcode(taken.queue);
   if (!gcode) return;
-  masterGcode.push({ index: opCounter++, gcode: gcode, timestamp: new Date().toISOString() });
+  // Replace, not push: only the just-run op should ever be exported, not
+  // every local op run since the page loaded.
+  masterGcode = [{ index: opCounter++, gcode: gcode, timestamp: new Date().toISOString() }];
 }
 
 /* ------------------------------------------------------------------ */
@@ -2762,24 +2764,24 @@ function wsConnect() {
 
   socket.on("master_gcode", function(data) {
     var serverGcode = data.gcode || "";
-    if (masterGcode.length === 0) {
-      // No locally-run (non-LLM) operations to add — server's export is complete as-is.
-      if (serverGcode) { downloadNcFile(serverGcode, wsSessionKey); }
-      else { r().taiMsg("Henüz kaydedilmiş G-code operasyonu yok.", "bot"); }
+    if (masterGcode.length > 0) {
+      // A local command (delik/cep/örnek parça/vb.) never reaches the server,
+      // so it can't be "the latest op" there — but handleGcodeBlocks() clears
+      // this buffer the moment a newer LLM op arrives, so if it's non-empty
+      // here it IS the most recent action. Export just that, not whatever
+      // (possibly older, unrelated) op the server also has on file.
+      var lines = ["(Rover CNC · Local Export)", "(Date: " + new Date().toISOString().slice(0, 16) + ")", ""];
+      masterGcode.forEach(function(op) {
+        lines.push("(--- Op " + op.index + " ---)");
+        lines.push(op.gcode);
+        lines.push("");
+      });
+      lines.push("M30");
+      downloadNcFile(lines.join("\n"), wsSessionKey);
       return;
     }
-    // Local commands (delik/cep/örnek parça/vb.) never reach the server, so
-    // its export is missing them — append them here before downloading.
-    var lines = [];
-    if (serverGcode) lines.push(serverGcode.replace(/\bM30\s*$/i, "").trimEnd());
-    else lines.push("(Rover CNC · Local Export)", "(Date: " + new Date().toISOString().slice(0, 16) + ")", "");
-    masterGcode.forEach(function(op) {
-      lines.push("(--- Local Op " + op.index + " ---)");
-      lines.push(op.gcode);
-      lines.push("");
-    });
-    lines.push("M30");
-    downloadNcFile(lines.join("\n"), wsSessionKey);
+    if (serverGcode) { downloadNcFile(serverGcode, wsSessionKey); }
+    else { r().taiMsg("Henüz kaydedilmiş G-code operasyonu yok.", "bot"); }
   });
 
   hookChatInput();
@@ -2831,13 +2833,13 @@ function handleGcodeBlocks(blocks, opIndices) {
   var stockDims = im
     ? { w: R.W, d: R.D, h: R.TOP }
     : { len: R.STOCK_LEN, r: R.STOCK_R };
+  // The server already persists each LLM-driven block via save_operation()
+  // and "nc kaydet" now asks it for just the latest one — no need to track
+  // it here too. But an OLDER locally-run op (delik/cep/örnek parça) may
+  // still be sitting in masterGcode; since this LLM op is now the most
+  // recent action, that stale local entry must not be exported instead of it.
+  masterGcode = [];
   blocks.forEach(function(block, i) {
-    masterGcode.push({
-      index: opIndices[i] !== undefined ? opIndices[i] : opCounter++,
-      gcode: block,
-      timestamp: new Date().toISOString(),
-    });
-
     const parsed = R.parseGcode(block, im ? "mill" : "lathe");
     if (parsed.q.length > 0) {
       if (im) {
