@@ -2671,7 +2671,14 @@ const WS_URL = window.ROVER_WS_URL || (
     ? "http://localhost:5050"
     : "https://rover-cnc-backend.onrender.com"
 );
-const ENABLE_LLM = window.ROVER_ENABLE_LLM !== false;
+// Production default is OFF: every supported shape (delik/cep/kanal/altıgen
+// cep/örnek parça/torna eşdeğerleri) now runs through deterministic,
+// parametric toolpath generators — no LLM involved, no risk of malformed or
+// unsafe coordinates. The LLM chat path (server/app.py's on_chat_message)
+// still exists behind this flag for experimentation, but must be explicitly
+// opted into (window.ROVER_ENABLE_LLM = true) — it must never be the
+// default for a page machinists actually run G-code from.
+const ENABLE_LLM = window.ROVER_ENABLE_LLM === true;
 
 /* ------------------------------------------------------------------ */
 /*  STATE                                                              */
