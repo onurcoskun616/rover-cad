@@ -1294,6 +1294,25 @@ function postEpiloguePy(gcodePath, postName, isTorna) {
     // still be matched back to the right tool downstream. Keyed by Label
     // because that is the name the post writes into its own
     // "(Begin operation: <Label>)" marker.
+    // Blogun ve parcanin Z kotlari. G-code, STEP'in kendi koordinatlarinda
+    // uretiliyor: bu parcada Z0 parcanin ALTI. Operator ise tezgahta Z'yi
+    // MALZEMENIN USTUNDE sifirlar. Ikisi ayrisinca kodun Z4/Z0 dedigi yer,
+    // tezgahta malzeme ustunun 4mm ve 0mm USTU olur — takim malzemeye hic
+    // girmez. Kaydirmayi Node tarafinda yapabilmek icin referans kotu buradan
+    // bildiriliyor.
+    "try:",
+    "    _zt = float(base.Shape.BoundBox.ZMax)",
+    "    _zb = float(base.Shape.BoundBox.ZMin)",
+    "    _zs = _zt",
+    "    try:",
+    "        _stk = getattr(job, 'Stock', None)",
+    "        if _stk is not None:",
+    "            _zs = max(_zs, float(_stk.Shape.BoundBox.ZMax))",
+    "    except Exception:",
+    "        pass",
+    "    print('Z_EXTENTS=%.4f,%.4f,%.4f' % (_zb, _zt, _zs))",
+    "except Exception as _e:",
+    "    print('Z_EXTENTS=err ' + str(_e))",
     "import json as _json_tm",
     "_tmap = []",
     "for _op in _grp:",
@@ -1336,12 +1355,21 @@ export function parseToolMap(text) {
 // carry tool changes is left untouched — that post meant what it wrote.
 // `M6` rides along for real controls that expect it; the simulator ignores it.
 // Elle degisim yorumunda slotun hangi takim oldugunu yaz — operatorun eline
-// "T4" degil "T4 (O20mm Parmak Freze)" gecsin. Magazin okunamazsa slot numarasi
+// "T4" degil "T4 - O20mm Parmak Freze" gecsin. Magazin okunamazsa slot numarasi
 // tek basina da is gorur, o yuzden hata yutuluyor.
+//
+// Takim adi PARANTEZSIZ donuyor ve icindeki parantezler de temizleniyor: bu
+// metin zaten parantezli bir yorumun ICINE giriyor ve RS274NGC ic ice yorum
+// kabul etmez. Mach3 bunu yukleme aninda reddetti — "Nested comment found,
+// Block = (TAKIM: T1 (O6 Parmak Freze) -- elle takin) Line 8" — ve program hic
+// baslamadi. Magazin adlari kullanici tarafindan yazildigi icin parantez
+// icerebilirler, o yuzden ada guvenmeyip burada siyiriyoruz.
 function slotName(slot) {
   try {
     const tool = listMagazineTools().find((t) => slotNumberForTool(t.id) === slot);
-    return tool ? ` (${tool.name})` : "";
+    if (!tool?.name) return "";
+    const safe = String(tool.name).replace(/[()]/g, "").trim();
+    return safe ? ` - ${safe}` : "";
   } catch {
     return "";
   }
@@ -1520,6 +1548,71 @@ function normalizeForRealControllers(gcodePath, answers) {
     );
   } catch (err) {
     console.warn("G-code kontrolcu uyumu uygulanamadi:", err.message);
+  }
+}
+
+/** Read the "Z_EXTENTS=zmin,zmax,stockTop" line postEpiloguePy() prints. */
+export function parseZExtents(text) {
+  const m = /Z_EXTENTS=(-?[\d.]+),(-?[\d.]+),(-?[\d.]+)/.exec(String(text ?? ""));
+  if (!m) return null;
+  const [partBottom, partTop, stockTop] = m.slice(1, 4).map(Number);
+  if (![partBottom, partTop, stockTop].every(Number.isFinite)) return null;
+  return { partBottom, partTop, stockTop };
+}
+
+// FreeCAD writes G-code in the STEP file's own coordinates. For this part that
+// put Z0 at the part's BOTTOM, so every cut came out positive (Z4, Z0) with
+// rapids at Z13/Z15. A machinist zeroes Z on the TOP OF THE MATERIAL, which is
+// what the wizard's WCS answer says ("Z0 ust"). Under that zero the machine
+// reads Z4 and Z0 as 4mm and 0mm ABOVE the surface: the cutter never touches
+// the work. That is exactly what the router did — "freze inmedi, yukari cikti".
+//
+// So shift every Z by -(reference height) to match the declared zero. The
+// reference is the stock top for a top-surface WCS (that is the face the
+// operator touches off on) and the part bottom for a bottom-surface WCS (which
+// is already the file's own origin, hence no shift). Only Z words move; X, Y,
+// I, J and feeds are untouched, so the geometry is identical — only the datum
+// changes.
+function applyWcsZeroShift(gcodePath, answers, zExtents) {
+  if (!zExtents) return;
+  const wcs = String(answers?.wcs ?? "").toLowerCase();
+  // "ust yuzey" / "ust" -> top-of-material zero. A bottom-surface WCS matches
+  // the file as generated; anything unrecognised is left alone rather than
+  // guessed at, because shifting to the wrong datum is worse than not shifting.
+  const topZero = wcs.includes("ust");
+  if (!topZero) return;
+  const shift = zExtents.stockTop;
+  if (!Number.isFinite(shift) || Math.abs(shift) < 1e-6) return;
+
+  let raw;
+  try {
+    raw = fs.readFileSync(gcodePath, "utf-8");
+  } catch {
+    return;
+  }
+  let moved = 0;
+  const shifted = raw
+    .split(/\r?\n/)
+    .map((line) => {
+      const code = line.replace(/\(.*?\)/g, "");
+      if (!/^\s*(G0?[0-3]\b|G1\b)/.test(code)) return line;
+      return line.replace(/(^|\s)Z(-?[\d.]+)/g, (all, lead, val) => {
+        const z = Number(val);
+        if (!Number.isFinite(z)) return all;
+        moved += 1;
+        return `${lead}Z${(z - shift).toFixed(3)}`;
+      });
+    })
+    .join("\n");
+  if (!moved) return;
+  try {
+    fs.writeFileSync(gcodePath, shifted, "utf-8");
+    console.log(
+      `Z sifir noktasi WCS'e tasindi: ${moved} Z degeri ${shift.toFixed(3)}mm asagi ` +
+      `kaydirildi (Z0 artik malzeme ustu).`,
+    );
+  } catch (err) {
+    console.warn("Z kaydirma uygulanamadi:", err.message);
   }
 }
 
@@ -1877,6 +1970,7 @@ export async function generateCamGcodeFromPlan(stepPath, answers, plan, context 
     }
     // Before any dialect transform, so injected changes get translated too.
     ensureToolChanges(gcodePath, parseToolMap(text), answers);
+    applyWcsZeroShift(gcodePath, answers, parseZExtents(text));
     normalizeForRealControllers(gcodePath, answers);
     applyControllerTransform(gcodePath, postName, abs, answers);
     // Last: the dialect transforms rewrite the file wholesale.
@@ -1903,6 +1997,7 @@ export async function generateCamGcodeFromPlan(stepPath, answers, plan, context 
   }
   if (!fs.existsSync(gcodePath)) throw new Error("G-code dosyasi olusmadi");
   ensureToolChanges(gcodePath, parseToolMap(runText), answers);
+  applyWcsZeroShift(gcodePath, answers, parseZExtents(runText));
   normalizeForRealControllers(gcodePath, answers);
   applyControllerTransform(gcodePath, postName, abs, answers);
   brandGcodeHeader(gcodePath);
