@@ -8,7 +8,6 @@ import { config } from "../config.js";
 import { sanitizeFreeCADCode } from "./exportService.js";
 import { resolveStepPath, describeStepGeometry } from "./camService.js";
 import { camParamsBlock } from "./camWizardService.js";
-import { listMagazineTools, slotNumberForTool } from "./cncMagazineService.js";
 import {
   detectThreads,
   detectThreadMethod,
@@ -367,55 +366,6 @@ function plungeCheckPy(isTorna) {
   ].join("\n");
 }
 
-// Trusted epilogue (NOT model output): flag operations whose toolpaths are
-// byte-for-byte identical to an earlier one. detectDuplicateDepthSplit() below
-// spots the same mistake, but only among operations that ALSO tripped the
-// plunge limit — so a level split that collapsed onto shallow, legal depths
-// sailed straight through. Live case: ProfileRough_L0/_L1 and
-// ProfileFinish_L0/_L1/_L2 all cut the exact same contour at Z3 then Z0,
-// five times, because FreeCAD's opExecute reset every level's StartDepth and
-// FinalDepth back to the same defaults during recompute. The part still came
-// out, so nothing complained — it just air-cut four extra times and never
-// stepped down. Identical paths are never intentional: two operations that
-// remove the same material are always a level split that did not take.
-function duplicateOpCheckPy() {
-  return [
-    "import json as _json_dup, hashlib as _hashlib_dup",
-    "_dup_ops = []",
-    "_seen_paths = {}",
-    "for _op in _grp:",
-    "    _p = getattr(_op, 'Path', None)",
-    "    if _p is None:",
-    "        continue",
-    "    _lbl = str(getattr(_op, 'Label', _op.Name))",
-    "    _sig = []",
-    "    for _c in _p.Commands:",
-    "        _pr = _c.Parameters",
-    "        _sig.append(_c.Name + ':' + ','.join(",
-    "            '%s%.4f' % (_k, float(_pr[_k])) for _k in sorted(_pr) if _k in 'XYZIJK'))",
-    "    if len(_sig) < 2:",
-    "        continue",
-    "    _h = _hashlib_dup.md5('|'.join(_sig).encode('utf-8')).hexdigest()",
-    "    if _h in _seen_paths:",
-    "        _dup_ops.append({'op': _lbl, 'sameAs': _seen_paths[_h]})",
-    "    else:",
-    "        _seen_paths[_h] = _lbl",
-    'print("DUPLICATE_OPS=" + _json_dup.dumps(_dup_ops))',
-  ].join("\n");
-}
-
-/** Read the "DUPLICATE_OPS=[...]" line duplicateOpCheckPy() prints. */
-export function parseDuplicateOps(text) {
-  const match = String(text ?? "").match(/DUPLICATE_OPS=(\[.*\])/);
-  if (!match) return [];
-  try {
-    const parsed = JSON.parse(match[1]);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
-
 // Read the "PLUNGE_VIOLATIONS=[...]" line the trusted epilogue prints (see
 // plungeCheckPy above) out of the FreeCAD tool's combined stdout text.
 export function parsePlungeViolations(text) {
@@ -502,344 +452,61 @@ export function parseCollisionViolations(text) {
   }
 }
 
-// Trusted transform (NOT model output): make the FreeCAD Job's Stock match the
-// raw block the user actually entered in the CAM wizard. `PathJob.Create(...,
-// None)` leaves the Job on FreeCAD's default stock — the part's own bounding
-// box plus a ~1mm skin — so every operation gets planned for a block that
-// shrink-wraps the finished part. Live testing showed exactly what that costs:
-// on a real 80x143x20 plate holding a ~20x23x13 hexagon, the FaceMill skimmed a
-// 4x7mm rectangle (the default stock's whole top) instead of the plate's, the
-// Profile traced the outline once at a single depth instead of descending
-// through 20mm of material, and every ClearanceHeight/SafeHeight came out below
-// the plate's real top — so the CNC simulator, which renders the block the user
-// entered, saw each retract rapid drive straight into stock the toolpath never
-// knew existed, and the finished "part" was just its outline scratched into an
-// otherwise untouched plate. Setting the stock here rather than in the prompt is
-// deliberate: the model is told the block dimensions in [CAM_PARAMETRELERI] and
-// still left the Job on its default stock, and this is a property with one
-// correct value that can be computed outright.
-//
-// Injected immediately AFTER the Job is created and BEFORE the model's
-// operations are built, because operations read the stock when their paths are
-// computed — setting it afterwards would leave already-computed depths and
-// boundaries derived from the default block.
-//
-// Extents go on symmetrically in X/Y (part centred in the block) with ALL the
-// spare Z above the part, mirroring how a block is actually clamped: the part's
-// bottom sits on the fixture and the excess on top is what gets faced off.
-// Skipped when the entered block is smaller than the part on any axis — that
-// part cannot be made from that block, and silently shrinking the stock would
-// hide the mistake instead of surfacing it.
-function realStockPy(sx, sy, sz) {
+// Trusted epilogue (NOT model output): PREVENTIVE, deterministic fix for a
+// real live defect — a machinist reported the tool cutting a visible groove
+// at the STOCK CENTER before ever machining the actual part, traced to the
+// exported G-code's very own lead-in: `G1 Z11.500` / `G1 Z5.000` right after
+// "(Begin operation: ProfileRough)", BOTH pure Z-only moves with no X/Y at
+// all, followed only THEN by `G0 X17.879 Y18.934` relocating to the real
+// target. FreeCAD (or a too-low ClearanceHeight/SafeHeight, itself computed
+// relative to StartDepth rather than the real stock top — see
+// autoFixClearanceHeightsPy below) generated a lead-in that descends BEFORE
+// ever moving to the operation's real X/Y — meaning it engages material at
+// whatever position the tool happened to be at (often (0,0), the WCS
+// origin), not the intended cut location. Converting that descent to a safe
+// FEED (autoFixUnsafeRapidsToFeedPy below) only fixes the CRASH risk — it
+// still cuts at the wrong spot, just slowly. The only correct fix is
+// positional: relocate X/Y to the real target FIRST, while still at
+// whatever height the lead-in started from, THEN replay the original Z-only
+// moves (now at the correct, already-established position). G-code in this
+// project is always absolute (G17 G90), so reordering never changes what a
+// Z-only move actually does once X/Y is established — it only changes WHEN.
+// Runs FIRST in the epilogue chain, before any collision-detection-based fix
+// below, so those operate on an already-correctly-ordered toolpath. Leading
+// non-motion commands (operation-start comments, M3/T-code) are left exactly
+// where they are — only the first block of Z-only motion commands preceding
+// the operation's first X/Y-bearing move gets hoisted after it. Verified
+// with a Python simulation reproducing the exact reported command sequence,
+// plus regression checks for already-correctly-ordered operations and
+// leading comment/M-code preservation.
+function autoFixPrematureDescentPy() {
   return [
-    "def _rover_real_stock(_doc, _job, _base_obj, _sx, _sy, _sz):",
-    "    try:",
-    "        _bb = _base_obj.Shape.BoundBox",
-    "        _stock = _job.Stock",
-    "    except Exception as _e:",
-    "        print('REAL_STOCK=skipped (' + str(_e) + ')')",
-    "        return",
-    "    if _stock is None:",
-    "        print('REAL_STOCK=skipped (job has no Stock)')",
-    "        return",
-    "    _px = float(_bb.XLength); _py = float(_bb.YLength); _pz = float(_bb.ZLength)",
-    "    if _sx + 1e-6 < _px or _sy + 1e-6 < _py or _sz + 1e-6 < _pz:",
-    "        print('REAL_STOCK=skipped (block %gx%gx%g smaller than part %gx%gx%g)' % (_sx, _sy, _sz, _px, _py, _pz))",
-    "        return",
-    "    _ext = (( 'ExtXneg', (_sx - _px) / 2.0), ('ExtXpos', (_sx - _px) / 2.0),",
-    "            ('ExtYneg', (_sy - _py) / 2.0), ('ExtYpos', (_sy - _py) / 2.0),",
-    "            ('ExtZneg', 0.0), ('ExtZpos', _sz - _pz))",
-    "    _n = 0",
-    "    for _k, _v in _ext:",
-    "        if hasattr(_stock, _k):",
-    "            try:",
-    "                setattr(_stock, _k, _v)",
-    "                _n += 1",
-    "            except Exception:",
-    "                pass",
-    "    if _n:",
-    "        _doc.recompute()",
-    "        print('REAL_STOCK=%gx%gx%g' % (_sx, _sy, _sz))",
-    "    else:",
-    "        print('REAL_STOCK=skipped (stock exposes no Ext* properties)')",
-    `_rover_real_stock(doc, job, base, ${sx}, ${sy}, ${sz})`,
-  ].join("\n");
-}
-
-// Splice realStockPy() into the model's script on the line after the Job is
-// created, matching that line's indentation (the script builds the Job inside a
-// function body, so a flush-left block would be a syntax error). Returns the
-// code untouched when the wizard has no block dimensions or the Job line isn't
-// where the prompt mandates it — a missing stock override only costs the fix,
-// while a bad splice would cost the whole run.
-function injectRealStockPy(code, answers) {
-  const sx = positiveNumberOrNull(answers?.stockX);
-  const sy = positiveNumberOrNull(answers?.stockY);
-  const sz = positiveNumberOrNull(answers?.stockZ);
-  if (!sx || !sy || !sz) return code;
-  const lines = code.split("\n");
-  const idx = lines.findIndex((l) => /^\s*job\s*=.*PathJob\s*\.\s*Create\s*\(/.test(l));
-  if (idx < 0) return code;
-  const indent = lines[idx].match(/^\s*/)[0];
-  const block = realStockPy(sx, sy, sz)
-    .split("\n")
-    .map((l) => (l ? indent + l : l));
-  lines.splice(idx + 1, 0, ...block);
-  return lines.join("\n");
-}
-
-// Sanitize the model's script, then give the Job the user's real stock block.
-// Shared by both run paths (fresh generation and the re-run of an approved
-// preview's stored code) so an exported G-code can never be planned against a
-// different block than the preview the user approved.
-function preparePathCodePy(code, answers) {
-  return wrapWithTracebackPy(injectRealStockPy(sanitizeFreeCADCode(code), answers));
-}
-
-// Trusted epilogue (NOT model output): force every MillFace operation to face
-// the RAW BLOCK's top. The cam-code prompt already spells this out, and the
-// model kept pinning `Base` to the part's own top faces anyway — so MillFace
-// cleared that little island instead of the block. On a 98x156 plate holding a
-// ~57x51 part that came out as a handful of disconnected diagonal strokes that
-// read as a letter scratched into the stock, plus a stray plunge out where the
-// island's first pass started, while the rest of the block's top was never
-// touched. Same lesson as autoFixClearanceHeightsPy above: when a property has
-// exactly one correct value, set the property instead of asking again.
-//
-// Depths go with it — facing runs from the block's top down to the finished top
-// surface, since that gap IS the excess this operation exists to remove — and
-// are re-asserted after the recompute because FreeCAD's own opExecute resets
-// them to the operation's defaults, which is what collapsed facing into a
-// single pass at the part's top. Must run BEFORE autoFixDeepPlungesPy: that one
-// hand-edits Path.Commands in memory and a later recompute would undo its work.
-function autoFixFaceBoundaryPy() {
-  return [
-    // A facing op that emits only a clearance move (no X/Y anywhere) removed
-    // nothing. On a read failure assume it cuts, so a property we could not
-    // inspect never triggers a rollback.
-    "def _rover_face_cuts(_op):",
-    "    try:",
+    "def _rover_fix_premature_descent(_grp):",
+    "    for _op in _grp:",
     "        _p = getattr(_op, 'Path', None)",
     "        if _p is None:",
-    "            return False",
-    "        for _c in _p.Commands:",
-    "            if 'X' in _c.Parameters or 'Y' in _c.Parameters:",
-    "                return True",
-    "    except Exception:",
-    "        return True",
-    "    return False",
-    // The part's genuinely horizontal top faces, by FreeCAD face name. A facing
-    // op pointed at a vertical wall produces nothing — you cannot face-mill the
-    // side of a part — and that is exactly what the live failure turned out to
-    // be: boundary and depths were already correct (Stock, 20->10) and the path
-    // was still empty, while FreeCAD reported the selected face as Face5 at
-    // y=-17.32, z=1.47, a hexagon SIDE wall halfway up the part.
-    "def _rover_top_faces(_base_obj):",
-    "    _names = []",
-    "    try:",
-    "        _sh = _base_obj.Shape",
-    "        _zmax = float(_sh.BoundBox.ZMax)",
-    "        for _i, _f in enumerate(_sh.Faces):",
-    "            try:",
-    "                if type(_f.Surface).__name__ != 'Plane':",
-    "                    continue",
-    "                if abs(float(_f.normalAt(0, 0).z)) < 0.999:",
-    "                    continue",
-    "                if abs(float(_f.BoundBox.ZMax) - _zmax) > 1e-6:",
-    "                    continue",
-    "                _names.append('Face%d' % (_i + 1))",
-    "            except Exception:",
-    "                continue",
-    "    except Exception:",
-    "        pass",
-    "    return _names",
-    "def _rover_fix_face_ops(_doc, _grp, _base_obj, _job):",
-    "    try:",
-    "        _part_top = float(_base_obj.Shape.BoundBox.ZMax)",
-    "    except Exception:",
-    "        return",
-    "    _stock_top = _part_top",
-    "    try:",
-    "        _stk = getattr(_job, 'Stock', None)",
-    "        if _stk is not None:",
-    "            _stock_top = max(_stock_top, float(_stk.Shape.BoundBox.ZMax))",
-    "    except Exception:",
-    "        pass",
-    // Facing runs from the block's top down to the finished top surface. If the
-    // block is no taller than the part there is nothing above it to remove, and
-    // an earlier version fell back to "skim 1mm" — which cuts 1mm INTO the
-    // finished part and delivers it undersize. A facing pass with no material
-    // to take is not a shallow pass, it is no pass: leave such an operation
-    // alone and say so, rather than inventing depth out of the part itself.
-    "    _has_excess = _stock_top > _part_top + 1e-6",
-    "    _final = _part_top",
-    "    if not _has_excess:",
-    "        print('FACE_FIX=0 (blok parcadan yuksek degil: yuzeylenecek malzeme yok)')",
-    "        return",
-    "    _targets = []",
-    "    for _op in _grp:",
-    "        _cls = ''",
-    "        try:",
-    "            _cls = type(_op.Proxy).__name__",
-    "        except Exception:",
-    "            pass",
-    "        _name = str(getattr(_op, 'Name', '')) + str(getattr(_op, 'Label', ''))",
-    "        if 'Face' not in _cls and 'Face' not in _name:",
     "            continue",
-    // BoundaryShape is the knob that decides how far the clearing reaches:
-    // 'Face Region' stops at the selected face's own outline, 'Stock' runs out
-    // to the block. Base stays exactly as the model set it — an earlier version
-    // cleared it too, on the theory that pinning Base to the part's top faces
-    // was what confined the operation, and that produced a FaceMill with no
-    // toolpath at all (a lone clearance move and nothing else). Base names the
-    // surface to face; BoundaryShape decides how wide. Only the second one was
-    // ever wrong.
-    "        _prev_boundary = getattr(_op, 'BoundaryShape', None)",
-    "        _prev_base = getattr(_op, 'Base', None)",
-    "        _prev_sd = _prev_fd = None",
-    "        try:",
-    "            _prev_sd = float(_op.StartDepth.Value)",
-    "            _prev_fd = float(_op.FinalDepth.Value)",
-    "        except Exception:",
-    "            pass",
-    // The boundary is a bonus; the depths are the point. An earlier version
-    // skipped the whole operation when BoundaryShape was missing or refused the
-    // value — which meant the depths were never corrected either, and a face op
-    // left skimming 10mm above the part went out untouched, cutting nothing but
-    // air. Widening the boundary is worth attempting, and worth nothing if it
-    // costs the fix that actually matters.
-    "        if _prev_boundary is not None:",
-    "            try:",
-    "                _op.BoundaryShape = 'Stock'",
-    "            except Exception:",
-    "                pass",
-    // "Face the whole block" in FreeCAD is an EMPTY Base plus a Stock boundary:
-    // with Base naming a face, MillFace clears that face's own region inset by
-    // the tool radius and the Stock boundary does not widen it — on a 40mm
-    // hexagon under a 25mm cutter that came out as an 18x14mm patch in the
-    // middle of an 80x143 block. An earlier attempt at an empty Base looked
-    // like it produced nothing, but that was while the depths still sat in air
-    // above the part, so it was never actually tested. The fallbacks below
-    // cover it if this turns out to be empty on its own merits.
-    "        try:",
-    "            _op.Base = []",
-    "        except Exception:",
-    "            pass",
-    "        for _prop, _val in (('StartDepth', _stock_top), ('FinalDepth', _final)):",
-    "            if hasattr(_op, _prop):",
-    "                try:",
-    "                    setattr(_op, _prop, _val)",
-    "                except Exception:",
-    "                    pass",
-    "        _targets.append((_op, _prev_boundary, _prev_base, _prev_sd, _prev_fd))",
-    "    if not _targets:",
-    "        print('FACE_FIX=0')",
-    "        return",
-    "    _doc.recompute()",
-    "    _again = False",
-    "    for _op, _prev, _pbase, _psd, _pfd in _targets:",
-    "        try:",
-    "            if (abs(float(_op.StartDepth.Value) - _stock_top) > 1e-6",
-    "                    or abs(float(_op.FinalDepth.Value) - _final) > 1e-6):",
-    "                _op.StartDepth = _stock_top",
-    "                _op.FinalDepth = _final",
-    "                _again = True",
-    "        except Exception:",
-    "            pass",
-    "    if _again:",
-    "        _doc.recompute()",
-    // Never ship a facing operation that cuts nothing. If forcing the boundary
-    // left the op with no XY motion at all, put the original boundary back: a
-    // narrower face pass still removes material, an empty one is strictly worse
-    // than what the model wrote.
-    // Roll back EVERYTHING this function changed, not just the boundary. An
-    // earlier version restored BoundaryShape alone and left the forced depths
-    // in place, so a face op that came out empty stayed empty after the
-    // "rollback" — which is how an empty FaceMill (one clearance move, no
-    // cutting at all) still reached the machine. Undoing a subset of a failed
-    // change is not a rollback.
-    // Still nothing? Re-aim the operation at the part's real top faces before
-    // concluding the settings were wrong — a Base pointing at a side wall
-    // defeats every correct boundary and depth above it.
-    "    _rebased = False",
-    "    _top_faces = _rover_top_faces(_base_obj)",
-    "    for _op, _prev, _pbase, _psd, _pfd in _targets:",
-    "        if _rover_face_cuts(_op) or not _top_faces:",
+    "        _cmds = list(_p.Commands)",
+    "        _xy_idx = None",
+    "        _pending = []",
+    "        for _i, _c in enumerate(_cmds):",
+    "            _pr = _c.Parameters",
+    "            if 'X' in _pr or 'Y' in _pr:",
+    "                _xy_idx = _i",
+    "                break",
+    "            if 'X' in _pr or 'Y' in _pr or 'Z' in _pr:",
+    "                _pending.append(_i)",
+    "        if _xy_idx is None or not _pending:",
     "            continue",
-    "        try:",
-    "            _op.Base = [(_base_obj, _top_faces)]",
-    "            _rebased = True",
-    "        except Exception:",
-    "            pass",
-    "    if _rebased:",
-    "        _doc.recompute()",
-    "    _reverted = 0",
-    "    _tried = []",
-    "    for _op, _prev, _pbase, _psd, _pfd in _targets:",
-    "        if _rover_face_cuts(_op):",
-    "            continue",
-    "        try:",
-    "            if _prev is not None:",
-    "                _op.BoundaryShape = _prev",
-    "            if _pbase is not None:",
-    "                _op.Base = _pbase",
-    "            if _psd is not None:",
-    "                _op.StartDepth = _psd",
-    "            if _pfd is not None:",
-    "                _op.FinalDepth = _pfd",
-    "            _tried.append((_op, _prev, _pbase, _psd, _pfd))",
-    "        except Exception:",
-    "            pass",
-    "    if _tried:",
-    "        _doc.recompute()",
-    // Restoring is only an improvement if what we restored actually cuts. The
-    // model's own depths are how this started: a face op skimming a 1mm layer
-    // ~10mm ABOVE a 10mm-tall part, entirely in air, producing nothing. Handing
-    // that back is not a rollback, it is the original bug. When neither setting
-    // cuts, keep the forced one — it is at least aimed at the block's real top.
-    "    _refixed = False",
-    "    for _op, _prev, _pbase, _psd, _pfd in _tried:",
-    "        if _rover_face_cuts(_op):",
-    "            _reverted += 1",
-    "            continue",
-    "        try:",
-    "            _op.BoundaryShape = 'Stock'",
-    "        except Exception:",
-    "            pass",
-    "        try:",
-    "            _op.StartDepth = _stock_top",
-    "            _op.FinalDepth = _final",
-    "            _refixed = True",
-    "        except Exception:",
-    "            pass",
-    "    if _refixed:",
-    "        _doc.recompute()",
-    // Per-op diagnostic: without FreeCAD to hand, this is what says whether the
-    // forced settings produced a real path, whether the rollback recovered one,
-    // and which depths were involved.
-    "    for _op, _prev, _pbase, _psd, _pfd in _targets:",
-    "        _n = 0",
-    "        _xs = []",
-    "        _ys = []",
-    "        try:",
-    "            for _c in _op.Path.Commands:",
-    "                if 'X' in _c.Parameters or 'Y' in _c.Parameters:",
-    "                    _n += 1",
-    "                if 'X' in _c.Parameters:",
-    "                    _xs.append(float(_c.Parameters['X']))",
-    "                if 'Y' in _c.Parameters:",
-    "                    _ys.append(float(_c.Parameters['Y']))",
-    "        except Exception:",
-    "            pass",
-    // The number of moves says the op is alive; the swept extent says whether
-    // it is facing the block or a patch in the middle of it.
-    "        _span = '%.0fx%.0f' % (max(_xs) - min(_xs), max(_ys) - min(_ys)) if _xs and _ys else '-'",
-    "        _nbase = len(getattr(_op, 'Base', []) or [])",
-    "        print('FACE_OP=%s boundary=%s->%s depth=%s/%s->%.3f/%.3f topfaces=%s base=%d cuts=%d span=%s'",
-    "              % (getattr(_op, 'Label', '?'), _prev, getattr(_op, 'BoundaryShape', '?'),",
-    "                 _psd, _pfd, _stock_top, _final, ','.join(_top_faces) or 'none', _nbase, _n, _span))",
-    "    print('FACE_FIX=%d reverted=%d (top %.3f -> %.3f)' % (len(_targets), _reverted, _stock_top, _final))",
-    "_rover_fix_face_ops(doc, _grp, base, job)",
+    "        _moved = set(_pending) | {_xy_idx}",
+    "        _prefix = _cmds[:_pending[0]]",
+    "        _xy_cmd = _cmds[_xy_idx]",
+    "        _zonly_cmds = [_cmds[i] for i in _pending]",
+    "        _rest = [c for i, c in enumerate(_cmds) if i > _pending[0] - 1 and i not in _moved]",
+    "        _new_cmds = _prefix + [_xy_cmd] + _zonly_cmds + _rest",
+    "        if _new_cmds != _cmds:",
+    "            _op.Path = Path.Path(_new_cmds)",
+    "_rover_fix_premature_descent(_grp)",
   ].join("\n");
 }
 
@@ -874,20 +541,7 @@ function autoFixClearanceHeightsPy() {
     "        _bb = _base_obj.Shape.BoundBox",
     "    except Exception:",
     "        return",
-    // Clear the STOCK, not just the finished part. Deriving this from the part
-    // alone put every retract below the top of the raw block whenever the block
-    // was taller than the part (the normal case — that excess is what gets
-    // machined away), so the "safe" height sat inside material the toolpath was
-    // about to travel across. Live case: part ZMax 13 gave safe_z 18 on a 20mm
-    // plate, and every rapid at Z18 was a crash.
-    "    _top = float(_bb.ZMax)",
-    "    try:",
-    "        _stk = getattr(job, 'Stock', None)",
-    "        if _stk is not None:",
-    "            _top = max(_top, float(_stk.Shape.BoundBox.ZMax))",
-    "    except Exception:",
-    "        pass",
-    "    _safe_z = _top + 5.0",
+    "    _safe_z = float(_bb.ZMax) + 5.0",
     "    _fixed = False",
     "    for _op in _grp:",
     "        for _prop in ('ClearanceHeight', 'SafeHeight'):",
@@ -941,12 +595,13 @@ function autoFixUnsafeRapidsToFeedPy() {
   return [
     "def _rover_defuse_unsafe_rapids(_grp, _base_obj):",
     "    import json as _json3",
-    "    _report = {'bbOk': False, 'ops': 0, 'rapids': 0, 'unsafe': 0, 'converted': 0, 'assignErrors': [], 'otherErrors': []}",
+    "    _report = {'bbOk': False, 'ops': 0, 'rapids': 0, 'unsafe': 0, 'converted': 0, 'clamped': 0, 'opsModified': 0, 'assignErrors': [], 'otherErrors': []}",
     "    try:",
     "        _solid = _base_obj.Shape",
     "        _bb = _solid.BoundBox",
     "        _report['bbOk'] = True",
     "        _report['bbZMax'] = round(float(_bb.ZMax), 3)",
+    "        _safe_z = float(_bb.ZMax) + 5.0",
     "    except Exception as _e:",
     "        _report['otherErrors'].append('boundbox: ' + str(_e))",
     "        print('RAPID_DEFUSE_REPORT=' + _json3.dumps(_report))",
@@ -966,6 +621,7 @@ function autoFixUnsafeRapidsToFeedPy() {
     "                pass",
     "            _new_cmds = []",
     "            _px = _py = _pz = None",
+    "            _xy_established = False",
     "            _changed = False",
     "            for _c in _p.Commands:",
     // Position fallback/tracking below is a DELIBERATE line-for-line mirror of
@@ -984,6 +640,8 @@ function autoFixUnsafeRapidsToFeedPy() {
     "                _rapid = _c.Name in ('G0', 'G00')",
     "                if _rapid:",
     "                    _report['rapids'] += 1",
+    "                if 'X' in _pr or 'Y' in _pr:",
+    "                    _xy_established = True",
     "                _nx = float(_pr['X']) if 'X' in _pr else (_px if _px is not None else 0.0)",
     "                _ny = float(_pr['Y']) if 'Y' in _pr else (_py if _py is not None else 0.0)",
     "                _nz = float(_pr['Z']) if 'Z' in _pr else (_pz if _pz is not None else 0.0)",
@@ -1005,10 +663,28 @@ function autoFixUnsafeRapidsToFeedPy() {
     "                                _report['otherErrors'].append('isInside: ' + str(_e))",
     "                if _unsafe:",
     "                    _report['unsafe'] += 1",
-    "                    _params = dict(_pr)",
-    "                    if 'F' not in _params:",
-    "                        _params['F'] = _default_feed",
-    "                    _new_cmds.append(Path.Command('G1', _params))",
+    "                    if not _xy_established:",
+    // No X or Y has EVER been explicitly given yet in this operation — this
+    // Z-only move (or one carrying forward a phantom never-visited X/Y) is
+    // never a real cutting target. Converting it to a feed would cut material
+    // at whatever position the tool happens to be sitting at (often (0,0),
+    // the WCS origin) — a real live defect, not a hypothetical: it carved a
+    // visible groove at the stock center before the actual part was ever
+    // touched. Raise it to a safe height and keep it a rapid instead — never
+    // touch material at the wrong spot, at any speed. autoFixPrematureDescentPy
+    // above should already prevent most of these by reordering the lead-in,
+    // but this is the last line of defense for whatever it doesn't catch.
+    "                        _params = dict(_pr)",
+    "                        _params['Z'] = _safe_z",
+    "                        _new_cmds.append(Path.Command(_c.Name, _params))",
+    "                        _nz = _safe_z",
+    "                        _report['clamped'] += 1",
+    "                    else:",
+    "                        _params = dict(_pr)",
+    "                        if 'F' not in _params:",
+    "                            _params['F'] = _default_feed",
+    "                        _new_cmds.append(Path.Command('G1', _params))",
+    "                        _report['converted'] += 1",
     "                    _changed = True",
     "                else:",
     "                    _new_cmds.append(_c)",
@@ -1016,7 +692,7 @@ function autoFixUnsafeRapidsToFeedPy() {
     "            if _changed:",
     "                try:",
     "                    _op.Path = Path.Path(_new_cmds)",
-    "                    _report['converted'] += 1",
+    "                    _report['opsModified'] += 1",
     "                except Exception as _e:",
     "                    _report['assignErrors'].append(str(getattr(_op, 'Label', _op.Name)) + ': ' + str(_e))",
     "        except Exception as _e:",
@@ -1158,11 +834,6 @@ function buildSafetyChecks(isTorna) {
     label: "Takim kontrolcusu atamalari dogrulandi (interaktif secim beklemesi yok)",
     ok: true,
   });
-  checks.push({
-    key: "duplicateOps",
-    label: "Hicbir operasyon bir digeriyle ayni toolpath'i tekrarlamiyor (seviye bolmesi tuttu)",
-    ok: true,
-  });
   return checks;
 }
 
@@ -1201,20 +872,10 @@ function previewEpiloguePy(previewJsonPath, defaultFeed, isTorna) {
     "    _grp = list(job.Operations.Group)",
     "except Exception as _e:",
     "    raise RuntimeError('job.Operations bulunamadi: ' + str(_e))",
-    autoFixFaceBoundaryPy(),
+    autoFixPrematureDescentPy(),
     autoFixClearanceHeightsPy(),
     autoFixUnsafeRapidsToFeedPy(),
     autoFixDeepPlungesPy(),
-    // Report the safety checks BEFORE building the preview JSON. They used to
-    // print last, after the toolpath extraction and its EST_MINUTES/PREVIEW_JSON
-    // output — so if the tool's captured stdout ever came back clipped, the
-    // check lines were the first thing lost, and every parser below reads a
-    // missing marker as an empty violation list. That is how a job with twelve
-    // byte-identical profile operations passed a check that finds them
-    // correctly when run directly. Cheap to emit early; expensive to miss.
-    plungeCheckPy(isTorna),
-    collisionCheckPy(),
-    duplicateOpCheckPy(),
     `_default_feed = float(${feed})`,
     "_rapid_rate = 3000.0  # mm/min assumed rapid rate for time estimate",
     "_paths = []",
@@ -1258,6 +919,8 @@ function previewEpiloguePy(previewJsonPath, defaultFeed, isTorna) {
     "    _json.dump({'toolpaths': _paths, 'estimatedMinutes': round(_total_min, 2), 'opMinutes': _op_minutes}, _f)",
     "print('EST_MINUTES=' + str(round(_total_min, 2)))",
     "print('PREVIEW_JSON=' + _out)",
+    plungeCheckPy(isTorna),
+    collisionCheckPy(),
   ].join("\n");
 }
 
@@ -1282,184 +945,16 @@ function postEpiloguePy(gcodePath, postName, isTorna) {
     "if post_mod is None:",
     "    raise RuntimeError('post-processor modulu bulunamadi')",
     "_grp = list(job.Operations.Group)",
-    autoFixFaceBoundaryPy(),
+    autoFixPrematureDescentPy(),
     autoFixClearanceHeightsPy(),
     autoFixUnsafeRapidsToFeedPy(),
     autoFixDeepPlungesPy(),
     plungeCheckPy(isTorna),
     collisionCheckPy(),
-    duplicateOpCheckPy(),
-    // Report which magazine slot each operation runs on, so a post that drops
-    // tool changes (grbl_post does — real GRBL has no automatic changer) can
-    // still be matched back to the right tool downstream. Keyed by Label
-    // because that is the name the post writes into its own
-    // "(Begin operation: <Label>)" marker.
-    // Blogun ve parcanin Z kotlari. G-code, STEP'in kendi koordinatlarinda
-    // uretiliyor: bu parcada Z0 parcanin ALTI. Operator ise tezgahta Z'yi
-    // MALZEMENIN USTUNDE sifirlar. Ikisi ayrisinca kodun Z4/Z0 dedigi yer,
-    // tezgahta malzeme ustunun 4mm ve 0mm USTU olur — takim malzemeye hic
-    // girmez. Kaydirmayi Node tarafinda yapabilmek icin referans kotu buradan
-    // bildiriliyor.
-    "try:",
-    "    _zt = float(base.Shape.BoundBox.ZMax)",
-    "    _zb = float(base.Shape.BoundBox.ZMin)",
-    "    _zs = _zt",
-    "    try:",
-    "        _stk = getattr(job, 'Stock', None)",
-    "        if _stk is not None:",
-    "            _zs = max(_zs, float(_stk.Shape.BoundBox.ZMax))",
-    "    except Exception:",
-    "        pass",
-    "    print('Z_EXTENTS=%.4f,%.4f,%.4f' % (_zb, _zt, _zs))",
-    "except Exception as _e:",
-    "    print('Z_EXTENTS=err ' + str(_e))",
-    "import json as _json_tm",
-    "_tmap = []",
-    "for _op in _grp:",
-    "    try:",
-    "        _tc = getattr(_op, 'ToolController', None)",
-    "        _tn = int(_tc.ToolNumber) if _tc is not None else 0",
-    "    except Exception:",
-    "        _tn = 0",
-    "    _tmap.append([str(getattr(_op, 'Label', '')), _tn])",
-    "print('TOOLMAP=' + _json_tm.dumps(_tmap))",
     `_out = ${JSON.stringify(gcodePath)}`,
     "post_mod.export(_grp, _out, '--no-show-editor')",
     "print('GCODE_PATH=' + _out)",
   ].join("\n");
-}
-
-/** Read the operation -> magazine slot map printed by postEpiloguePy(). */
-export function parseToolMap(text) {
-  const m = /TOOLMAP=(\[.*\])/.exec(text || "");
-  if (!m) return [];
-  try {
-    const parsed = JSON.parse(m[1]);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
-
-// grbl_post deliberately emits no tool change: real GRBL has no automatic
-// changer, so a machinist swaps tools by hand. The CNC simulator has a 40-slot
-// magazine and picks its tool from the T word, so a G-code with no T word left
-// it cutting with whatever tool the previous program had loaded. Live case: a
-// path compensated for a O6mm endmill ran against a leftover O26mm cutter, and
-// the hexagon profile came out as a groove wide enough to look like a different
-// part. Multi-tool jobs were worse — every operation ran on tool one.
-//
-// So when the exported file has no T word at all, add one per operation from
-// the Job's own ToolControllers, at the "(Begin operation: ...)" marker the post
-// already writes, and only where the tool actually changes. A file that DOES
-// carry tool changes is left untouched — that post meant what it wrote.
-// `M6` rides along for real controls that expect it; the simulator ignores it.
-// Elle degisim yorumunda slotun hangi takim oldugunu yaz — operatorun eline
-// "T4" degil "T4 - O20mm Parmak Freze" gecsin. Magazin okunamazsa slot numarasi
-// tek basina da is gorur, o yuzden hata yutuluyor.
-//
-// Takim adi PARANTEZSIZ donuyor ve icindeki parantezler de temizleniyor: bu
-// metin zaten parantezli bir yorumun ICINE giriyor ve RS274NGC ic ice yorum
-// kabul etmez. Mach3 bunu yukleme aninda reddetti — "Nested comment found,
-// Block = (TAKIM: T1 (O6 Parmak Freze) -- elle takin) Line 8" — ve program hic
-// baslamadi. Magazin adlari kullanici tarafindan yazildigi icin parantez
-// icerebilirler, o yuzden ada guvenmeyip burada siyiriyoruz.
-function slotName(slot) {
-  try {
-    const tool = listMagazineTools().find((t) => slotNumberForTool(t.id) === slot);
-    if (!tool?.name) return "";
-    const safe = String(tool.name).replace(/[()]/g, "").trim();
-    return safe ? ` - ${safe}` : "";
-  } catch {
-    return "";
-  }
-}
-
-function ensureToolChanges(gcodePath, toolMap, answers) {
-  if (!Array.isArray(toolMap) || !toolMap.length) return;
-  // M6 tezgaha "takimi degistir" der. Otomatik degistiricisi olmayan bir
-  // router'da Mach3'un varsayilani M6'da durup Cycle Start beklemek; iki
-  // takimli bir isin ilk M6'si daha 8. satirda geldigi icin program hic
-  // kimildamadan durur ve "yukledi ama calismadi" gibi gorunur. Elle degisimde
-  // T yazilir (simulator takimi yine bundan tanir, gercek kontrol de bekleyen
-  // takimi kaydeder) ama M6 yazilmaz; operatore hangi takimi takacagi yorum
-  // satiriyla soylenir.
-  const manual = !String(answers?.toolChanger ?? "").toLowerCase().includes("atc");
-  let raw;
-  try {
-    raw = fs.readFileSync(gcodePath, "utf-8");
-  } catch {
-    return;
-  }
-  const lines = raw.split(/\r?\n/);
-  // Strip comments first: "(Tool: T5 ...)" is a note, not a tool change.
-  const alreadyHasToolWord = lines.some((l) => /(?:^|\s)T\d+/.test(l.replace(/\(.*?\)/g, "")));
-  if (alreadyHasToolWord) return;
-
-  const slotByLabel = new Map(
-    toolMap
-      .filter((e) => Array.isArray(e) && e[0] && Number(e[1]) > 0)
-      .map((e) => [String(e[0]), Math.round(Number(e[1]))]),
-  );
-  if (!slotByLabel.size) return;
-
-  const out = [];
-  let currentSlot = null;
-  let injected = 0;
-  for (const line of lines) {
-    out.push(line);
-    const marker = /^\(Begin operation:\s*(.+?)\s*\)\s*$/.exec(line);
-    if (!marker) continue;
-    const slot = slotByLabel.get(marker[1]);
-    if (!slot || slot === currentSlot) continue;
-    if (manual) {
-      // Ilk operasyonda takim zaten spindle'da olur; "degisim" degil, takilacak
-      // takimin ne oldugunu soylemek gerekir.
-      out.push(`(${currentSlot === null ? "TAKIM" : "TAKIM DEGISIMI"}: T${slot}${slotName(slot)} -- elle takin)`);
-      out.push(`T${slot}`);
-    } else {
-      out.push(`T${slot} M6`);
-    }
-    currentSlot = slot;
-    injected += 1;
-  }
-  if (!injected) return;
-  try {
-    fs.writeFileSync(gcodePath, out.join("\n"), "utf-8");
-    console.log(
-      `${injected} takim ${manual ? "secimi (elle degisim: M6 yazilmadi)" : "degisimi"} G-code'a eklendi:`,
-      path.basename(gcodePath),
-    );
-  } catch (err) {
-    console.warn("Takim degisimi eklenemedi:", err.message);
-  }
-}
-
-// The post-processor stamps its own toolchain into the file header ("Exported
-// by FreeCAD", "Post Processor: Path.Post.scripts.grbl_post"). This is the
-// product's output, so it carries the product's name; the post-processor line
-// keeps the dialect, which is what a machinist actually needs from it, without
-// the module path. Everything below the header is untouched — only these two
-// comment lines are rewritten, and only when they are actually there.
-function brandGcodeHeader(gcodePath) {
-  let raw;
-  try {
-    raw = fs.readFileSync(gcodePath, "utf-8");
-  } catch {
-    return;
-  }
-  const branded = raw
-    .replace(/^\(Exported by .*\)$/m, "(Exported by TOPKAPIAI)")
-    .replace(
-      /^\(Post Processor: *(?:Path\.Post\.scripts\.|PathScripts\.post\.)?([A-Za-z0-9_]+?)(?:_post)?\)$/m,
-      "(Post Processor: $1)",
-    );
-  if (branded === raw) return;
-  try {
-    fs.writeFileSync(gcodePath, branded, "utf-8");
-  } catch (err) {
-    console.warn("G-code basligi markalanamadi:", err.message);
-  }
 }
 
 /**
@@ -1467,262 +962,6 @@ function brandGcodeHeader(gcodePath) {
  * Heidenhain Klartext, …), read the generated Fanuc G-code, transform it, and
  * overwrite the file.
  */
-// grbl_post writes G-code that GRBL tolerates but a standards-conforming
-// controller does not. Three defects showed up the first time a file reached a
-// real Mach3 router, and none of them are Mach3-specific — they are wrong on
-// LinuxCNC and every Fanuc-style control too, and the CNC simulator never
-// caught them because it is as permissive as GRBL:
-//
-//   1. Arc words. In G17 only I and J define the arc centre; K belongs to
-//      G18/G19. grbl_post emits "K0.000" on every G2/G3 anyway (36 lines in the
-//      failing file), and RS274NGC calls that an error.
-//   2. Spindle. The file ends with M5 but never issues M3 or an S speed, so the
-//      spindle is never commanded to start — the router would plunge with a
-//      stationary cutter.
-//   3. Work offset. No G54, so which offset applies is left to whatever the
-//      control happens to have active.
-//
-// Fixed here rather than in a Mach3-only dialect because the output is simply
-// incorrect as it stands; every controller benefits. Runs BEFORE the dialect
-// transforms so they translate already-valid code.
-function normalizeForRealControllers(gcodePath, answers) {
-  let raw;
-  try {
-    raw = fs.readFileSync(gcodePath, "utf-8");
-  } catch {
-    return;
-  }
-  const rpm = Number(answers?.spindleRpm) > 0 ? Math.round(Number(answers.spindleRpm)) : null;
-  const lines = raw.split(/\r?\n/);
-  const hasSpindleOn = lines.some((l) => /(?:^|\s)M0?[34]\b/.test(l.replace(/\(.*?\)/g, "")));
-  const hasWcs = lines.some((l) => /(?:^|\s)G5[4-9]\b/.test(l.replace(/\(.*?\)/g, "")));
-
-  const out = [];
-  let plane = "G17"; // RS274NGC default
-  let strippedK = 0;
-  let spindleDone = hasSpindleOn;
-  let wcsDone = hasWcs;
-
-  for (let line of lines) {
-    const code = line.replace(/\(.*?\)/g, "");
-    if (/(?:^|\s)G19\b/.test(code)) plane = "G19";
-    else if (/(?:^|\s)G18\b/.test(code)) plane = "G18";
-    else if (/(?:^|\s)G17\b/.test(code)) plane = "G17";
-
-    if (plane === "G17" && /^\s*G0?[23]\b/.test(code) && /(?:^|\s)K-?[\d.]+/.test(code)) {
-      line = line.replace(/\s*K-?[\d.]+/g, "");
-      strippedK += 1;
-    }
-    out.push(line);
-
-    // G54 rides with the preamble's modal setup line.
-    if (!wcsDone && /^\s*G17\b/.test(code)) {
-      out.push("G54");
-      wcsDone = true;
-    }
-    // Spindle starts once the first tool is in the spindle; with no tool change
-    // at all, right after the modal setup instead. The tool line is matched with
-    // M6 OPTIONAL: manual-change jobs emit a bare "T1" (no M6, so the control
-    // does not stop), and an M6-only match sent the spindle command up into the
-    // preamble — spinning the cutter to full speed BEFORE the line telling the
-    // operator to fit the tool by hand.
-    if (!spindleDone && /^\s*T\d+\s*(M0?6\s*)?$/i.test(code)) {
-      out.push(rpm ? `M3 S${rpm}` : "M3");
-      spindleDone = true;
-    }
-  }
-  if (!spindleDone) {
-    const at = out.findIndex((l) => /^\s*G17\b/.test(l.replace(/\(.*?\)/g, "")));
-    if (at >= 0) out.splice(at + 1, 0, rpm ? `M3 S${rpm}` : "M3");
-    spindleDone = at >= 0;
-  }
-
-  const next = out.join("\n");
-  if (next === raw) return;
-  try {
-    fs.writeFileSync(gcodePath, next, "utf-8");
-    console.log(
-      `G-code kontrolcu uyumu: ${strippedK} yay satirindan K kaldirildi` +
-      `${hasSpindleOn ? "" : `, spindle baslatma eklendi (${rpm ? `M3 S${rpm}` : "M3"})`}` +
-      `${hasWcs ? "" : ", G54 eklendi"}`,
-    );
-  } catch (err) {
-    console.warn("G-code kontrolcu uyumu uygulanamadi:", err.message);
-  }
-}
-
-/** Read the "Z_EXTENTS=zmin,zmax,stockTop" line postEpiloguePy() prints. */
-export function parseZExtents(text) {
-  const m = /Z_EXTENTS=(-?[\d.]+),(-?[\d.]+),(-?[\d.]+)/.exec(String(text ?? ""));
-  if (!m) return null;
-  const [partBottom, partTop, stockTop] = m.slice(1, 4).map(Number);
-  if (![partBottom, partTop, stockTop].every(Number.isFinite)) return null;
-  return { partBottom, partTop, stockTop };
-}
-
-// FreeCAD writes G-code in the STEP file's own coordinates. For this part that
-// put Z0 at the part's BOTTOM, so every cut came out positive (Z4, Z0) with
-// rapids at Z13/Z15. A machinist zeroes Z on the TOP OF THE MATERIAL, which is
-// what the wizard's WCS answer says ("Z0 ust"). Under that zero the machine
-// reads Z4 and Z0 as 4mm and 0mm ABOVE the surface: the cutter never touches
-// the work. That is exactly what the router did — "freze inmedi, yukari cikti".
-//
-// So shift every Z by -(reference height) to match the declared zero. The
-// reference is the stock top for a top-surface WCS (that is the face the
-// operator touches off on) and the part bottom for a bottom-surface WCS (which
-// is already the file's own origin, hence no shift). Only Z words move; X, Y,
-// I, J and feeds are untouched, so the geometry is identical — only the datum
-// changes.
-function applyWcsZeroShift(gcodePath, answers, zExtents) {
-  if (!zExtents) return;
-  const wcs = String(answers?.wcs ?? "").toLowerCase();
-  // "ust yuzey" / "ust" -> top-of-material zero. A bottom-surface WCS matches
-  // the file as generated; anything unrecognised is left alone rather than
-  // guessed at, because shifting to the wrong datum is worse than not shifting.
-  const topZero = wcs.includes("ust");
-  if (!topZero) return;
-  const shift = zExtents.stockTop;
-  if (!Number.isFinite(shift) || Math.abs(shift) < 1e-6) return;
-
-  let raw;
-  try {
-    raw = fs.readFileSync(gcodePath, "utf-8");
-  } catch {
-    return;
-  }
-  let moved = 0;
-  const shifted = raw
-    .split(/\r?\n/)
-    .map((line) => {
-      const code = line.replace(/\(.*?\)/g, "");
-      if (!/^\s*(G0?[0-3]\b|G1\b)/.test(code)) return line;
-      return line.replace(/(^|\s)Z(-?[\d.]+)/g, (all, lead, val) => {
-        const z = Number(val);
-        if (!Number.isFinite(z)) return all;
-        moved += 1;
-        return `${lead}Z${(z - shift).toFixed(3)}`;
-      });
-    })
-    .join("\n");
-  if (!moved) return;
-  try {
-    fs.writeFileSync(gcodePath, shifted, "utf-8");
-    console.log(
-      `Z sifir noktasi WCS'e tasindi: ${moved} Z degeri ${shift.toFixed(3)}mm asagi ` +
-      `kaydirildi (Z0 artik malzeme ustu).`,
-    );
-  } catch (err) {
-    console.warn("Z kaydirma uygulanamadi:", err.message);
-  }
-}
-
-// Bir parmak frezenin MERKEZINDE kesme hizi sifirdir: dik daldiginda malzemeyi
-// kesmez, ezer. Router'da MDF'ye 6mm dik dalinca giris noktasi yirtildi ve
-// parca daha ilk hareketinde bozuldu. Plan "ramp (acili giris)" diyordu, ama
-// uretilen kod ayni XY'de kalip yalnizca Z'yi dusuruyordu — yani duz dalma.
-//
-// Burada o dalma, konturun ILK SEGMENTI boyunca gidip gelerek inen bir rampaya
-// cevriliyor. Bacak sayisi CIFT tutuluyor, boylece takim rampanin sonunda
-// basladigi noktaya hedef derinlikte geri doner ve programin geri kalani hic
-// degismeden devam eder — sadece dalma hareketi degisir, geometri aynidir.
-//
-// Yalnizca malzemeye giren dalmalar rampalanir: havada inen yaklasma
-// hareketlerinin yirtacak bir seyi yoktur ve onlari uzatmak bosa zaman.
-// Malzemenin ust yuzeyi, DOSYANIN O ANKI koordinatlarinda. applyWcsZeroShift
-// ust-yuzey WCS'de her seyi blok ust kotu kadar asagi tasidigi icin orada
-// yuzey artik Z0'dir; kaydirma yapilmayan durumda blok ust kotu neyse odur.
-// Referans bilinmiyorsa null doner ve rampalama atlanir — yanlis bir yuzey
-// varsayip havada rampa yapmaktansa dokunmamak yeglenir.
-function materialTopZ(answers, zExtents) {
-  if (!zExtents) return null;
-  const shifted = String(answers?.wcs ?? "").toLowerCase().includes("ust");
-  return shifted ? 0 : zExtents.stockTop;
-}
-
-function rampPlungeEntries(gcodePath, materialTopZ, angleDeg = 15) {
-  if (!Number.isFinite(materialTopZ)) return;
-  let raw;
-  try {
-    raw = fs.readFileSync(gcodePath, "utf-8");
-  } catch {
-    return;
-  }
-  const lines = raw.split(/\r?\n/);
-  const strip = (l) => l.replace(/\(.*?\)/g, "");
-  const word = (l, w) => {
-    const m = new RegExp(`(?:^|\\s)${w}(-?[\\d.]+)`).exec(strip(l));
-    return m ? Number(m[1]) : null;
-  };
-  const isMotion = (l) => /^\s*G0?[0-3]\b/.test(strip(l));
-
-  const out = [];
-  let cx = null, cy = null, cz = null;
-  let ramped = 0;
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    if (!isMotion(line)) { out.push(line); continue; }
-    const nx = word(line, "X") ?? cx;
-    const ny = word(line, "Y") ?? cy;
-    const nz = word(line, "Z") ?? cz;
-    const feed = word(line, "F");
-    const isFeed = /^\s*G0?1\b/.test(strip(line));
-
-    // Saf dikey dalma: besleme hareketi, XY sabit, Z asagi, hedef malzeme icinde.
-    const pureZDrop =
-      isFeed && cx !== null && cy !== null && cz !== null &&
-      Math.abs(nx - cx) < 1e-6 && Math.abs(ny - cy) < 1e-6 &&
-      nz < cz - 1e-6 && nz < materialTopZ - 1e-6;
-
-    if (pureZDrop) {
-      // Rampanin yonu: bir sonraki XY'si farkli hareket.
-      let qx = null, qy = null;
-      for (let j = i + 1; j < lines.length; j++) {
-        if (!isMotion(lines[j])) continue;
-        const tx = word(lines[j], "X"), ty = word(lines[j], "Y");
-        if (tx === null && ty === null) continue;
-        const px = tx ?? nx, py = ty ?? ny;
-        if (Math.abs(px - nx) > 1e-6 || Math.abs(py - ny) > 1e-6) { qx = px; qy = py; }
-        break;
-      }
-      const segLen = qx === null ? 0 : Math.hypot(qx - nx, qy - ny);
-      // Rampa yalnizca malzemeye giren kismi kapsar; ustteki hava zaten sorunsuz.
-      const airTo = Math.min(cz, materialTopZ);
-      const cutDepth = airTo - nz;
-      if (segLen > 1e-3 && cutDepth > 1e-3) {
-        const need = cutDepth / Math.tan((angleDeg * Math.PI) / 180);
-        let legs = Math.ceil(need / segLen);
-        if (legs % 2 !== 0) legs += 1;      // cift bacak -> baslangic noktasina don
-        legs = Math.max(2, Math.min(24, legs));
-        const f = feed ?? null;
-        if (airTo < cz - 1e-6) {
-          out.push(`G1 Z${airTo.toFixed(3)}${f ? ` F${f}` : ""}`);
-        }
-        for (let k = 1; k <= legs; k++) {
-          const z = airTo - (cutDepth * k) / legs;
-          const toQ = k % 2 === 1;
-          const tx = toQ ? qx : nx, ty = toQ ? qy : ny;
-          out.push(`G1 X${tx.toFixed(3)} Y${ty.toFixed(3)} Z${z.toFixed(3)}${f ? ` F${f}` : ""}`);
-        }
-        ramped += 1;
-        cx = nx; cy = ny; cz = nz;
-        continue;                            // orijinal dik dalma satiri atilir
-      }
-    }
-
-    out.push(line);
-    cx = nx; cy = ny; cz = nz;
-  }
-
-  if (!ramped) return;
-  try {
-    fs.writeFileSync(gcodePath, out.join("\n"), "utf-8");
-    console.log(`${ramped} dik dalma ${angleDeg} derecelik rampaya cevrildi.`);
-  } catch (err) {
-    console.warn("Rampa donusumu uygulanamadi:", err.message);
-  }
-}
-
 function applyControllerTransform(gcodePath, postName, stepPath, answers) {
   const partName = path.basename(stepPath || "PART", path.extname(stepPath || ""));
   let label;
@@ -1821,7 +1060,7 @@ async function generateAndRunPathCode({ abs, geometry, answers, plan, threadGuid
       const result = await callFreecadTool(config.freecadMcp.toolName, {
         [config.freecadMcp.toolParam]:
           disableInteractiveToolControllerPy() + "\n" +
-          preparePathCodePy(code, answers) + "\n" + epiloguePy,
+          wrapWithTracebackPy(sanitizeFreeCADCode(code)) + "\n" + epiloguePy,
       });
       text = extractResultText(result);
       if (result?.isError || text.startsWith("Failed to execute code")) {
@@ -1839,31 +1078,9 @@ async function generateAndRunPathCode({ abs, geometry, answers, plan, threadGuid
     }
 
     if (text.includes(successMarker)) {
-      // Facing is the one operation with no downstream check of its own — an
-      // empty one exports as valid G-code and only shows up as untouched stock
-      // in the simulator. Surface what the face fix actually did.
-      for (const line of String(text).split("\n")) {
-        if (line.startsWith("FACE_OP=") || line.startsWith("FACE_FIX=")) {
-          console.log(`  ${line.trim()}`);
-        }
-      }
       const plungeViolations = parsePlungeViolations(text);
       const collisionViolations = parseCollisionViolations(text);
-      const duplicateOps = parseDuplicateOps(text);
-      // Every parser above returns [] both when a check found nothing AND when
-      // its marker never arrived, so a check that silently failed to report is
-      // indistinguishable from a clean run — which is exactly how twelve
-      // identical profile operations shipped past a duplicate check that
-      // detects them correctly. Absence of a report is not a pass; say so.
-      const missing = ["PLUNGE_VIOLATIONS=", "COLLISION_VIOLATIONS=", "DUPLICATE_OPS="]
-        .filter((marker) => !String(text).includes(marker));
-      if (missing.length) {
-        console.warn(
-          `UYARI: guvenlik kontrolu rapor vermedi (${missing.join(", ")}) — ` +
-          "bu kontroller bu calistirma icin DOGRULANMADI, temiz cikti sayilmamali.",
-        );
-      }
-      if (plungeViolations.length || collisionViolations.length || duplicateOps.length) {
+      if (plungeViolations.length || collisionViolations.length) {
         const problems = [];
         if (plungeViolations.length) {
           const detail = plungeViolations
@@ -1889,18 +1106,6 @@ async function generateAndRunPathCode({ abs, geometry, answers, plan, threadGuid
           }
           problems.push(plungeHint);
         }
-        if (duplicateOps.length) {
-          const detail = duplicateOps.map((d) => `${d.op} == ${d.sameAs}`).join("; ");
-          console.warn(`Ayni toolpath tekrari (attempt ${attempt}): ${detail}`);
-          problems.push(
-            `Su operasyonlar bir oncekiyle BIREBIR AYNI toolpath'i uretiyor: ${detail}. ` +
-            "Ayni malzemeyi iki kez kaldiran operasyon her zaman tutmamis bir seviye bolmesidir: " +
-            "StartDepth/FinalDepth atamalarin recompute sirasinda FreeCAD'in kendi varsayilanlarina " +
-            "geri donmus, boylece her seviye ayni araliga cokmus. COZUM: seviyeleri " +
-            "_rover_make_leveled_ops ile olustur — o fonksiyon degerleri atadiktan SONRA geri okuyup " +
-            "tutmadiysa yeniden atar. Kendi bolme dongunu yaziyorsan ayni geri-okuma kontrolunu sen ekle.",
-          );
-        }
         let rapidDefuseDiag = "";
         if (collisionViolations.length) {
           const detail = collisionViolations
@@ -1923,7 +1128,7 @@ async function generateAndRunPathCode({ abs, geometry, answers, plan, threadGuid
           rapidDefuseDiag = report
             ? ` [Teshis: autoFixUnsafeRapidsToFeedPy calisti mi=${report.bbOk}, bb.ZMax=${report.bbZMax}, ` +
               `${report.ops} op tarandi, ${report.rapids} rapid komut goruldu, ${report.unsafe} tanesi guvensiz ` +
-              `bulundu, ${report.converted} operasyonda G1'e cevrildi.` +
+              `bulundu, ${report.converted} G1'e cevrildi, ${report.clamped} guvenli yukseklige cekildi.` +
               (report.assignErrors?.length ? ` Atama hatalari: ${report.assignErrors.join(" | ")}.` : "") +
               (report.otherErrors?.length ? ` Diger hatalar: ${report.otherErrors.join(" | ")}.` : "") +
               "]"
@@ -2053,7 +1258,7 @@ export async function generateCamGcodeFromPlan(stepPath, answers, plan, context 
     const result = await callFreecadTool(config.freecadMcp.toolName, {
       [config.freecadMcp.toolParam]:
         disableInteractiveToolControllerPy() + "\n" +
-        preparePathCodePy(stored, answers) + "\n" + epiloguePy,
+        wrapWithTracebackPy(sanitizeFreeCADCode(stored)) + "\n" + epiloguePy,
     });
     const text = extractResultText(result);
     if ((result?.isError || !text.includes("GCODE_PATH=")) && !fs.existsSync(gcodePath)) {
@@ -2064,14 +1269,7 @@ export async function generateCamGcodeFromPlan(stepPath, answers, plan, context 
     // code is re-run verbatim here, so re-verify before handing out the file.
     const violations = parsePlungeViolations(text);
     const collisions = parseCollisionViolations(text);
-    // Duplicate operations were checked only inside generateAndRunPathCode's
-    // retry loop, so an approved preview whose stored code is re-run here got
-    // exported without ever being asked the question. That is how a file with
-    // twelve identical contour operations — the same pass cut ten extra times,
-    // each one down to full depth — reached a real router. The export is the
-    // last gate before the machine; it has to ask everything the preview asks.
-    const dupes = parseDuplicateOps(text);
-    if (violations.length || collisions.length || dupes.length) {
+    if (violations.length || collisions.length) {
       try { fs.unlinkSync(gcodePath); } catch { /* not present; fine */ }
       const parts = [];
       if (violations.length) {
@@ -2080,29 +1278,16 @@ export async function generateCamGcodeFromPlan(stepPath, answers, plan, context 
       if (collisions.length) {
         parts.push(collisions.map((v) => `${v.op}: (${v.x}, ${v.y}, ${v.z})`).join("; "));
       }
-      if (dupes.length) {
-        parts.push(
-          `ayni toolpath tekrari: ${dupes.map((d) => `${d.op} == ${d.sameAs}`).join("; ")}`,
-        );
-      }
       throw new Error(`Guvenlik kontrolu basarisiz: ${parts.join(" | ")}. Onizlemeyi yeniden olusturun.`);
     }
-    // Before any dialect transform, so injected changes get translated too.
-    ensureToolChanges(gcodePath, parseToolMap(text), answers);
-    applyWcsZeroShift(gcodePath, answers, parseZExtents(text));
-    rampPlungeEntries(gcodePath, materialTopZ(answers, parseZExtents(text)));
-    normalizeForRealControllers(gcodePath, answers);
     applyControllerTransform(gcodePath, postName, abs, answers);
-    // Last: the dialect transforms rewrite the file wholesale.
-    brandGcodeHeader(gcodePath);
     return { gcodePath, safetyChecks: buildSafetyChecks(isTornaMachine(answers)) };
   }
 
   // No approved preview to reuse → generate the Path code and post-process it.
-  let runText = "";
   try {
     const geometry = await describeStepGeometry(stepPath);
-    ({ text: runText } = await generateAndRunPathCode({
+    await generateAndRunPathCode({
       abs,
       geometry,
       answers,
@@ -2110,17 +1295,12 @@ export async function generateCamGcodeFromPlan(stepPath, answers, plan, context 
       threadGuidance: threadGuidanceFor(answers, context),
       epiloguePy,
       successMarker: "GCODE_PATH=",
-    }));
+    });
   } catch (err) {
     try { fs.unlinkSync(gcodePath); } catch { /* not present; fine */ }
     throw err;
   }
   if (!fs.existsSync(gcodePath)) throw new Error("G-code dosyasi olusmadi");
-  ensureToolChanges(gcodePath, parseToolMap(runText), answers);
-  applyWcsZeroShift(gcodePath, answers, parseZExtents(runText));
-  rampPlungeEntries(gcodePath, materialTopZ(answers, parseZExtents(runText)));
-  normalizeForRealControllers(gcodePath, answers);
   applyControllerTransform(gcodePath, postName, abs, answers);
-  brandGcodeHeader(gcodePath);
   return { gcodePath, safetyChecks: buildSafetyChecks(isTornaMachine(answers)) };
 }
