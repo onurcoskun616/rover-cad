@@ -1616,6 +1616,113 @@ function applyWcsZeroShift(gcodePath, answers, zExtents) {
   }
 }
 
+// Bir parmak frezenin MERKEZINDE kesme hizi sifirdir: dik daldiginda malzemeyi
+// kesmez, ezer. Router'da MDF'ye 6mm dik dalinca giris noktasi yirtildi ve
+// parca daha ilk hareketinde bozuldu. Plan "ramp (acili giris)" diyordu, ama
+// uretilen kod ayni XY'de kalip yalnizca Z'yi dusuruyordu — yani duz dalma.
+//
+// Burada o dalma, konturun ILK SEGMENTI boyunca gidip gelerek inen bir rampaya
+// cevriliyor. Bacak sayisi CIFT tutuluyor, boylece takim rampanin sonunda
+// basladigi noktaya hedef derinlikte geri doner ve programin geri kalani hic
+// degismeden devam eder — sadece dalma hareketi degisir, geometri aynidir.
+//
+// Yalnizca malzemeye giren dalmalar rampalanir: havada inen yaklasma
+// hareketlerinin yirtacak bir seyi yoktur ve onlari uzatmak bosa zaman.
+// Malzemenin ust yuzeyi, DOSYANIN O ANKI koordinatlarinda. applyWcsZeroShift
+// ust-yuzey WCS'de her seyi blok ust kotu kadar asagi tasidigi icin orada
+// yuzey artik Z0'dir; kaydirma yapilmayan durumda blok ust kotu neyse odur.
+// Referans bilinmiyorsa null doner ve rampalama atlanir — yanlis bir yuzey
+// varsayip havada rampa yapmaktansa dokunmamak yeglenir.
+function materialTopZ(answers, zExtents) {
+  if (!zExtents) return null;
+  const shifted = String(answers?.wcs ?? "").toLowerCase().includes("ust");
+  return shifted ? 0 : zExtents.stockTop;
+}
+
+function rampPlungeEntries(gcodePath, materialTopZ, angleDeg = 15) {
+  if (!Number.isFinite(materialTopZ)) return;
+  let raw;
+  try {
+    raw = fs.readFileSync(gcodePath, "utf-8");
+  } catch {
+    return;
+  }
+  const lines = raw.split(/\r?\n/);
+  const strip = (l) => l.replace(/\(.*?\)/g, "");
+  const word = (l, w) => {
+    const m = new RegExp(`(?:^|\\s)${w}(-?[\\d.]+)`).exec(strip(l));
+    return m ? Number(m[1]) : null;
+  };
+  const isMotion = (l) => /^\s*G0?[0-3]\b/.test(strip(l));
+
+  const out = [];
+  let cx = null, cy = null, cz = null;
+  let ramped = 0;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (!isMotion(line)) { out.push(line); continue; }
+    const nx = word(line, "X") ?? cx;
+    const ny = word(line, "Y") ?? cy;
+    const nz = word(line, "Z") ?? cz;
+    const feed = word(line, "F");
+    const isFeed = /^\s*G0?1\b/.test(strip(line));
+
+    // Saf dikey dalma: besleme hareketi, XY sabit, Z asagi, hedef malzeme icinde.
+    const pureZDrop =
+      isFeed && cx !== null && cy !== null && cz !== null &&
+      Math.abs(nx - cx) < 1e-6 && Math.abs(ny - cy) < 1e-6 &&
+      nz < cz - 1e-6 && nz < materialTopZ - 1e-6;
+
+    if (pureZDrop) {
+      // Rampanin yonu: bir sonraki XY'si farkli hareket.
+      let qx = null, qy = null;
+      for (let j = i + 1; j < lines.length; j++) {
+        if (!isMotion(lines[j])) continue;
+        const tx = word(lines[j], "X"), ty = word(lines[j], "Y");
+        if (tx === null && ty === null) continue;
+        const px = tx ?? nx, py = ty ?? ny;
+        if (Math.abs(px - nx) > 1e-6 || Math.abs(py - ny) > 1e-6) { qx = px; qy = py; }
+        break;
+      }
+      const segLen = qx === null ? 0 : Math.hypot(qx - nx, qy - ny);
+      // Rampa yalnizca malzemeye giren kismi kapsar; ustteki hava zaten sorunsuz.
+      const airTo = Math.min(cz, materialTopZ);
+      const cutDepth = airTo - nz;
+      if (segLen > 1e-3 && cutDepth > 1e-3) {
+        const need = cutDepth / Math.tan((angleDeg * Math.PI) / 180);
+        let legs = Math.ceil(need / segLen);
+        if (legs % 2 !== 0) legs += 1;      // cift bacak -> baslangic noktasina don
+        legs = Math.max(2, Math.min(24, legs));
+        const f = feed ?? null;
+        if (airTo < cz - 1e-6) {
+          out.push(`G1 Z${airTo.toFixed(3)}${f ? ` F${f}` : ""}`);
+        }
+        for (let k = 1; k <= legs; k++) {
+          const z = airTo - (cutDepth * k) / legs;
+          const toQ = k % 2 === 1;
+          const tx = toQ ? qx : nx, ty = toQ ? qy : ny;
+          out.push(`G1 X${tx.toFixed(3)} Y${ty.toFixed(3)} Z${z.toFixed(3)}${f ? ` F${f}` : ""}`);
+        }
+        ramped += 1;
+        cx = nx; cy = ny; cz = nz;
+        continue;                            // orijinal dik dalma satiri atilir
+      }
+    }
+
+    out.push(line);
+    cx = nx; cy = ny; cz = nz;
+  }
+
+  if (!ramped) return;
+  try {
+    fs.writeFileSync(gcodePath, out.join("\n"), "utf-8");
+    console.log(`${ramped} dik dalma ${angleDeg} derecelik rampaya cevrildi.`);
+  } catch (err) {
+    console.warn("Rampa donusumu uygulanamadi:", err.message);
+  }
+}
+
 function applyControllerTransform(gcodePath, postName, stepPath, answers) {
   const partName = path.basename(stepPath || "PART", path.extname(stepPath || ""));
   let label;
@@ -1971,6 +2078,7 @@ export async function generateCamGcodeFromPlan(stepPath, answers, plan, context 
     // Before any dialect transform, so injected changes get translated too.
     ensureToolChanges(gcodePath, parseToolMap(text), answers);
     applyWcsZeroShift(gcodePath, answers, parseZExtents(text));
+    rampPlungeEntries(gcodePath, materialTopZ(answers, parseZExtents(text)));
     normalizeForRealControllers(gcodePath, answers);
     applyControllerTransform(gcodePath, postName, abs, answers);
     // Last: the dialect transforms rewrite the file wholesale.
@@ -1998,6 +2106,7 @@ export async function generateCamGcodeFromPlan(stepPath, answers, plan, context 
   if (!fs.existsSync(gcodePath)) throw new Error("G-code dosyasi olusmadi");
   ensureToolChanges(gcodePath, parseToolMap(runText), answers);
   applyWcsZeroShift(gcodePath, answers, parseZExtents(runText));
+  rampPlungeEntries(gcodePath, materialTopZ(answers, parseZExtents(runText)));
   normalizeForRealControllers(gcodePath, answers);
   applyControllerTransform(gcodePath, postName, abs, answers);
   brandGcodeHeader(gcodePath);
