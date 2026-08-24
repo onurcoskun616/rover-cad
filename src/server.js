@@ -13,6 +13,7 @@ import reviseRouter from "./routes/revise.js";
 import generatePdfRouter from "./routes/generatePdf.js";
 import jobsRouter from "./routes/jobs.js";
 import camAssistantRouter from "./routes/camAssistant.js";
+import stockCamAssistantRouter from "./routes/stockCamAssistant.js";
 import dimensionsRouter from "./routes/dimensions.js";
 import paramEditRouter from "./routes/paramEdit.js";
 import simulateRouter from "./routes/simulate.js";
@@ -74,6 +75,10 @@ app.use("/files", express.static(path.join(__dirname, "..", "examples")));
 // /cam-step, /cam-plan, /cam-confirm.
 // Mounted at "/" (its routes carry their own auth), so keep it last.
 app.use("/", camAssistantRouter);
+// Menu-driven, stock-based CAM plan (Faz 1-7): /stock-cam/plan, /stock-cam/step,
+// /stock-cam/confirm, /stock-cam/edit, /stock-cam/gcode. Starts from a bare
+// stock block instead of an uploaded STEP file — see stockCamPlanService.js.
+app.use("/", stockCamAssistantRouter);
 
 // eslint-disable-next-line no-unused-vars
 app.use((err, req, res, next) => {
