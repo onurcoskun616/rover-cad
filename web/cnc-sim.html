@@ -2173,8 +2173,12 @@ async function stockCamAdvanceStep(text){
   taiMsg(`✓ Önizleme ${verb} (${stockCamPending.opLabel}: ${stockCamOpSummary(opType,data.answers)}). Stok üzerindeki turuncu alanı kontrol edin. Doğruysa "onayla", değilse "iptal" yazın.`,"bot");
 }
 
+let stockCamConfirming=false;
+
 async function stockCamDoConfirm(){
   if(!stockCamPending)return;
+  if(stockCamConfirming){ taiMsg("⏳ Zaten işleniyor, lütfen sonucu bekleyin.","bot"); return; }
+  stockCamConfirming=true;
   const{opType,opLabel,answers}=stockCamPending;
   const editingId=stockCamEditingId;
   taiMsg("⏳ FreeCAD'de gerçek G-code üretiliyor ve güvenlik kontrolünden geçiriliyor…","bot");
@@ -2201,6 +2205,8 @@ async function stockCamDoConfirm(){
       (result.estimatedMinutes!=null?` (tahmini süre: ${result.estimatedMinutes} dk)`:""),"bot");
   }catch(e){
     taiMsg("⛔ Hata: "+e.message,"bot");
+  }finally{
+    stockCamConfirming=false;
   }
 }
 
