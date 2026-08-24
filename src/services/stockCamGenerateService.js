@@ -117,45 +117,53 @@ function drillOpPy(index, p, stock) {
   ].join("\n");
 }
 
-function rectSketchPy(index, p, stock) {
-  const sk = `_sk_${index}`;
+// Pocket profiles are built as a Part::Feature holding a real Part.Face
+// (NOT a Sketcher::SketchObject) and referenced with an EXPLICIT "Face1"
+// sub-element — verified against the real FreeCAD source
+// (Path/Op/Pocket.py's areaOpShapes): `if obj.Base:` iterates
+// `for sub in base[1]:` and does NOTHING when that sub-element list is
+// empty (the earlier `Base = [(_sk, [])]` version silently found zero
+// faces to remove — Sketches don't reliably expose `.Face1` either, and
+// an empty sub-list isn't a "use the whole object" shorthand the way the
+// job's own `Base` property's truthiness check might suggest). Every
+// working reference pattern in this codebase (cam-code-system-prompt.txt)
+// always passes real, named faces — never an empty list.
+function rectFacePy(index, p, stock) {
+  const feat = `_face_${index}`;
   const hw = pyFloat(Number(p.pw) / 2), hl = pyFloat(Number(p.pl) / 2);
-  const cx = pyFloat(p.x), cy = pyFloat(p.y);
+  const cx = pyFloat(p.x), cy = pyFloat(p.y), z = pyFloat(stock.h);
   return [
-    `${sk} = doc.addObject('Sketcher::SketchObject', ${pyStr(`PocketSketch_${index}`)})`,
-    `${sk}.Placement = App.Placement(App.Vector(0.0, 0.0, ${pyFloat(stock.h)}), App.Rotation(0, 0, 0, 1))`,
-    `_hw_${index}, _hl_${index} = ${hw}, ${hl}`,
+    `_hw_${index}, _hl_${index}, _z_${index} = ${hw}, ${hl}, ${z}`,
     `_cx_${index}, _cy_${index} = ${cx}, ${cy}`,
-    `_p0_${index} = App.Vector(_cx_${index}-_hw_${index}, _cy_${index}-_hl_${index}, 0.0)`,
-    `_p1_${index} = App.Vector(_cx_${index}+_hw_${index}, _cy_${index}-_hl_${index}, 0.0)`,
-    `_p2_${index} = App.Vector(_cx_${index}+_hw_${index}, _cy_${index}+_hl_${index}, 0.0)`,
-    `_p3_${index} = App.Vector(_cx_${index}-_hw_${index}, _cy_${index}+_hl_${index}, 0.0)`,
-    `${sk}.addGeometry(Part.LineSegment(_p0_${index}, _p1_${index}), False)`,
-    `${sk}.addGeometry(Part.LineSegment(_p1_${index}, _p2_${index}), False)`,
-    `${sk}.addGeometry(Part.LineSegment(_p2_${index}, _p3_${index}), False)`,
-    `${sk}.addGeometry(Part.LineSegment(_p3_${index}, _p0_${index}), False)`,
+    `_fp0_${index} = App.Vector(_cx_${index}-_hw_${index}, _cy_${index}-_hl_${index}, _z_${index})`,
+    `_fp1_${index} = App.Vector(_cx_${index}+_hw_${index}, _cy_${index}-_hl_${index}, _z_${index})`,
+    `_fp2_${index} = App.Vector(_cx_${index}+_hw_${index}, _cy_${index}+_hl_${index}, _z_${index})`,
+    `_fp3_${index} = App.Vector(_cx_${index}-_hw_${index}, _cy_${index}+_hl_${index}, _z_${index})`,
+    `_fwire_${index} = Part.makePolygon([_fp0_${index}, _fp1_${index}, _fp2_${index}, _fp3_${index}, _fp0_${index}])`,
+    `${feat} = doc.addObject('Part::Feature', ${pyStr(`PocketProfile_${index}`)})`,
+    `${feat}.Shape = Part.Face(_fwire_${index})`,
     "doc.recompute()",
   ].join("\n");
 }
 
-function circSketchPy(index, p, stock) {
-  const sk = `_sk_${index}`;
+function circFacePy(index, p, stock) {
+  const feat = `_face_${index}`;
   return [
-    `${sk} = doc.addObject('Sketcher::SketchObject', ${pyStr(`PocketSketch_${index}`)})`,
-    `${sk}.Placement = App.Placement(App.Vector(0.0, 0.0, ${pyFloat(stock.h)}), App.Rotation(0, 0, 0, 1))`,
-    `${sk}.addGeometry(Part.Circle(App.Vector(${pyFloat(p.x)}, ${pyFloat(p.y)}, 0.0), App.Vector(0, 0, 1), ${pyFloat(Number(p.dia) / 2)}), False)`,
+    `_fcircle_${index} = Part.Circle(App.Vector(${pyFloat(p.x)}, ${pyFloat(p.y)}, ${pyFloat(stock.h)}), App.Vector(0, 0, 1), ${pyFloat(Number(p.dia) / 2)})`,
+    `${feat} = doc.addObject('Part::Feature', ${pyStr(`PocketProfile_${index}`)})`,
+    `${feat}.Shape = Part.Face(Part.Wire(_fcircle_${index}.toShape()))`,
     "doc.recompute()",
   ].join("\n");
 }
 
-function pocketOpPy(index, p, stock, sketchPy) {
+function pocketOpPy(index, p, stock, facePy) {
   const varName = `pocket_${index}`;
   const depth = Number(p.depth);
   const stepDown = Math.min(depth, 3.0);
   return [
-    sketchPy,
+    facePy,
     `${varName} = PathPocket.Create(${pyStr(`Pocket_${index}`)})`,
-    `${varName}.Base = [(_sk_${index}, [])]`,
+    `${varName}.Base = [(_face_${index}, ["Face1"])]`,
     `${varName}.StartDepth = ${pyFloat(stock.h)}`,
     `${varName}.FinalDepth = ${pyFloat(Number(stock.h) - depth)}`,
     `${varName}.StepDown = ${pyFloat(stepDown)}`,
@@ -185,8 +193,8 @@ function operationPy(index, op, stock) {
   }
   const p = op.params;
   if (op.type === "drill") return drillOpPy(index, p, stock);
-  if (op.type === "rectPocket") return pocketOpPy(index, p, stock, rectSketchPy(index, p, stock));
-  if (op.type === "circPocket") return pocketOpPy(index, p, stock, circSketchPy(index, p, stock));
+  if (op.type === "rectPocket") return pocketOpPy(index, p, stock, rectFacePy(index, p, stock));
+  if (op.type === "circPocket") return pocketOpPy(index, p, stock, circFacePy(index, p, stock));
   throw new Error(`operationPy: eslesmeyen tip ${op.type}`); // unreachable given the guards above
 }
 
