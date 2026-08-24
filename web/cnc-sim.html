@@ -1791,6 +1791,84 @@ function tpMillChamfer(depth,cw){
   return q;
 }
 
+/* ---- stok-tabanlı işlem önizlemesi ("sticker") ----
+ * Faz 3: onaylanmadan önce, tam olarak gerçekleştirilecek işlemin
+ * konum/boyutunu stok üzerinde gösteren, sahneye EKLENEN ayrı bir katman.
+ * Stok mesh'ine (`plane`) veya `mill.queue`'ya hiç dokunmaz — tamamen
+ * görsel, `clearOpPreview()` ile her zaman zararsızca kaldırılabilir.
+ * Aynı x/y/depth/dia/pw/pl/... alan adlarını backend'deki stok-tabanlı CAM
+ * planıyla (stockCamPlanService.js) paylaşır, böylece sticker'ın çizdiği
+ * ölçüyle gerçek FreeCAD işleminin ölçüsü her zaman birebir aynı kaynaktan
+ * gelir — ayrı bir hesaplama yok.
+ * Not: burada kullanılan x/y, G-code'un kendi X/Y ekseni (X=sol-sağ,
+ * Y=ön-arka derinlik) — sahnenin render ekseni değil. Sahnede yükseklik
+ * Three.js'in Y ekseni olduğu için, gcode-Y burada render-Z'ye denk düşer
+ * (tıpkı tpMillDrill/tpMillCircPocket'in kendi cx/cz parametrelerinde
+ * olduğu gibi). */
+let _opPreviewGroup = null;
+
+function clearOpPreview(){
+  if(!_opPreviewGroup) return;
+  scene.remove(_opPreviewGroup);
+  _opPreviewGroup.traverse(o=>{o.geometry?.dispose?.();o.material?.dispose?.();});
+  _opPreviewGroup=null;
+}
+
+function showOpPreview(opType, params){
+  clearOpPreview();
+  const g=new THREE.Group();
+  const renderY=(TOP||0)+0.3; // just above the real top surface, never touching it
+  const lineMat=new THREE.LineBasicMaterial({color:0xffaa00});
+  const fillMat=new THREE.MeshBasicMaterial({color:0xffaa00,transparent:true,opacity:0.25,side:THREE.DoubleSide,depthWrite:false});
+  const cx=Number(params?.x)||0, cz=Number(params?.y)||0; // gcode X,Y -> render X,Z
+
+  function outlineFromPoints(pts2d){
+    const pts=pts2d.map(([dx,dz])=>new THREE.Vector3(cx+dx,renderY,cz+dz));
+    g.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), lineMat));
+  }
+  function fillFromShape2d(pts2d){
+    const shape=new THREE.Shape();
+    pts2d.forEach(([dx,dz],i)=>{ if(i===0) shape.moveTo(dx,dz); else shape.lineTo(dx,dz); });
+    shape.closePath();
+    const geo=new THREE.ShapeGeometry(shape);
+    geo.rotateX(-Math.PI/2);
+    const fill=new THREE.Mesh(geo,fillMat);
+    fill.position.set(cx,renderY-0.05,cz);
+    g.add(fill);
+  }
+  function rectCorners(halfW,halfL){
+    return [[-halfW,-halfL],[halfW,-halfL],[halfW,halfL],[-halfW,halfL],[-halfW,-halfL]];
+  }
+  function polygonCorners(radius,sides,rotationDeg){
+    const rot=((rotationDeg||0)*Math.PI)/180, pts=[];
+    for(let i=0;i<=sides;i++){const a=rot+(i/sides)*Math.PI*2;pts.push([Math.cos(a)*radius,Math.sin(a)*radius]);}
+    return pts;
+  }
+  function rotatedRectCorners(halfW,halfL,angleDeg){
+    const rad=((angleDeg||0)*Math.PI)/180;
+    return rectCorners(halfW,halfL).map(([lx,lz])=>[
+      lx*Math.cos(rad)-lz*Math.sin(rad),
+      lx*Math.sin(rad)+lz*Math.cos(rad),
+    ]);
+  }
+
+  let pts2d=null;
+  switch(opType){
+    case "drill": pts2d=polygonCorners((Number(params?.dia)||10)/2,24); break;
+    case "rectPocket": pts2d=rectCorners((Number(params?.pw)||20)/2,(Number(params?.pl)||20)/2); break;
+    case "circPocket": pts2d=polygonCorners((Number(params?.dia)||20)/2,32); break;
+    case "hexPocket": pts2d=polygonCorners((Number(params?.dia)||20)/2,6); break;
+    case "slot": pts2d=rotatedRectCorners((Number(params?.sl)||40)/2,(Number(params?.sw)||10)/2,Number(params?.dirAngle)||0); break;
+    default: pts2d=null; // face/contour/chamfer act on the whole part — nothing localized to mark
+  }
+  if(pts2d){
+    outlineFromPoints(pts2d);
+    fillFromShape2d(pts2d);
+  }
+  scene.add(g);
+  _opPreviewGroup=g;
+}
+
 /* ---- torna toolpath generators ---- */
 function tpLatheTurn(targetDia,startZ,endZ){
   const targetR=targetDia/2,clearZ=startZ-5,q=[];let r=STOCK_R;
@@ -1911,6 +1989,8 @@ function sampleBoltProfile(){
 
 /* ---- akıllı öneri sistemi ---- */
 function taiGetChips(){
+  const stockCamChips=stockCamContextChips();
+  if(stockCamChips) return stockCamChips;
   if(isMill()){
     if(taiLastOp==="drill")return[
       {l:"Başka konumda delik",c:"X20 Z10 noktasında 10mm çapında 15mm delik aç"},
@@ -1982,12 +2062,249 @@ function taiSendMsg(){const txt=taiInput.value.trim();if(!txt)return;taiInput.va
 taiSend.onclick=taiSendMsg;
 taiInput.onkeydown=e=>{if(e.key==="Enter")taiSendMsg();};
 
+/* ==================================================================== */
+/*  STOK-TABANLI CAM SİHİRBAZI (menü -> LLM soru-cevap -> sticker ->     */
+/*  onay -> gerçek FreeCAD üretimi). Node backend'in /stock-cam/* uç     */
+/*  noktalarını kullanır — ENABLE_LLM bayrağından BAĞIMSIZ çalışır,      */
+/*  çünkü buradaki LLM kullanımı CAM Asistanı ile aynı güvenli kalıp:    */
+/*  LLM sadece sabit bir şemadaki parametreleri çıkarır/sorar, G-code'u  */
+/*  asla kendisi yazmaz — gerçek G-code her zaman FreeCAD'den, mevcut    */
+/*  trusted-epilogue güvenlik zincirinden geçerek çıkar.                 */
+/* ==================================================================== */
+const STOCK_CAM_MENU=[
+  {type:"drill",label:"Delik Delme"},
+  {type:"rectPocket",label:"Dikdörtgen Cep"},
+  {type:"circPocket",label:"Daire Cep"},
+];
+let stockCamPlanKey=null;   // bu sayfa oturumu boyunca kalıcı
+let stockCamOps=[];         // onaylanmış işlemlerin yerel kopyası (geçmiş paneli için)
+let stockCam=null;          // {opType, opLabel, answers} — sihirbaz sürerken
+let stockCamPending=null;   // {opType, opLabel, answers} — sticker gösterildi, onay bekleniyor
+let stockCamEditingId=null; // düzenlenen işlemin id'si (varsa) — onaylamak yerine düzenle çağrılır
+let stockCamMenuOpen=false;
+let stockCamHistoryOpen=false;
+
+function stockCamContextChips(){
+  if(stockCamPending)return[{l:"✅ Onayla",c:"onayla"},{l:"❌ İptal",c:"iptal"}];
+  if(stockCam)return[{l:"❌ İptal",c:"iptal"}];
+  if(stockCamMenuOpen)return STOCK_CAM_MENU.map(m=>({l:m.label,c:m.label}));
+  if(stockCamHistoryOpen){
+    const chips=stockCamOps.map((o,i)=>({l:`✎ ${i+1}. ${o.label}`,c:`islem duzenle ${i+1}`}));
+    chips.push({l:"⬅ Kapat",c:"gecmisi kapat"});
+    return chips;
+  }
+  if(!isMill())return null;
+  const chips=[{l:"🔧 İşlem Menüsü",c:"işlem menüsü"}];
+  if(stockCamOps.length){
+    chips.push({l:"📋 Geçmiş ("+stockCamOps.length+")",c:"geçmiş"});
+    chips.push({l:"⬇️ G-code Oluştur",c:"g-code oluştur"});
+  }
+  return chips;
+}
+
+async function stockCamEnsurePlan(){
+  if(stockCamPlanKey)return stockCamPlanKey;
+  const r=await fetch(`${MAG_API_BASE}/stock-cam/plan`,{method:"POST",headers:magHeaders(),body:JSON.stringify({stock:{w:W,d:D,h:TOP}})});
+  const data=await r.json();
+  if(!r.ok)throw new Error(data?.error||"Plan olusturulamadi.");
+  stockCamPlanKey=data.plan.planKey;
+  return stockCamPlanKey;
+}
+
+async function stockCamPollJob(jobId){
+  const deadline=Date.now()+20*60*1000;
+  while(Date.now()<deadline){
+    await new Promise(res=>setTimeout(res,1500));
+    let r,data;
+    try{ r=await fetch(`${MAG_API_BASE}/jobs/${jobId}`,{headers:magHeaders()}); data=await r.json(); }
+    catch{ continue; }
+    if(r.status===404)throw new Error("İşlem bulunamadı veya zaman aşımına uğradı.");
+    if(!r.ok||!data)continue;
+    if(data.status==="pending")continue;
+    if(data.status==="error")throw new Error(data.error||"İşlem başarısız oldu.");
+    if(data.status==="done"){const{status,ok,...body}=data;return body;}
+  }
+  throw new Error("İşlem zaman aşımına uğradı.");
+}
+
+function stockCamOpSummary(opType,params){
+  if(opType==="drill")return `Ø${params.dia}mm, ${params.depth}mm derin, X${params.x} Y${params.y}`;
+  if(opType==="rectPocket")return `${params.pw}x${params.pl}mm, ${params.depth}mm derin, X${params.x} Y${params.y}`;
+  if(opType==="circPocket")return `Ø${params.dia}mm, ${params.depth}mm derin, X${params.x} Y${params.y}`;
+  return JSON.stringify(params);
+}
+
+async function stockCamShowMenu(){
+  try{ await stockCamEnsurePlan(); }
+  catch(e){ taiMsg("⛔ "+e.message,"bot"); return; }
+  stockCamMenuOpen=true;
+  taiMsg("<b>Hangi işlemi eklemek istersiniz?</b><br>"+STOCK_CAM_MENU.map(m=>"• "+m.label).join("<br>")+"<br><br>Aşağıdaki düğmelerden birini seçin.","bot");
+}
+
+async function stockCamStartWizard(opType,opLabel,prefill){
+  try{ await stockCamEnsurePlan(); }
+  catch(e){ taiMsg("⛔ "+e.message,"bot"); return; }
+  stockCamMenuOpen=false;
+  stockCam={opType,opLabel,answers:prefill||{}};
+  taiMsg(`<b>${opLabel}</b> seçildi. Parametreleri anlatın (örn: "10mm çapında 10mm derinlikte merkeze").`,"bot");
+}
+
+async function stockCamAdvanceStep(text){
+  const{opType,answers}=stockCam;
+  let data;
+  try{
+    const r=await fetch(`${MAG_API_BASE}/stock-cam/step`,{method:"POST",headers:magHeaders(),
+      body:JSON.stringify({planKey:stockCamPlanKey,opType,message:text,answers})});
+    data=await r.json();
+    if(!r.ok)throw new Error(data?.error||"Sunucu hatası.");
+  }catch(e){ taiMsg("⛔ Hata: "+e.message,"bot"); return; }
+  stockCam.answers=data.answers;
+  if(!data.done){ taiMsg(data.question||"Devam eden parametreler için bilgi verin.","bot"); return; }
+  if(data.problems&&data.problems.length){ taiMsg("⛔ "+data.problems.join("<br>"),"bot"); return; }
+  showOpPreview(opType,data.answers);
+  stockCamPending={opType,opLabel:stockCam.opLabel,answers:data.answers};
+  stockCam=null;
+  const verb=stockCamEditingId?"güncellendi":"gösterildi";
+  taiMsg(`✓ Önizleme ${verb} (${stockCamPending.opLabel}: ${stockCamOpSummary(opType,data.answers)}). Stok üzerindeki turuncu alanı kontrol edin. Doğruysa "onayla", değilse "iptal" yazın.`,"bot");
+}
+
+async function stockCamDoConfirm(){
+  if(!stockCamPending)return;
+  const{opType,opLabel,answers}=stockCamPending;
+  const editingId=stockCamEditingId;
+  taiMsg("⏳ FreeCAD'de gerçek G-code üretiliyor ve güvenlik kontrolünden geçiriliyor…","bot");
+  try{
+    const url=editingId?`${MAG_API_BASE}/stock-cam/edit`:`${MAG_API_BASE}/stock-cam/confirm`;
+    const body=editingId?{planKey:stockCamPlanKey,opId:editingId,opType,params:answers}:{planKey:stockCamPlanKey,opType,params:answers};
+    const r=await fetch(url,{method:"POST",headers:magHeaders(),body:JSON.stringify(body)});
+    const start=await r.json();
+    if(!r.ok)throw new Error(start?.error||"Sunucu hatası.");
+    const result=await stockCamPollJob(start.jobId);
+    if(!result.confirmed){
+      taiMsg("⛔ Onaylanamadı: "+(result.error||"bilinmeyen hata")+"<br>Parametreleri düzeltip tekrar deneyebilirsiniz.","bot");
+      return; // sticker kalır, operatör düzeltip tekrar "onayla" diyebilir
+    }
+    clearOpPreview();
+    stockCamPending=null; stockCamEditingId=null;
+    if(editingId){
+      const idx=stockCamOps.findIndex(o=>o.id===editingId);
+      if(idx!==-1)stockCamOps[idx]={id:editingId,type:opType,label:opLabel,params:answers};
+    }else{
+      stockCamOps.push({id:result.operation.id,type:opType,label:opLabel,params:answers});
+    }
+    taiMsg(`<span class="tai-msg-action">✓ ${opLabel} onaylandı:</span> ${stockCamOpSummary(opType,answers)}`+
+      (result.estimatedMinutes!=null?` (tahmini süre: ${result.estimatedMinutes} dk)`:""),"bot");
+  }catch(e){
+    taiMsg("⛔ Hata: "+e.message,"bot");
+  }
+}
+
+function stockCamShowHistory(){
+  if(!stockCamOps.length){ taiMsg("Henüz onaylanmış işlem yok.","bot"); return; }
+  stockCamHistoryOpen=true;
+  taiMsg("<b>Onaylanan İşlemler:</b><br>"+stockCamOps.map((o,i)=>
+    `${i+1}. ${o.label} — ${stockCamOpSummary(o.type,o.params)}`).join("<br>")+
+    "<br><br>Düzenlemek için aşağıdan seçin.","bot");
+}
+
+async function stockCamEditPick(indexOneBased){
+  const idx=indexOneBased-1;
+  const op=stockCamOps[idx];
+  if(!op){ taiMsg("⛔ Böyle bir işlem yok.","bot"); return; }
+  stockCamHistoryOpen=false;
+  stockCamEditingId=op.id;
+  await stockCamStartWizard(op.type,op.label,{...op.params});
+  taiMsg(`Mevcut değerler: ${stockCamOpSummary(op.type,op.params)}. Neyi değiştirmek istersiniz? (Değişmeyecek değerleri de tekrar söylemeniz gerekmez, sadece değişeni belirtin.)`,"bot");
+}
+
+async function stockCamDoGenerateGcode(){
+  if(!stockCamPlanKey||!stockCamOps.length){ taiMsg("Henüz onaylanmış işlem yok.","bot"); return; }
+  taiMsg("⏳ Tüm plan için G-code üretiliyor…","bot");
+  try{
+    const r=await fetch(`${MAG_API_BASE}/stock-cam/gcode`,{method:"POST",headers:magHeaders(),
+      body:JSON.stringify({planKey:stockCamPlanKey})});
+    const start=await r.json();
+    if(!r.ok)throw new Error(start?.error||"Sunucu hatası.");
+    const result=await stockCamPollJob(start.jobId);
+    if(!result.exported){ taiMsg("⛔ G-code üretilemedi: "+(result.error||"bilinmeyen hata"),"bot"); return; }
+    taiMsg(`<span class="tai-msg-action">✓ G-code hazır:</span> <a href="${result.gcodeUrl}" target="_blank" rel="noopener">indir</a>`,"bot");
+    // Faz 7: FreeCAD'in ürettiği G-code'u indirmekle yetinme — hemen simülatörde
+    // çalıştırıp gözle doğrula, tıpkı elle yüklenen bir .gcode dosyasında olduğu gibi.
+    try{
+      const gtext=await (await fetch(result.gcodeUrl)).text();
+      const stockDims={w:W,d:D,h:TOP};
+      const parsed=parseGcode(gtext,"mill");
+      if(parsed.q.length>0){
+        millProgramText=gtext;
+        runMillGcode(parsed,stockDims);
+        taiMsg("▶ G-code simülatörde çalıştırıldı, sonucu kontrol edin.","bot");
+      }
+    }catch(e){
+      taiMsg("⚠ G-code indi ama simülatörde otomatik çalıştırılamadı: "+e.message+" — dosyayı elle yükleyebilirsiniz.","bot");
+    }
+  }catch(e){
+    taiMsg("⛔ Hata: "+e.message,"bot");
+  }
+}
+
+// taiUserInput'a bağlanan giriş noktası — true dönerse normal taiExec akışı
+// atlanır (bu metin sihirbaz tarafından ele alındı demektir).
+async function stockCamHandleInput(text){
+  const t=taiNorm(text);
+
+  if((stockCam||stockCamPending)&&/^(iptal|cancel|vazgec)/i.test(t)){
+    clearOpPreview();
+    stockCam=null; stockCamPending=null; stockCamEditingId=null;
+    taiMsg("✓ İşlem iptal edildi.","bot");
+    return true;
+  }
+  if(stockCamPending&&/^(onayla|evet|tamam|confirm|ok)/i.test(t)){
+    await stockCamDoConfirm();
+    return true;
+  }
+  if(stockCam){
+    await stockCamAdvanceStep(text);
+    return true;
+  }
+  if(stockCamHistoryOpen&&/^gecmisi kapat/i.test(t)){
+    stockCamHistoryOpen=false;
+    taiMsg("✓ Geçmiş kapatıldı.","bot");
+    return true;
+  }
+  const editMatch=t.match(/^islem duzenle\s+(\d+)/i);
+  if(editMatch){
+    await stockCamEditPick(parseInt(editMatch[1],10));
+    return true;
+  }
+  if(/(islem\s*menu(su)?)$/i.test(t)){
+    if(!isMill()){ taiMsg("Bu özellik şu an sadece Freze modunda kullanılabilir.","bot"); return true; }
+    await stockCamShowMenu();
+    return true;
+  }
+  if(stockCamMenuOpen){
+    const picked=STOCK_CAM_MENU.find(m=>t===taiNorm(m.label));
+    if(picked){ await stockCamStartWizard(picked.type,picked.label); return true; }
+  }
+  if(/^(gecmis|islem\s*listesi|onaylanan\s*islemler)$/i.test(t)){
+    stockCamShowHistory();
+    return true;
+  }
+  if(/(g.?code\s*olustur|gkodu\s*olustur)/i.test(t)){
+    await stockCamDoGenerateGcode();
+    return true;
+  }
+  return false;
+}
+
 function taiUserInput(text){
   taiMsg(text,"user");
-  const result=taiExec(text);
-  if(result){taiMsg(result,"bot");taiRenderChips();return;}
-  taiMsg("Bu komutu anlayamadım. Şu tarz komutlar deneyebilirsin:<br>• <b>12mm çapında 20mm delik aç</b><br>• <b>60x40mm 10mm cep aç</b><br>• <b>Çapı 30mm'ye düşür</b><br>• <b>Örnek parçaları göster</b><br>• <b>Yardım</b>","bot");
-  taiRenderChips();
+  stockCamHandleInput(text).then(handled=>{
+    if(handled){ taiRenderChips(); return; }
+    const result=taiExec(text);
+    if(result){ taiMsg(result,"bot"); taiRenderChips(); return; }
+    taiMsg("Bu komutu anlayamadım. Şu tarz komutlar deneyebilirsin:<br>• <b>12mm çapında 20mm delik aç</b><br>• <b>60x40mm 10mm cep aç</b><br>• <b>Çapı 30mm'ye düşür</b><br>• <b>Örnek parçaları göster</b><br>• <b>Yardım</b>","bot");
+    taiRenderChips();
+  });
 }
 
 // Locally-executed operations (delik/cep/örnek parça/vb.) never produce G-code
@@ -2651,6 +2968,7 @@ window._rover = {
   taiUserInput, taiExec, taiGetChips, taiNorm, taiMsg, taiRenderChips,
   taiMessages, parseGcode, runMillGcode, runLatheGcode, safetyInterceptor,
   magazine, TOOL_LIBRARY, buildTool, buildMagazineDisk, takeLastRunQueue,
+  showOpPreview, clearOpPreview,
   get CUTTER_R(){ return CUTTER_R; }, get CUTTER_H(){ return CUTTER_H; },
   get active(){ return active; },
   get W(){ return W; }, get D(){ return D; }, get TOP(){ return TOP; },

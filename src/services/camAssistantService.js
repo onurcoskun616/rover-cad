@@ -67,8 +67,11 @@ export function parseJsonLoose(raw) {
 const JSON_ATTEMPTS = 2;
 
 // Call the CLI expecting JSON, validating/normalising with `shape`. Retries
-// with increasingly firm reminders if the response doesn't parse.
-async function runClaudeJson(input, systemPromptFile, shape) {
+// with increasingly firm reminders if the response doesn't parse. Exported
+// so other LLM-as-structured-data-extractor call sites (e.g.
+// stockCamStepService.js's parameter-collection wizard) reuse the same
+// retry/validation behavior instead of re-implementing it.
+export async function runClaudeJson(input, systemPromptFile, shape) {
   let lastError;
   let lastRaw = "";
   for (let attempt = 1; attempt <= JSON_ATTEMPTS; attempt++) {
@@ -285,7 +288,7 @@ export function isTornaMachine(answers) {
 // it disabled, an operation that still ends up ambiguous fails immediately
 // with a catchable Python error our retry loop can feed back to the model,
 // instead of hanging the FreeCAD session with no way to recover.
-function disableInteractiveToolControllerPy() {
+export function disableInteractiveToolControllerPy() {
   return [
     "try:",
     "    from PathScripts import PathUtils as _PathUtils",
@@ -323,7 +326,7 @@ function disableInteractiveToolControllerPy() {
 // it (and compiling with that same filename) makes the traceback print the
 // actual failing statement, not just its line number — confirmed by a
 // direct before/after test.
-function wrapWithTracebackPy(code) {
+export function wrapWithTracebackPy(code) {
   return [
     "try:",
     "    import linecache as _lc",
@@ -877,7 +880,7 @@ function postModuleCandidates(postName) {
 // computed for each operation in `job`, estimate machining time from the move
 // lengths and feed rates, and write it all as JSON for the viewer + quote.
 // Rapids are flagged so the preview can distinguish them from cutting moves.
-function previewEpiloguePy(previewJsonPath, defaultFeed, isTorna) {
+export function previewEpiloguePy(previewJsonPath, defaultFeed, isTorna) {
   const feed = Number(defaultFeed) > 0 ? Number(defaultFeed) : 500;
   return [
     "",
@@ -941,7 +944,7 @@ function previewEpiloguePy(previewJsonPath, defaultFeed, isTorna) {
 
 // Trusted epilogue (NOT model output): post-process the operations FreeCAD built
 // in `job` into G-code with the chosen controller's post-processor.
-function postEpiloguePy(gcodePath, postName, isTorna) {
+export function postEpiloguePy(gcodePath, postName, isTorna) {
   const candidates = postModuleCandidates(postName);
   return [
     "",
