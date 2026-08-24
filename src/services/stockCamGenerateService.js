@@ -63,7 +63,19 @@ function stockPy(stock) {
     "    except Exception:",
     "        from PathScripts import PathToolController",
     "",
-    "doc = App.newDocument()",
+    // Force-close any document left open from a previous run before opening
+    // a fresh one — the same guard camService.js's stepInsertPy uses for the
+    // STEP-file CAM flow. Skipping this is what caused a live "GUI dispatch
+    // timed out after 90s" failure: FreeCAD's shared, persistent GUI process
+    // still had a document open (from an earlier attempt — including a
+    // same-operation double-confirm, since two concurrent runs both call
+    // this), and something about that stale state blocked the GUI thread.
+    "if App.ActiveDocument is not None:",
+    "    try:",
+    "        App.closeDocument(App.ActiveDocument.Name)",
+    "    except Exception:",
+    "        pass",
+    "doc = App.newDocument('RoverStockJob')",
     `_stock_w, _stock_d, _stock_h = ${w}, ${d}, ${h}`,
     "_stock_solid = Part.makeBox(_stock_w, _stock_d, _stock_h, App.Vector(-_stock_w/2.0, -_stock_d/2.0, 0.0))",
     "base = doc.addObject('Part::Feature', 'Stok')",
