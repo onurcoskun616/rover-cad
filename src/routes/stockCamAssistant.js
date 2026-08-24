@@ -62,26 +62,33 @@ router.get("/stock-cam/plan/:planKey", apiKeyAuth, (req, res) => {
 // Faz 2: one turn of the parameter-collection wizard for a chosen operation
 // type. Stateless like CAM Asistanı's /cam-step — the client resends the
 // accumulated answers each turn.
-router.post("/stock-cam/step", apiKeyAuth, async (req, res, next) => {
-  try {
-    const planKey = requirePlanKey(req, res);
-    if (!planKey) return;
-    const plan = getPlan(planKey);
-    if (!plan) return res.status(404).json({ error: "Plan bulunamadi." });
-    const { opType, message, answers } = req.body ?? {};
-    if (!OPERATION_TYPES[opType]) {
-      return res.status(400).json({ error: `Bilinmeyen islem tipi: ${opType}` });
-    }
+router.post("/stock-cam/step", apiKeyAuth, (req, res) => {
+  const planKey = requirePlanKey(req, res);
+  if (!planKey) return;
+  const plan = getPlan(planKey);
+  if (!plan) return res.status(404).json({ error: "Plan bulunamadi." });
+  const { opType, message, answers } = req.body ?? {};
+  if (!OPERATION_TYPES[opType]) {
+    return res.status(400).json({ error: `Bilinmeyen islem tipi: ${opType}` });
+  }
+
+  // Async (polled via /jobs/:id): this calls the LLM (Claude CLI), which can
+  // take well over Cloudflare's ~100s edge timeout — same reason every other
+  // LLM/FreeCAD-touching CAM route in this file uses createJob/runJob. A
+  // synchronous await here manifests to the browser as a bare "Failed to
+  // fetch" once the edge kills the connection, with no error detail at all.
+  const jobId = createJob();
+  runJob(jobId, async () => {
     const result = await getNextParamStep(
       opType,
       typeof message === "string" ? message : "",
       answers && typeof answers === "object" ? answers : {},
       plan.stock,
     );
-    res.json(result);
-  } catch (err) {
-    next(err);
-  }
+    return { ok: true, body: result };
+  });
+
+  res.status(202).json({ jobId });
 });
 
 // Faz 3 support: re-validate a draft's params against the plan's stock
