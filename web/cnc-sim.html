@@ -2152,11 +2152,16 @@ async function stockCamStartWizard(opType,opLabel,prefill){
 async function stockCamAdvanceStep(text){
   const{opType,answers}=stockCam;
   let data;
+  taiMsg("⏳ Düşünüyor…","bot");
   try{
     const r=await fetch(`${MAG_API_BASE}/stock-cam/step`,{method:"POST",headers:magHeaders(),
       body:JSON.stringify({planKey:stockCamPlanKey,opType,message:text,answers})});
-    data=await r.json();
-    if(!r.ok)throw new Error(data?.error||"Sunucu hatası.");
+    const start=await r.json();
+    if(!r.ok)throw new Error(start?.error||"Sunucu hatası.");
+    // LLM cagrisi Cloudflare'in ~100sn edge zaman asimini asabilir — dogrudan
+    // yanit beklemek yerine (confirm/edit/gcode ile ayni sebep) job olarak
+    // baslatilip /jobs/:id ile yoklanir.
+    data=await stockCamPollJob(start.jobId);
   }catch(e){ taiMsg("⛔ Hata: "+e.message,"bot"); return; }
   stockCam.answers=data.answers;
   if(!data.done){ taiMsg(data.question||"Devam eden parametreler için bilgi verin.","bot"); return; }
