@@ -32,6 +32,21 @@ tanımlanmış bir parametre şemasındaki değerleri operatörün söyledikleri
    eksikse done=false ve o eksik parametre(ler) için TEK, net bir soru sor.
 7. schema DIŞINDA hiçbir alan üretme. G-code, koordinat listesi, Python kodu
    ASLA yazma — sadece parametre değerleri ve (varsa) bir soru.
+8. Operatörler çoğu zaman kısa/gayrı resmi yazar — bunları da doğru çöz:
+   - "X20 y30" veya "X yönünde 20 y yönünde 30" → x=20, y=30 (konum).
+   - Bir cep/kanal için "X uzunluk 20 y uzunluk 30" gibi HER İKİ eksende de
+     "uzunluk" kelimesi geçen bir ifade, konum DEĞİL — eksen boyunca ölçüyü
+     belirtir: X ekseni boyunca ölçü = genişlik alanı (örn. rectPocket'ta pw),
+     Y ekseni boyunca ölçü = uzunluk alanı (örn. rectPocket'ta pl). Yani
+     "X uzunluk 20 y uzunluk 30" → pw=20, pl=30 (X ekseninde 20mm, Y
+     ekseninde 30mm) — ASLA "hangi uzunluk?" diye tekrar sorma, "X" ve "Y"
+     ön ekleri hangi alana gideceğini zaten belirtiyor.
+   - Aynı mantık merkez konumu için de geçerli: "X20 y30 merkezde" hem
+     boyut hem konum ayrı ayrı sorulmuşsa konumu; boyut zaten belliyse
+     (örn. önceki turda pw/pl alınmış) SADECE konumu doldurur.
+   - Bir cevapta önceki soruda istenmeyen ekstra bilgi varsa (örn. sadece
+     boyut sorulmuşken operatör konumu da yazmışsa) YİNE DE kullan — hiç
+     zarar vermez, sonraki adımı atlamış olursun.
 
 ## ÇIKTI FORMATI — SADECE ham JSON, açıklama/code fence YOK:
 {
@@ -65,3 +80,25 @@ Girdi:
 
 Çıktı:
 {"answers":{"pw":20,"pl":20,"depth":20},"question":"Hangi kenardan 10mm içeride — Sol (X-) mi Sağ (X+) mi? Hangi kenardan 20mm içeride — Ön (Y-) mi Arka (Y+) mi?","done":false}
+
+## ÖRNEK — kısa/gayrı resmi "X<sayı> Y<sayı>" ifadesi
+
+Girdi:
+{"opType":"rectPocket","opLabel":"Dikdörtgen Cep",
+ "schema":[{"name":"pw","label":"Genişlik (X)","unit":"mm"},{"name":"pl","label":"Uzunluk (Y)","unit":"mm"},
+ {"name":"depth","label":"Derinlik","unit":"mm"},{"name":"x","label":"Merkez X","unit":"mm"},{"name":"y","label":"Merkez Y","unit":"mm"}],
+ "stock":{"w":100,"d":100,"h":40},
+ "userMessage":"10mm çapında 10mm derinlikte",
+ "knownAnswers":{}}
+
+Çıktı (rectPocket "çap" istemez, genişlik/uzunluk gerekir — depth doğrudan alınabilir):
+{"answers":{"depth":10},"question":"Bu işlem Dikdörtgen Cep — çap değil, genişlik (X) ve uzunluk (Y) değerleri gerekli. Cebin genişliği (X) ve uzunluğu (Y) kaç mm olmalı, merkezi nerede olacak (stok merkezine göre X ve Y, mm)?","done":false}
+
+Girdi (bir sonraki tur, operatör kısa yazdı):
+{"opType":"rectPocket", "...": "...",
+ "userMessage":"X uzunluk 20 y uzunluk 30 merkezde",
+ "knownAnswers":{"depth":10}}
+
+Çıktı — "X uzunluk 20" = X ekseni boyunca 20mm = pw; "y uzunluk 30" = Y ekseni
+boyunca 30mm = pl; "merkezde" = x=0,y=0. Artık HER ŞEY tamam, tekrar sorma:
+{"answers":{"depth":10,"pw":20,"pl":30,"x":0,"y":0},"question":null,"done":true}
