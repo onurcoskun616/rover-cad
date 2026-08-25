@@ -911,6 +911,21 @@ function updateCoolant(dt){for(const c of coolantPool){if(c.life>0){c.life-=dt*1
 function resizeMillStock(newW, newD, newTop){
   if(W===newW && D===newD && TOP===newTop) return;
   W=newW; D=newD; TOP=newTop;
+  // The stock-cam wizard's plan is created ONCE per page session and then
+  // reused for its whole lifetime (stockCamPlanKey stays set across every
+  // later "İşlem Menüsü" open) — it was never invalidated when the stock
+  // itself changed afterward, so every operation confirmed/generated after
+  // a mid-session resize kept being planned and machined against the OLD
+  // stock size, not the one now shown on screen. Any actual size change
+  // (this function no-ops otherwise, see the guard above) must throw away
+  // that stale plan so the next operation starts a fresh one against the
+  // CURRENT stock.
+  if(typeof stockCamPlanKey!=="undefined" && stockCamPlanKey){
+    stockCamPlanKey=null; stockCamOps=[]; stockCam=null; stockCamPending=null;
+    stockCamEditingId=null; stockCamMenuOpen=false; stockCamHistoryOpen=false;
+    if(typeof clearOpPreview==="function") clearOpPreview();
+    if(typeof taiMsg==="function") taiMsg("ℹ️ Stok boyutu değişti — önceki CAM planı sıfırlandı, yeni işlemler bu boyuta göre planlanacak.","bot");
+  }
   ({c:COLS, r:ROWS}=gridForStock(W, D));
   dx=W/(COLS-1); dz=D/(ROWS-1);
   refreshMarginCells();
