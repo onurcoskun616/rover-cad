@@ -120,7 +120,7 @@ router.post("/stock-cam/confirm", apiKeyAuth, (req, res) => {
   }
   if (!isStockGenerationSupported(opType)) {
     return res.status(400).json({
-      error: `'${OPERATION_TYPES[opType].label}' islemi henuz gercek FreeCAD uretimini desteklemiyor.`,
+      error: `'${OPERATION_TYPES[opType].label}' islemi henuz gercek Topkapi AI uretimini desteklemiyor.`,
     });
   }
   const problems = validateOperationParams(opType, params ?? {}, plan.stock);

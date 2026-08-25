@@ -2212,7 +2212,7 @@ async function stockCamDoConfirm(){
   stockCamConfirming=true;
   const{opType,opLabel,answers}=stockCamPending;
   const editingId=stockCamEditingId;
-  taiMsg("⏳ FreeCAD'de gerçek G-code üretiliyor ve güvenlik kontrolünden geçiriliyor…","bot");
+  taiMsg("⏳ Topkapı AI gerçek G-code üretiyor ve güvenlik kontrolünden geçiriyor…","bot");
   try{
     const url=editingId?`${MAG_API_BASE}/stock-cam/edit`:`${MAG_API_BASE}/stock-cam/confirm`;
     const body=editingId?{planKey:stockCamPlanKey,opId:editingId,opType,params:answers}:{planKey:stockCamPlanKey,opType,params:answers};
