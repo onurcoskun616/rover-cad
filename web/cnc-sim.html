@@ -2129,8 +2129,38 @@ let stockCamPending=null;   // {opType, opLabel, answers} — sticker gösterild
 let stockCamEditingId=null; // düzenlenen işlemin id'si (varsa) — onaylamak yerine düzenle çağrılır
 let stockCamMenuOpen=false;
 let stockCamHistoryOpen=false;
+let stockCamMachines=null;      // "Makineler" envanterinden çekilen liste — sayfa oturumu boyunca önbelleklenir
+let stockCamPostProcessor=null; // bu oturum için seçilen kontrolcü ("" = kayıtlı makine yok, sunucu varsayılanı grbl kullanır)
+// Kurulum akışı: her sayfa oturumunda (freze sekmesi ilk açıldığında) ZORUNLU
+// olarak önce kontrolcü, sonra stok boyutu sorulur — operatörün kendi isteği
+// ("her defasında ilk konuşmada sorsun... adım adım ilerlesin"). null=henüz
+// başlamadı, 'controller'/'newController'/'stockSize' = o adımda bekliyor,
+// 'done' = tamamlandı, normal İşlem Menüsü akışı açık.
+let stockCamSetupStage=null;
+// Hobi/DIY (GRBL, Mach3/4, LinuxCNC) ile birlikte endüstriyel/sanayi
+// kontrolcüleri de listelenir — eski CAM Asistanı akışının POST_OPTIONS
+// listesiyle aynı (camWizardService.js), backend'in postModuleCandidates()
+// zaten hepsini tanıyor.
+const STOCK_CAM_KNOWN_CONTROLLERS=[
+  "GRBL","Mach3","Mach4","LinuxCNC",
+  "Fanuc","Siemens (Sinumerik)",
+  "Heidenhain (TNC 640)","Heidenhain (iTNC 530)","Heidenhain (TNC 426/430)",
+  "Haas","Mitsubishi (Meldas)","Mazak","Okuma (OSP)","Doosan",
+];
 
 function stockCamContextChips(){
+  if(!isMill())return null;
+  if(stockCamSetupStage&&stockCamSetupStage!=="done"){
+    if(stockCamSetupStage==="controller"){
+      const chips=(stockCamMachines||[]).map(m=>({l:`${m.name} (${m.postProcessor||"GRBL"})`,c:`kontrolcu ${m.name}`}));
+      chips.push({l:"➕ Yeni Kontrolcü",c:"yeni kontrolcu"});
+      return chips;
+    }
+    if(stockCamSetupStage==="newController"){
+      return STOCK_CAM_KNOWN_CONTROLLERS.map(c=>({l:c,c}));
+    }
+    return null; // 'stockSize' — serbest metin girişi bekleniyor, chip yok
+  }
   if(stockCamPending)return[{l:"✅ Onayla",c:"onayla"},{l:"❌ İptal",c:"iptal"}];
   if(stockCam)return[{l:"❌ İptal",c:"iptal"}];
   if(stockCamMenuOpen)return STOCK_CAM_MENU.map(m=>({l:m.label,c:m.label}));
@@ -2139,13 +2169,89 @@ function stockCamContextChips(){
     chips.push({l:"⬅ Kapat",c:"gecmisi kapat"});
     return chips;
   }
-  if(!isMill())return null;
   const chips=[{l:"🔧 İşlem Menüsü",c:"işlem menüsü"}];
   if(stockCamOps.length){
     chips.push({l:"📋 Geçmiş ("+stockCamOps.length+")",c:"geçmiş"});
     chips.push({l:"⬇️ G-code Oluştur",c:"g-code oluştur"});
   }
   return chips;
+}
+
+// Freze sekmesi ilk açıldığında (sayfa yüklendiğinde) çağrılır — kontrolcü
+// ve stok boyutu sorulmadan hiçbir CAM işlemine izin verilmez.
+async function stockCamStartSetup(){
+  if(stockCamSetupStage!==null)return; // zaten başlamış/tamamlanmış
+  stockCamSetupStage="controller";
+  try{
+    const r=await fetch(`${MAG_API_BASE}/machines`,{headers:magHeaders()});
+    const data=await r.json();
+    stockCamMachines=Array.isArray(data?.machines)?data.machines:[];
+  }catch(e){ stockCamMachines=[]; }
+  if(stockCamMachines.length){
+    taiMsg("👋 Başlamadan önce: hangi tezgah/kontrolcüyü kullanacağız? Kayıtlı bir makine seçin ya da yeni ekleyin.","bot");
+  } else {
+    taiMsg("👋 Başlamadan önce: kayıtlı bir tezgahınız yok. Hangi kontrolcüyü kullanıyorsunuz?","bot");
+    stockCamSetupStage="newController";
+  }
+}
+
+async function stockCamRegisterController(controllerName){
+  const idx=(stockCamMachines||[]).length+1;
+  const name=`Freze-${idx}`;
+  try{
+    const r=await fetch(`${MAG_API_BASE}/machines`,{method:"POST",headers:magHeaders(),
+      body:JSON.stringify({name,postProcessor:controllerName})});
+    const data=await r.json();
+    if(!r.ok)throw new Error(data?.error||"Makine kaydedilemedi.");
+    stockCamMachines=[...(stockCamMachines||[]),data.machine];
+    stockCamPostProcessor=data.machine.postProcessor||controllerName;
+    taiMsg(`✓ Kaydedildi: <b>${name}</b> (${stockCamPostProcessor}). Bir daha sorulmayacak, bu makineyi seçebileceksiniz.`,"bot");
+  }catch(e){
+    stockCamPostProcessor=controllerName; // kayıt başarısız olsa bile bu oturum için kullan
+    taiMsg("⚠ Makine kaydedilemedi ama bu oturum için "+controllerName+" kullanılacak: "+e.message,"bot");
+  }
+  stockCamSetupStage="stockSize";
+  taiMsg("Şimdi stok boyutunu belirtin (mm, örn: <b>200x140x60</b>).","bot");
+}
+
+async function stockCamHandleSetupInput(text){
+  const t=taiNorm(text);
+  if(stockCamSetupStage==="controller"){
+    if(/^yeni\s*kontrolc/i.test(t)){
+      stockCamSetupStage="newController";
+      taiMsg("Hangi kontrolcüyü kullanıyorsunuz? (örn: GRBL, Mach3, Mach4, LinuxCNC, Fanuc, Sinumerik, Heidenhain…)","bot");
+      return true;
+    }
+    const m=text.match(/^kontrolcu\s+(.+)/i)||text.match(/^kontrolcü\s+(.+)/i);
+    const wanted=taiNorm(m?m[1]:text);
+    const found=(stockCamMachines||[]).find(mm=>taiNorm(mm.name)===wanted||taiNorm(mm.name).includes(wanted));
+    if(found){
+      stockCamPostProcessor=found.postProcessor||"GRBL";
+      stockCamSetupStage="stockSize";
+      taiMsg(`✓ Makine: <b>${found.name}</b> (${stockCamPostProcessor}) seçildi. Şimdi stok boyutunu belirtin (mm, örn: <b>200x140x60</b>).`,"bot");
+      return true;
+    }
+    taiMsg("Kayıtlı makinelerden birini seçin ya da \"Yeni Kontrolcü\" ile ekleyin.","bot");
+    return true;
+  }
+  if(stockCamSetupStage==="newController"){
+    await stockCamRegisterController(text.trim()||"GRBL");
+    return true;
+  }
+  if(stockCamSetupStage==="stockSize"){
+    const dims=text.match(/(\d+\.?\d*)\s*x\s*(\d+\.?\d*)\s*(?:x\s*(\d+\.?\d*))?/i);
+    if(!dims){
+      taiMsg("Lütfen stok boyutunu \"genişlik x derinlik x yükseklik\" formatında yazın, örn: 200x140x60.","bot");
+      return true;
+    }
+    const w=Math.max(40,Math.round(parseFloat(dims[1]))), d=Math.max(30,Math.round(parseFloat(dims[2]))),
+      h=Math.max(10,Math.round(dims[3]?parseFloat(dims[3]):TOP));
+    resizeMillStock(w,d,h);
+    stockCamSetupStage="done";
+    taiMsg(`✓ Stok boyutu: ${w}x${d}x${h}mm. Kurulum tamamlandı — şimdi işlem menüsünden devam edebilirsiniz.`,"bot");
+    return true;
+  }
+  return false;
 }
 
 async function stockCamEnsurePlan(){
@@ -2155,6 +2261,39 @@ async function stockCamEnsurePlan(){
   if(!r.ok)throw new Error(data?.error||"Plan olusturulamadi.");
   stockCamPlanKey=data.plan.planKey;
   return stockCamPlanKey;
+}
+
+// G-code was always exported with a silently-hardcoded fallback controller
+// (grbl) — the wizard never asked, or looked up, what the operator's real
+// mill actually is. grbl deliberately never emits a tool-change command
+// (its own FreeCAD source: "grbl currently does not handle it"), so a plan
+// with genuinely different-sized operations always machined everything
+// with whatever tool happened to be loaded. This reuses the SAME machine
+// inventory ("Makineler") the older CAM Asistanı flow already asks for,
+// instead of asking again from scratch: 0 machines → keep the grbl
+// fallback but say so; 1 → use it silently; 2+ → default to the first and
+// tell the operator how to pick a different one ("kontrolcü <makine adı>").
+async function stockCamResolvePostProcessor(){
+  if(stockCamPostProcessor!==null) return stockCamPostProcessor;
+  try{
+    const r=await fetch(`${MAG_API_BASE}/machines`,{headers:magHeaders()});
+    const data=await r.json();
+    const list=Array.isArray(data?.machines)?data.machines:[];
+    stockCamMachines=list;
+    if(list.length===0){
+      stockCamPostProcessor="";
+      taiMsg("ℹ️ Kayıtlı makine bulunamadı, varsayılan GRBL kontrolcüsü kullanılacak (takım değiştirme komutu üretmez). Gerçek tezgahınız farklıysa \"Makineler\" sayfasından ekleyin.","bot");
+    } else if(list.length===1){
+      stockCamPostProcessor=list[0].postProcessor||"GRBL";
+      taiMsg(`ℹ️ Makine: <b>${list[0].name}</b> (${stockCamPostProcessor}) kontrolcüsü kullanılacak.`,"bot");
+    } else {
+      stockCamPostProcessor=list[0].postProcessor||"GRBL";
+      taiMsg(`ℹ️ Birden fazla makine kayıtlı, varsayılan olarak <b>${list[0].name}</b> (${stockCamPostProcessor}) kullanılacak. Değiştirmek için "kontrolcü &lt;makine adı&gt;" yazın.`,"bot");
+    }
+  }catch(e){
+    stockCamPostProcessor="";
+  }
+  return stockCamPostProcessor;
 }
 
 async function stockCamPollJob(jobId){
@@ -2276,10 +2415,19 @@ async function stockCamEditPick(indexOneBased){
 
 async function stockCamDoGenerateGcode(){
   if(!stockCamPlanKey||!stockCamOps.length){ taiMsg("Henüz onaylanmış işlem yok.","bot"); return; }
+  const postProcessor=await stockCamResolvePostProcessor();
+  // grbl (kayıtlı makine yoksa varsayılan) M6 takım-değiştirme komutu üretmez
+  // (FreeCAD'in kendi kaynağındaki not: "grbl currently does not handle it").
+  // Birden fazla işlem varsa muhtemelen farklı boyutlarda takım gerekiyor —
+  // bu durumda program takımı OTOMATİK değiştirmeyecek, operatör kontrol
+  // etmeli.
+  if(stockCamOps.length>1 && /^(|grbl)$/i.test((postProcessor||"").trim())){
+    taiMsg("⚠ Bu kontrolcü (GRBL) otomatik takım değiştirmeyi desteklemiyor — plan birden fazla işlem içeriyor, gerekirse takımı elle kontrol edip değiştirmeniz gerekebilir.","bot");
+  }
   taiMsg("⏳ Tüm plan için G-code üretiliyor…","bot");
   try{
     const r=await fetch(`${MAG_API_BASE}/stock-cam/gcode`,{method:"POST",headers:magHeaders(),
-      body:JSON.stringify({planKey:stockCamPlanKey})});
+      body:JSON.stringify({planKey:stockCamPlanKey,postProcessor})});
     const start=await r.json();
     if(!r.ok)throw new Error(start?.error||"Sunucu hatası.");
     const result=await stockCamPollJob(start.jobId);
@@ -2308,6 +2456,10 @@ async function stockCamDoGenerateGcode(){
 // atlanır (bu metin sihirbaz tarafından ele alındı demektir).
 async function stockCamHandleInput(text){
   const t=taiNorm(text);
+
+  if(isMill()&&stockCamSetupStage&&stockCamSetupStage!=="done"){
+    return await stockCamHandleSetupInput(text);
+  }
 
   if((stockCam||stockCamPending)&&/^(iptal|cancel|vazgec)/i.test(t)){
     clearOpPreview();
@@ -2348,6 +2500,26 @@ async function stockCamHandleInput(text){
   }
   if(/(g.?code\s*olustur|gkodu\s*olustur)/i.test(t)){
     await stockCamDoGenerateGcode();
+    return true;
+  }
+  const ctrlMatch=text.match(/^(?:kontrolc[uü]|controller|makine)\s+(.+)/i);
+  if(ctrlMatch){
+    if(stockCamMachines===null){
+      try{
+        const r=await fetch(`${MAG_API_BASE}/machines`,{headers:magHeaders()});
+        const data=await r.json();
+        stockCamMachines=Array.isArray(data?.machines)?data.machines:[];
+      }catch(e){ stockCamMachines=[]; }
+    }
+    const wanted=taiNorm(ctrlMatch[1]);
+    const found=stockCamMachines.find(m=>taiNorm(m.name)===wanted||taiNorm(m.name).includes(wanted));
+    if(found){
+      stockCamPostProcessor=found.postProcessor||"GRBL";
+      taiMsg(`✓ Kontrolcü değiştirildi: <b>${found.name}</b> (${stockCamPostProcessor}).`,"bot");
+    }else{
+      const names=stockCamMachines.map(m=>m.name).join(", ")||"(kayıtlı makine yok — \"Makineler\" sayfasından ekleyin)";
+      taiMsg(`⛔ "${ctrlMatch[1]}" adında kayıtlı bir makine bulunamadı. Kayıtlı makineler: ${names}`,"bot");
+    }
     return true;
   }
   return false;
@@ -2710,6 +2882,9 @@ function taiExec(raw){
 
 taiMsg("Merhaba! Ben <b>Topkapı AI</b>, CNC asistanın.<br>Doğal dilde komut verebilirsin:<br>• \"<b>12mm çapında 20mm delik aç</b>\"<br>• \"<b>60x40mm 10mm derin cep aç</b>\"<br>• \"<b>Soğutma aç</b>\" / \"<b>Coolant flood</b>\" / \"<b>M8</b>\"<br>• \"<b>Örnek parçaları göster</b>\"<br>• \"<b>Yardım</b>\" yazarak tüm komutları gör.","bot");
 taiRenderChips();
+// Stok-tabanlı CAM sihirbazı her sayfa oturumunda kontrolcü + stok boyutu
+// bilinmeden başlamaz — bkz. stockCamStartSetup tanımı.
+if(isMill()){ stockCamStartSetup().then(taiRenderChips); }
 
 /* ==================================================================== */
 /* ================  TAKIM MAGAZİNİ DÜZENLEYİCİ (kalıcı)  ============= */
