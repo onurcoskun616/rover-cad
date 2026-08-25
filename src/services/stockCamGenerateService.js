@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { config } from "../config.js";
@@ -431,8 +432,29 @@ export async function exportStockPlanGcode(plan, gcodePath, postName) {
     if (safetyError) {
       return { ok: false, error: `Guvenlik kontrolu basarisiz: ${safetyError}` };
     }
+    prependStockHeaderComment(gcodePath, plan.stock);
     return { ok: true, gcodePath };
   } catch (err) {
     return { ok: false, error: err.message };
   }
+}
+
+// A plain .gcode file carries no stock-size information — real CNC
+// controllers don't need it (the operator loads the physical stock), but
+// this simulator does, to draw and align the block the toolpath is meant to
+// cut. The wizard's own "generate then auto-run" path already knows the
+// right size (it just built the plan), but if the operator downloads the
+// file and re-opens it later — exactly what surfaced this — the simulator
+// only had the toolpath's own bounding box to guess from, which is smaller
+// than and centered differently from the real stock, making the cut look
+// wrong relative to the (mis-sized) block drawn on screen. Fixing this
+// without inventing a nonstandard G-code dialect: prepend one ordinary
+// parenthesized comment line, ignored by every real controller and by our
+// own parser unless it specifically looks for it (see cnc-sim.html's
+// parseRoverStockHeader), carrying the exact stock the operations were
+// planned against.
+export function prependStockHeaderComment(gcodePath, stock) {
+  const header = `(ROVER_STOCK W${pyFloat(stock.w)} D${pyFloat(stock.d)} H${pyFloat(stock.h)})\n`;
+  const existing = fs.readFileSync(gcodePath, "utf-8");
+  fs.writeFileSync(gcodePath, header + existing, "utf-8");
 }
