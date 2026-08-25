@@ -102,18 +102,45 @@ function toolDiameterFor(type, p) {
   return 6;
 }
 
-// FreeCAD's own opExecute can silently reset StartDepth/FinalDepth back to
-// the operation's defaults during doc.recompute() (documented and worked
-// around the same way in cam-code-system-prompt.txt's _rover_make_leveled_ops).
-// When that happens here the op ends up with FinalDepth ~= StartDepth (a
-// zero-depth skim at the stock's top surface) — the tool visibly plunges to
-// that level and retracts, but the height map never drops below the
-// existing top, so nothing is removed. Re-assert and recompute again
-// whenever the values didn't stick.
+// ROOT CAUSE (confirmed by reading FreeCAD 1.1.3's actual source,
+// src/Mod/CAM/Path/Op/Base.py + Path/Base/SetupSheet.py — this workbench is
+// "CAM" now, "Path" is just its still-importable Python namespace): every
+// new operation's setDefaultValues() calls
+// applyExpression(obj, 'FinalDepth', job.SetupSheet.FinalDepthExpression),
+// and SetupSheet.DefaultFinalDepthExpression is the literal string
+// "OpFinalDepth" (same for StartDepth/OpStartDepth) — so StartDepth/FinalDepth
+// come out of Create() already bound to a LIVE FreeCAD Expression, not a
+// plain number. Assigning a plain value on top does not remove that binding;
+// the next doc.recompute() just re-evaluates the expression and overwrites
+// it again. And Base.py's updateDepths() (which onChanged() reruns on every
+// Base/StartDepth/FinalDepth write) computes OpFinalDepth from the model's
+// bounding box top when the op has no `.Base` (true for our Drilling and,
+// after the profile face is Base'd, still true for the derived OpFinalDepth
+// itself) — i.e. FinalDepth keeps getting pulled back to the stock's TOP
+// surface, a zero-depth op: the tool visibly plunges to that height and
+// retracts, but nothing is ever removed. A single reassert-after-recompute
+// (previously tried here) cannot fix this because the expression reasserts
+// itself on EVERY subsequent recompute, not just the first. The actual fix
+// is FreeCAD's own idiom for this exact situation (used throughout
+// Path/Base/SetupSheet.py): clear the bound expression with
+// setExpression(prop, None) BEFORE assigning our literal value, so there is
+// no live expression left to re-overwrite it on the next recompute.
+function setDepthPy(varName, prop, value) {
+  return [
+    `${varName}.setExpression('${prop}', None)`,
+    `${varName}.${prop} = ${value}`,
+  ].join("\n");
+}
+
+// Kept as defense-in-depth: re-assert once more after a recompute, in case
+// something else (not the expression above, now cleared) still nudges the
+// value away from what we set.
 function assertDepthPy(varName, sd, fd) {
   return [
     "doc.recompute()",
     `if abs(float(${varName}.StartDepth.Value) - ${sd}) > 1e-6 or abs(float(${varName}.FinalDepth.Value) - ${fd}) > 1e-6:`,
+    `    ${varName}.setExpression('StartDepth', None)`,
+    `    ${varName}.setExpression('FinalDepth', None)`,
     `    ${varName}.StartDepth = ${sd}`,
     `    ${varName}.FinalDepth = ${fd}`,
     "    doc.recompute()",
@@ -130,8 +157,8 @@ function drillOpPy(index, p, stock) {
     `${toolVar}_tool_dia = ${pyFloat(dia)}`,
     `${varName} = PathDrilling.Create(${pyStr(`Drilling_${index}`)})`,
     `${varName}.Locations = [App.Vector(${pyFloat(p.x)}, ${pyFloat(p.y)}, 0.0)]`,
-    `${varName}.StartDepth = ${sd}`,
-    `${varName}.FinalDepth = ${fd}`,
+    setDepthPy(varName, "StartDepth", sd),
+    setDepthPy(varName, "FinalDepth", fd),
     `${varName}.ToolController = tc`,
     assertDepthPy(varName, sd, fd),
   ].join("\n");
@@ -186,8 +213,8 @@ function pocketOpPy(index, p, stock, facePy) {
     facePy,
     `${varName} = PathPocket.Create(${pyStr(`Pocket_${index}`)})`,
     `${varName}.Base = [(_face_${index}, ["Face1"])]`,
-    `${varName}.StartDepth = ${sd}`,
-    `${varName}.FinalDepth = ${fd}`,
+    setDepthPy(varName, "StartDepth", sd),
+    setDepthPy(varName, "FinalDepth", fd),
     `${varName}.StepDown = ${pyFloat(stepDown)}`,
     `${varName}.ToolController = tc`,
     assertDepthPy(varName, sd, fd),
