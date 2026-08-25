@@ -230,7 +230,11 @@ function pocketOpPy(index, p, stock, facePy) {
     `${varName}.Base = [(_face_${index}, ["Face1"])]`,
     setDepthPy(varName, "StartDepth", sd),
     setDepthPy(varName, "FinalDepth", fd),
-    `${varName}.StepDown = ${pyFloat(stepDown)}`,
+    // StepDown defaults to a live expression too (SetupSheet's
+    // DefaultStepDownExpression = "OpToolDiameter") - same class of bug as
+    // StartDepth/FinalDepth above, so clear it before assigning our own
+    // safe per-pass value.
+    setDepthPy(varName, "StepDown", pyFloat(stepDown)),
     `${varName}.ToolController = tc`,
     assertDepthPy(varName, sd, fd),
   ].join("\n");
