@@ -256,7 +256,7 @@ function operationPy(index, op, stock) {
   }
   if (!isStockGenerationSupported(op.type)) {
     throw new Error(
-      `'${OPERATION_TYPES[op.type].label}' islemi henuz gercek FreeCAD uretimini desteklemiyor ` +
+      `'${OPERATION_TYPES[op.type].label}' islemi henuz gercek Topkapi AI uretimini desteklemiyor ` +
       "(MVP kapsaminda sadece Delik Delme, Dikdortgen Cep, Daire Cep var).",
     );
   }
@@ -385,7 +385,7 @@ export async function verifyStockPlan(plan) {
     });
     const text = extractResultText(result);
     if (result?.isError || !text.includes(SUCCESS_PREVIEW)) {
-      return { ok: false, error: text || "FreeCAD onizleme uretemedi." };
+      return { ok: false, error: text || "Topkapi AI onizleme uretemedi." };
     }
     const safetyError = checkSafety(text);
     if (safetyError) {
