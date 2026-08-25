@@ -298,8 +298,21 @@ export function buildStockJobPy(plan) {
 // still the primary fix). The very first operation uses the job's default
 // `tc`; every operation after that gets its own explicit ToolController.
 function operationPyWithOwnTool(index, op, stock, toolDia) {
+  if (index === 0) {
+    // stockPy() gives the job's default `tc` a fixed placeholder diameter
+    // (6mm) since it's built before any operation exists to size it from.
+    // This was never corrected afterward, so operation 0 — whatever its own
+    // geometry — always machined with that placeholder, not the diameter
+    // toolDiameterFor() computes for it (a live 30x30mm pocket confirmed
+    // this: its toolpath's outermost offset ring landed exactly where a
+    // 6mm tool's radius compensation would put it, 3mm short of where a
+    // properly-sized ~15mm tool's would). Set the real diameter on `tc`
+    // BEFORE building the operation, so whatever FreeCAD derives from the
+    // tool (OpToolDiameter, offset spacing, etc.) sees the right size from
+    // the start rather than the placeholder.
+    return [`tc.Tool.Diameter = ${pyFloat(toolDia)}`, operationPy(index, op, stock)].join("\n");
+  }
   const body = operationPy(index, op, stock);
-  if (index === 0) return body;
   const tcVar = `tc_${index}`;
   const setup = [
     `def _rover_make_endmill_tool(_diameter, _label):`,
