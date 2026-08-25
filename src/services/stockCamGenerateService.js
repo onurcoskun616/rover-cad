@@ -51,7 +51,22 @@ function stockPy(stock) {
     "import Part, Path",
     "try:",
     "    from Path.Main import Job as PathJob",
-    "    import Path.Op.Pocket as PathPocket",
+    // Path.Op.Pocket is FreeCAD 1.1's "CAM 3D Pocket Operation": its
+    // areaOpShapes() does env.cut(base[0].Shape) expecting base[0] to be a
+    // real 3D solid feature with an actual modeled cavity — cutting a solid
+    // envelope by our flat, zero-volume Part::Feature profile face isn't a
+    // valid solid boolean there, which is exactly what produced the "Null
+    // shape" ValueError seen live (confirmed by reading FreeCAD 1.1.3's real
+    // source, src/Mod/CAM/Path/Op/Pocket.py vs PocketShape.py). PocketShape
+    // ("CAM Pocket Shape Operation") is the one built for exactly our case:
+    // classifySubFace() recognizes a flat face whose plane normal is
+    // vertical, translates it to FinalDepth and extrudes it up to
+    // StartDepth to make the removal solid — precisely the profile shape
+    // rectFacePy/circFacePy already build. Same base class (PathPocketBase
+    // -> PathAreaOp -> PathOp), so Base/StartDepth/FinalDepth/StepDown/
+    // ToolController all still work unchanged; only the import needs to
+    // point at the right module.
+    "    import Path.Op.PocketShape as PathPocket",
     "    import Path.Op.Drilling as PathDrilling",
     "except Exception:",
     "    from PathScripts import PathJob, PathPocket, PathDrilling",
