@@ -2433,6 +2433,9 @@ async function stockCamDoGenerateGcode(){
     const result=await stockCamPollJob(start.jobId);
     if(!result.exported){ taiMsg("⛔ G-code üretilemedi: "+(result.error||"bilinmeyen hata"),"bot"); return; }
     taiMsg(`<span class="tai-msg-action">✓ G-code hazır:</span> <a href="${result.gcodeUrl}" target="_blank" rel="noopener">indir</a>`,"bot");
+    if(result.warning){
+      taiMsg("⚠️ "+result.warning,"bot");
+    }
     // Faz 7: FreeCAD'in ürettiği G-code'u indirmekle yetinme — hemen simülatörde
     // çalıştırıp gözle doğrula, tıpkı elle yüklenen bir .gcode dosyasında olduğu gibi.
     try{

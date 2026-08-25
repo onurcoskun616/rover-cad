@@ -857,23 +857,56 @@ function buildSafetyChecks(isTorna) {
 
 // Candidate FreeCAD post-processor module names for each controller choice, with
 // grbl as the final fallback. Used by the trusted post-processing epilogue.
+//
+// Verified against FreeCAD 1.1.3's ACTUAL script filenames (checked out from
+// the real `1.1.3` git tag, not `main` HEAD, which lists a different set) —
+// earlier candidate names here were guesses that didn't match any real file
+// (e.g. bare "fanuc", "sinumerik", "siemens", "heidenhain" don't exist; only
+// the "_post"/"_legacy_post" suffixed names do), so several controllers
+// silently fell all the way through to the grbl_post fallback with no
+// warning. FreeCAD 1.1.3 ships NO native post-processor at all for Siemens/
+// Sinumerik, Heidenhain, Mitsubishi/Meldas, Mazak, Okuma/OSP, Haas, or
+// Doosan — for the five of those we have our own dialect transform
+// (applyControllerTransform / transformTo*, below) that expects standard
+// Fanuc-dialect input, so those resolve to the real fanuc_post module as
+// their base output. Haas and Doosan have neither a FreeCAD post nor a
+// transform yet; unsupportedControllerWarning() flags that case so the
+// caller can tell the operator instead of silently handing them grbl output.
 function postModuleCandidates(postName) {
   const p = String(postName || "").toLowerCase();
-  let list;
-  if (p.includes("mach4")) list = ["mach3_mach4", "mach4", "mach3"];
-  else if (p.includes("mach")) list = ["mach3_mach4", "mach3", "mach4"];
-  else if (p.includes("linux")) list = ["linuxcnc", "linuxcnc_post"];
-  else if (p.includes("fanuc")) list = ["fanuc", "fanuc_post", "refactored_fanuc"];
-  else if (p.includes("siemens") || p.includes("sinumerik")) list = ["sinumerik", "siemens", "fanuc"];
-  else if (p.includes("heidenhain")) list = ["heidenhain", "klartext", "fanuc"];
-  else if (p.includes("haas")) list = ["haas", "fanuc", "refactored_fanuc"];
-  else if (p.includes("mitsubishi") || p.includes("meldas")) list = ["mitsubishi", "meldas", "fanuc"];
-  else if (p.includes("mazak")) list = ["mazak", "mazatrol", "fanuc"];
-  else if (p.includes("okuma") || p.includes("osp")) list = ["okuma", "osp", "fanuc"];
-  else if (p.includes("doosan")) list = ["doosan", "fanuc", "refactored_fanuc"];
-  else list = ["grbl_post", "grbl"];
-  if (!list.includes("grbl_post")) list.push("grbl_post");
-  return list;
+  if (p.includes("mach")) return ["mach3_mach4_post", "mach3_mach4_legacy_post", "grbl_post"];
+  if (p.includes("linux")) return ["linuxcnc_post", "linuxcnc_legacy_post", "grbl_post"];
+  if (
+    p.includes("fanuc") ||
+    p.includes("siemens") || p.includes("sinumerik") ||
+    p.includes("heidenhain") || p.includes("klartext") ||
+    p.includes("mitsubishi") || p.includes("meldas") ||
+    p.includes("mazak") || p.includes("mazatrol") ||
+    p.includes("okuma") || p.includes("osp")
+  ) {
+    return ["fanuc_post", "fanuc_legacy_post", "grbl_post"];
+  }
+  return ["grbl_post"];
+}
+
+// Controllers our own choice list offers that FreeCAD 1.1.3 has NEITHER a
+// native post-processor NOR a dialect transform for (see comment above) —
+// the exported file is plain GRBL G-code, not this controller's real
+// dialect. Returns a warning string to surface to the operator, or null.
+export function unsupportedControllerWarning(postName) {
+  const p = String(postName || "").toLowerCase().trim();
+  if (!p || p.includes("grbl")) return null;
+  if (
+    p.includes("mach") || p.includes("linux") || p.includes("fanuc") ||
+    p.includes("siemens") || p.includes("sinumerik") ||
+    p.includes("heidenhain") || p.includes("klartext") ||
+    p.includes("mitsubishi") || p.includes("meldas") ||
+    p.includes("mazak") || p.includes("mazatrol") ||
+    p.includes("okuma") || p.includes("osp")
+  ) {
+    return null;
+  }
+  return `"${postName}" icin FreeCAD'de gercek bir post-processor ya da lehce donusumu yok — uretilen G-code sadece GRBL uyumlu, bu kontrolcunun gercek dilinde DEGIL. Makineye yuklemeden once elle uyarlamaniz veya baska bir kontrolcu secmeniz gerekir.`;
 }
 
 // Trusted epilogue (NOT model output): extract the toolpath polylines FreeCAD
@@ -980,7 +1013,7 @@ export function postEpiloguePy(gcodePath, postName, isTorna) {
  * Heidenhain Klartext, …), read the generated Fanuc G-code, transform it, and
  * overwrite the file.
  */
-function applyControllerTransform(gcodePath, postName, stepPath, answers) {
+export function applyControllerTransform(gcodePath, postName, stepPath, answers) {
   const partName = path.basename(stepPath || "PART", path.extname(stepPath || ""));
   let label;
   let transformed;
@@ -1299,7 +1332,11 @@ export async function generateCamGcodeFromPlan(stepPath, answers, plan, context 
       throw new Error(`Guvenlik kontrolu basarisiz: ${parts.join(" | ")}. Onizlemeyi yeniden olusturun.`);
     }
     applyControllerTransform(gcodePath, postName, abs, answers);
-    return { gcodePath, safetyChecks: buildSafetyChecks(isTornaMachine(answers)) };
+    return {
+      gcodePath,
+      safetyChecks: buildSafetyChecks(isTornaMachine(answers)),
+      warning: unsupportedControllerWarning(postName),
+    };
   }
 
   // No approved preview to reuse → generate the Path code and post-process it.
@@ -1320,5 +1357,9 @@ export async function generateCamGcodeFromPlan(stepPath, answers, plan, context 
   }
   if (!fs.existsSync(gcodePath)) throw new Error("G-code dosyasi olusmadi");
   applyControllerTransform(gcodePath, postName, abs, answers);
-  return { gcodePath, safetyChecks: buildSafetyChecks(isTornaMachine(answers)) };
+  return {
+    gcodePath,
+    safetyChecks: buildSafetyChecks(isTornaMachine(answers)),
+    warning: unsupportedControllerWarning(postName),
+  };
 }

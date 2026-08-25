@@ -149,6 +149,7 @@ router.post("/cam-confirm", apiKeyAuth, (req, res) => {
           gcodePath: result.gcodePath,
           gcodeUrl: makeFileUrl(proto, host, result.gcodePath),
           safetyChecks: result.safetyChecks,
+          warning: result.warning ?? null,
         },
       };
     },

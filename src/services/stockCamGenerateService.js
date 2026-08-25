@@ -10,6 +10,8 @@ import {
   postEpiloguePy,
   parsePlungeViolations,
   parseCollisionViolations,
+  applyControllerTransform,
+  unsupportedControllerWarning,
 } from "./camAssistantService.js";
 import { OPERATION_TYPES } from "./stockCamPlanService.js";
 
@@ -445,8 +447,22 @@ export async function exportStockPlanGcode(plan, gcodePath, postName) {
     if (safetyError) {
       return { ok: false, error: `Guvenlik kontrolu basarisiz: ${safetyError}` };
     }
+    // The stock-cam flow shares postEpiloguePy/postModuleCandidates with the
+    // STEP-file CAM Asistani flow: for controllers with no native FreeCAD
+    // post (Siemens/Sinumerik, Heidenhain, Mitsubishi, Mazak, Okuma), what
+    // just got exported is real Fanuc-dialect G-code, which still needs the
+    // same dialect transform applied here that the other flow already runs
+    // (applyControllerTransform) — skipping it, as this function previously
+    // did, is what left the file in Fanuc/grbl form regardless of the
+    // controller the operator actually picked.
+    applyControllerTransform(gcodePath, postName, `rover_stock_${plan.planKey}`, {
+      stockX: Number(plan.stock?.w) || 0,
+      stockY: Number(plan.stock?.d) || 0,
+      stockZ: Number(plan.stock?.h) || 0,
+      wcs: "merkez alt yuzey",
+    });
     prependStockHeaderComment(gcodePath, plan.stock);
-    return { ok: true, gcodePath };
+    return { ok: true, gcodePath, warning: unsupportedControllerWarning(postName) };
   } catch (err) {
     return { ok: false, error: err.message };
   }
