@@ -2129,6 +2129,8 @@ let stockCamPending=null;   // {opType, opLabel, answers} — sticker gösterild
 let stockCamEditingId=null; // düzenlenen işlemin id'si (varsa) — onaylamak yerine düzenle çağrılır
 let stockCamMenuOpen=false;
 let stockCamHistoryOpen=false;
+let stockCamMachines=null;      // "Makineler" envanterinden çekilen liste — sayfa oturumu boyunca önbelleklenir
+let stockCamPostProcessor=null; // bu oturum için seçilen kontrolcü ("" = kayıtlı makine yok, sunucu varsayılanı grbl kullanır)
 
 function stockCamContextChips(){
   if(stockCamPending)return[{l:"✅ Onayla",c:"onayla"},{l:"❌ İptal",c:"iptal"}];
@@ -2155,6 +2157,39 @@ async function stockCamEnsurePlan(){
   if(!r.ok)throw new Error(data?.error||"Plan olusturulamadi.");
   stockCamPlanKey=data.plan.planKey;
   return stockCamPlanKey;
+}
+
+// G-code was always exported with a silently-hardcoded fallback controller
+// (grbl) — the wizard never asked, or looked up, what the operator's real
+// mill actually is. grbl deliberately never emits a tool-change command
+// (its own FreeCAD source: "grbl currently does not handle it"), so a plan
+// with genuinely different-sized operations always machined everything
+// with whatever tool happened to be loaded. This reuses the SAME machine
+// inventory ("Makineler") the older CAM Asistanı flow already asks for,
+// instead of asking again from scratch: 0 machines → keep the grbl
+// fallback but say so; 1 → use it silently; 2+ → default to the first and
+// tell the operator how to pick a different one ("kontrolcü <makine adı>").
+async function stockCamResolvePostProcessor(){
+  if(stockCamPostProcessor!==null) return stockCamPostProcessor;
+  try{
+    const r=await fetch(`${MAG_API_BASE}/machines`,{headers:magHeaders()});
+    const data=await r.json();
+    const list=Array.isArray(data?.machines)?data.machines:[];
+    stockCamMachines=list;
+    if(list.length===0){
+      stockCamPostProcessor="";
+      taiMsg("ℹ️ Kayıtlı makine bulunamadı, varsayılan GRBL kontrolcüsü kullanılacak (takım değiştirme komutu üretmez). Gerçek tezgahınız farklıysa \"Makineler\" sayfasından ekleyin.","bot");
+    } else if(list.length===1){
+      stockCamPostProcessor=list[0].postProcessor||"GRBL";
+      taiMsg(`ℹ️ Makine: <b>${list[0].name}</b> (${stockCamPostProcessor}) kontrolcüsü kullanılacak.`,"bot");
+    } else {
+      stockCamPostProcessor=list[0].postProcessor||"GRBL";
+      taiMsg(`ℹ️ Birden fazla makine kayıtlı, varsayılan olarak <b>${list[0].name}</b> (${stockCamPostProcessor}) kullanılacak. Değiştirmek için "kontrolcü &lt;makine adı&gt;" yazın.`,"bot");
+    }
+  }catch(e){
+    stockCamPostProcessor="";
+  }
+  return stockCamPostProcessor;
 }
 
 async function stockCamPollJob(jobId){
@@ -2276,10 +2311,11 @@ async function stockCamEditPick(indexOneBased){
 
 async function stockCamDoGenerateGcode(){
   if(!stockCamPlanKey||!stockCamOps.length){ taiMsg("Henüz onaylanmış işlem yok.","bot"); return; }
+  const postProcessor=await stockCamResolvePostProcessor();
   taiMsg("⏳ Tüm plan için G-code üretiliyor…","bot");
   try{
     const r=await fetch(`${MAG_API_BASE}/stock-cam/gcode`,{method:"POST",headers:magHeaders(),
-      body:JSON.stringify({planKey:stockCamPlanKey})});
+      body:JSON.stringify({planKey:stockCamPlanKey,postProcessor})});
     const start=await r.json();
     if(!r.ok)throw new Error(start?.error||"Sunucu hatası.");
     const result=await stockCamPollJob(start.jobId);
@@ -2348,6 +2384,26 @@ async function stockCamHandleInput(text){
   }
   if(/(g.?code\s*olustur|gkodu\s*olustur)/i.test(t)){
     await stockCamDoGenerateGcode();
+    return true;
+  }
+  const ctrlMatch=text.match(/^(?:kontrolc[uü]|controller|makine)\s+(.+)/i);
+  if(ctrlMatch){
+    if(stockCamMachines===null){
+      try{
+        const r=await fetch(`${MAG_API_BASE}/machines`,{headers:magHeaders()});
+        const data=await r.json();
+        stockCamMachines=Array.isArray(data?.machines)?data.machines:[];
+      }catch(e){ stockCamMachines=[]; }
+    }
+    const wanted=taiNorm(ctrlMatch[1]);
+    const found=stockCamMachines.find(m=>taiNorm(m.name)===wanted||taiNorm(m.name).includes(wanted));
+    if(found){
+      stockCamPostProcessor=found.postProcessor||"GRBL";
+      taiMsg(`✓ Kontrolcü değiştirildi: <b>${found.name}</b> (${stockCamPostProcessor}).`,"bot");
+    }else{
+      const names=stockCamMachines.map(m=>m.name).join(", ")||"(kayıtlı makine yok — \"Makineler\" sayfasından ekleyin)";
+      taiMsg(`⛔ "${ctrlMatch[1]}" adında kayıtlı bir makine bulunamadı. Kayıtlı makineler: ${names}`,"bot");
+    }
     return true;
   }
   return false;
