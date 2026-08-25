@@ -2137,7 +2137,16 @@ let stockCamPostProcessor=null; // bu oturum için seçilen kontrolcü ("" = kay
 // başlamadı, 'controller'/'newController'/'stockSize' = o adımda bekliyor,
 // 'done' = tamamlandı, normal İşlem Menüsü akışı açık.
 let stockCamSetupStage=null;
-const STOCK_CAM_KNOWN_CONTROLLERS=["GRBL","Mach3","Mach4","LinuxCNC","Fanuc"];
+// Hobi/DIY (GRBL, Mach3/4, LinuxCNC) ile birlikte endüstriyel/sanayi
+// kontrolcüleri de listelenir — eski CAM Asistanı akışının POST_OPTIONS
+// listesiyle aynı (camWizardService.js), backend'in postModuleCandidates()
+// zaten hepsini tanıyor.
+const STOCK_CAM_KNOWN_CONTROLLERS=[
+  "GRBL","Mach3","Mach4","LinuxCNC",
+  "Fanuc","Siemens (Sinumerik)",
+  "Heidenhain (TNC 640)","Heidenhain (iTNC 530)","Heidenhain (TNC 426/430)",
+  "Haas","Mitsubishi (Meldas)","Mazak","Okuma (OSP)","Doosan",
+];
 
 function stockCamContextChips(){
   if(!isMill())return null;
