@@ -102,18 +102,38 @@ function toolDiameterFor(type, p) {
   return 6;
 }
 
+// FreeCAD's own opExecute can silently reset StartDepth/FinalDepth back to
+// the operation's defaults during doc.recompute() (documented and worked
+// around the same way in cam-code-system-prompt.txt's _rover_make_leveled_ops).
+// When that happens here the op ends up with FinalDepth ~= StartDepth (a
+// zero-depth skim at the stock's top surface) — the tool visibly plunges to
+// that level and retracts, but the height map never drops below the
+// existing top, so nothing is removed. Re-assert and recompute again
+// whenever the values didn't stick.
+function assertDepthPy(varName, sd, fd) {
+  return [
+    "doc.recompute()",
+    `if abs(float(${varName}.StartDepth.Value) - ${sd}) > 1e-6 or abs(float(${varName}.FinalDepth.Value) - ${fd}) > 1e-6:`,
+    `    ${varName}.StartDepth = ${sd}`,
+    `    ${varName}.FinalDepth = ${fd}`,
+    "    doc.recompute()",
+  ].join("\n");
+}
+
 function drillOpPy(index, p, stock) {
   const varName = `drill_${index}`;
   const toolVar = `tc_${index}`;
   const dia = toolDiameterFor("drill", p);
+  const sd = pyFloat(stock.h);
+  const fd = pyFloat(Number(stock.h) - Number(p.depth));
   return [
     `${toolVar}_tool_dia = ${pyFloat(dia)}`,
     `${varName} = PathDrilling.Create(${pyStr(`Drilling_${index}`)})`,
     `${varName}.Locations = [App.Vector(${pyFloat(p.x)}, ${pyFloat(p.y)}, 0.0)]`,
-    `${varName}.StartDepth = ${pyFloat(stock.h)}`,
-    `${varName}.FinalDepth = ${pyFloat(Number(stock.h) - Number(p.depth))}`,
+    `${varName}.StartDepth = ${sd}`,
+    `${varName}.FinalDepth = ${fd}`,
     `${varName}.ToolController = tc`,
-    "doc.recompute()",
+    assertDepthPy(varName, sd, fd),
   ].join("\n");
 }
 
@@ -160,15 +180,17 @@ function pocketOpPy(index, p, stock, facePy) {
   const varName = `pocket_${index}`;
   const depth = Number(p.depth);
   const stepDown = Math.min(depth, 3.0);
+  const sd = pyFloat(stock.h);
+  const fd = pyFloat(Number(stock.h) - depth);
   return [
     facePy,
     `${varName} = PathPocket.Create(${pyStr(`Pocket_${index}`)})`,
     `${varName}.Base = [(_face_${index}, ["Face1"])]`,
-    `${varName}.StartDepth = ${pyFloat(stock.h)}`,
-    `${varName}.FinalDepth = ${pyFloat(Number(stock.h) - depth)}`,
+    `${varName}.StartDepth = ${sd}`,
+    `${varName}.FinalDepth = ${fd}`,
     `${varName}.StepDown = ${pyFloat(stepDown)}`,
     `${varName}.ToolController = tc`,
-    "doc.recompute()",
+    assertDepthPy(varName, sd, fd),
   ].join("\n");
 }
 
