@@ -1040,7 +1040,7 @@ function computeRemoved(){return clamp((removedSum/removedCellCount())/TOP,0,1);
 let millProgramText=null,latheProgramText=null;
 function millStartCycle(){
   if(mill.emergency||mill.mode!=="AUTO")return;
-  if(millProgramText){runMillGcode(parseGcode(millProgramText,"mill"));return;}
+  if(millProgramText){runMillGcode(parseGcode(millProgramText,"mill"),parseRoverStockHeader(millProgramText)||undefined);return;}
   mill.spindleOn=true;mill.paused=false;if(mill.coolantMode==="off")mill.coolantMode="flood";
   const q=[],safeY=TOP+8,step=CUTTER_R*1.25,x0=-W*0.29,x1=W*0.29,z0=-D*0.27,z1=D*0.27;
   for(const depth of [TOP-14,TOP-26]){
@@ -1193,6 +1193,22 @@ function millArcPoints(sx,sy,sz,ex,ey,ez,i,j,clockwise){
     pts.push({x:cx+Math.cos(a)*r,y:cy+Math.sin(a)*r,z:sz+(ez-sz)*t});
   }
   return pts;
+}
+
+// A plain .gcode file has no stock-size info (real controllers don't need
+// it — the operator loads the physical stock). The wizard's own
+// "generate then auto-run" already knows the right size, but a downloaded
+// file re-opened later (manual "Dosya Aç", or pasted into chat) only had
+// the toolpath's own bounding box to guess a stock from — smaller than and
+// centered differently from the real stock, so the cut looked wrong
+// relative to the (mis-sized) block drawn on screen. exportStockPlanGcode
+// (server side) prepends a ROVER_STOCK comment header with the real stock
+// for exactly this reason — real controllers ignore parenthesized comments,
+// so this is inert everywhere except here.
+function parseRoverStockHeader(text){
+  const m=/^\(ROVER_STOCK W([\d.]+) D([\d.]+) H([\d.]+)\)/m.exec(text);
+  if(!m) return null;
+  return {w:Number(m[1]), d:Number(m[2]), h:Number(m[3])};
 }
 
 function parseGcode(text, type){
@@ -1522,7 +1538,7 @@ function runLatheGcode(parsed, stockDims){
 $("m-file").onchange=e=>{
   const f=e.target.files[0]; if(!f) return;
   $("m-file-info").textContent=f.name; $("m-file-info").classList.remove("hidden");
-  f.text().then(txt=>{millProgramText=txt;runMillGcode(parseGcode(txt,"mill"));});
+  f.text().then(txt=>{millProgramText=txt;runMillGcode(parseGcode(txt,"mill"),parseRoverStockHeader(txt)||undefined);});
   e.target.value="";
 };
 $("l-file").onchange=e=>{
@@ -2656,7 +2672,7 @@ function taiExec(raw){
   /* --- G-code --- */
   if(/^(g\d+|m\d+|[gm]\s*\d)/i.test(t)||/^[gnomxyzfs\d\s.;]+$/i.test(t.trim())){
     const parsed=parseGcode(raw,im?"mill":"lathe");
-    if(parsed.q.length>0){if(im)runMillGcode(parsed);else runLatheGcode(parsed);return A("✓ G-code çalıştırıldı:")+" "+parsed.q.length+" hareket komutu.";}
+    if(parsed.q.length>0){if(im)runMillGcode(parsed,parseRoverStockHeader(raw)||undefined);else runLatheGcode(parsed);return A("✓ G-code çalıştırıldı:")+" "+parsed.q.length+" hareket komutu.";}
   }
 
   return null;
