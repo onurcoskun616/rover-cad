@@ -1229,7 +1229,22 @@ function parseRoverStockHeader(text){
 function parseGcode(text, type){
   const lines=text.split(/\r?\n/);
   const q=[];
-  let cur={x:0,y:type==="mill"?90:0,z:0}, feed=200, lastG=0, prevWasRapid=false, approachZ=Infinity;
+  // A mill program's very first move often omits Z entirely — normal,
+  // real-world G-code convention: it assumes the operator already jogged
+  // to a safe height before pressing cycle start, so there's nothing to
+  // "restate". Defaulting the assumed starting Z to 0 (table level) was
+  // exactly backwards: a live 10x10x10 pocket's exported G-code opened
+  // with "G1 X0.5 Y-0.5" (no Z) then climbed to Z73 — with cur.z defaulting
+  // to 0, that first (missing-Z) move resolved to height 0 (the table,
+  // 60mm below a 60mm stock's top), and the very next line's climb to
+  // Z73 became a straight FEED move from height 0 up through the full
+  // stock at the pocket's own center point — carve() doesn't distinguish
+  // move type, so it gouged a full-depth shaft there before the operation's
+  // real safe-height/plunge sequence even began. Defaulting to a safe
+  // clearance height instead (same TOP+30 convention resizeMillStock uses
+  // for "tool at rest") means an omitted-Z move is read the way it's
+  // actually meant: "no change from a safe position", not "go to the table".
+  let cur={x:0,y:type==="mill"?90:0,z:type==="mill"?TOP+30:0}, feed=200, lastG=0, prevWasRapid=false, approachZ=Infinity;
   const bounds={xMin:Infinity,xMax:-Infinity,yMin:Infinity,yMax:-Infinity,zMin:Infinity,zMax:-Infinity};
   function pushMillPoint(isRapid,nx,ny,nz){
     if(!isRapid&&prevWasRapid) approachZ=Math.min(approachZ,cur.z);
