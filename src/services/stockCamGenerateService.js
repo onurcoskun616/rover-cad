@@ -12,7 +12,6 @@ import {
   parseCollisionViolations,
   applyControllerTransform,
   unsupportedControllerWarning,
-  hasDialectTransform,
 } from "./camAssistantService.js";
 import { OPERATION_TYPES } from "./stockCamPlanService.js";
 
@@ -463,12 +462,7 @@ export async function exportStockPlanGcode(plan, gcodePath, postName) {
       wcs: "merkez alt yuzey",
     });
     prependStockHeaderComment(gcodePath, plan.stock);
-    return {
-      ok: true,
-      gcodePath,
-      warning: unsupportedControllerWarning(postName),
-      simulatorPreview: !hasDialectTransform(postName),
-    };
+    return { ok: true, gcodePath, warning: unsupportedControllerWarning(postName) };
   } catch (err) {
     return { ok: false, error: err.message };
   }

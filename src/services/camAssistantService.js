@@ -893,25 +893,6 @@ function postModuleCandidates(postName) {
 // native post-processor NOR a dialect transform for (see comment above) —
 // the exported file is plain GRBL G-code, not this controller's real
 // dialect. Returns a warning string to surface to the operator, or null.
-// True when this controller's output goes through a dialect transform
-// (Sinumerik/Heidenhain/Meldas/Mazak/OSP) instead of staying in plain
-// GRBL/Fanuc-style G-word G-code. The in-browser simulator's G-code parser
-// only understands G0/G1/G2/G3 G-word motion — Heidenhain Klartext has no
-// G-words for motion at all (it's "L X.. Y.. Z.." instead), so attempting
-// to auto-run a transformed file there reads stray numbers out of the
-// file as if they were real moves (confirmed live: an operator saw the
-// tool rapid around erratically instead of drilling). The file itself is
-// correct for the real controller; only the BROWSER PREVIEW is incompatible.
-export function hasDialectTransform(postName) {
-  return (
-    isSinumerik(postName) ||
-    isHeidenhain(postName) ||
-    isMitsubishi(postName) ||
-    isMazak(postName) ||
-    isOkuma(postName)
-  );
-}
-
 export function unsupportedControllerWarning(postName) {
   const p = String(postName || "").toLowerCase().trim();
   if (!p || p.includes("grbl")) return null;
