@@ -71,8 +71,15 @@ function stockPy(stock) {
     // point at the right module.
     "    import Path.Op.PocketShape as PathPocket",
     "    import Path.Op.Drilling as PathDrilling",
+    // Path.Op.Profile — confirmed real module (Path/Op/Profile.py,
+    // class ObjectProfile), used for the "Kontur Kesme" operation: cuts
+    // along a boundary wire/face rather than clearing its interior. Its
+    // Side property ("Outside"/"Inside", confirmed enum values from the
+    // same source) picks which side of the boundary the tool removes
+    // material from.
+    "    import Path.Op.Profile as PathProfile",
     "except Exception:",
-    "    from PathScripts import PathJob, PathPocket, PathDrilling",
+    "    from PathScripts import PathJob, PathPocket, PathDrilling, PathProfile",
     "try:",
     "    import Path.Tool.Controller as PathToolController",
     "except Exception:",
@@ -110,13 +117,21 @@ function stockPy(stock) {
 }
 
 // Tool diameter picked from the operation's own geometry, matching the
-// simple convention CNC Simülatör's local taiRunMillWithTool already uses
-// (proper magazine-based selection is a documented follow-up, not required
-// to prove this pipeline safe/correct end to end).
+// simple convention CNC Simülatör's local taiRunMillWithTool already uses.
+// The proper magazine-based selection this comment used to call a
+// "documented follow-up" is now wired in — cnc-sim.html's own ToolMagazine
+// (real registered tools, findSlotForOp()) resolves a real tool BEFORE
+// confirming an operation and sends its diameter through as `toolDia` in
+// the op's own params. When present, that real diameter wins outright;
+// the geometry-based guesses below only run as a fallback (magazine has no
+// fitting tool, or an older client that doesn't send one yet).
 function toolDiameterFor(type, p) {
+  const explicit = Number(p?.toolDia);
+  if (Number.isFinite(explicit) && explicit > 0) return Math.min(20, explicit);
   if (type === "drill") return Math.min(20, Number(p.dia));
   if (type === "rectPocket") return Math.min(20, Math.max(1, Math.min(p.pw, p.pl) * 0.5));
   if (type === "circPocket") return Math.min(20, Math.max(1, Number(p.dia) * 0.4));
+  if (type === "contour") return 10;
   return 6;
 }
 
@@ -261,10 +276,51 @@ function pocketOpPy(index, p, stock, facePy) {
   ].join("\n");
 }
 
-// MVP scope (Faz 4): drill, rectPocket, circPocket. hexPocket/slot/face/
-// contour/chamfer intentionally raise here rather than silently machine
-// something wrong — see task Faz 4 follow-up.
-const SUPPORTED_TYPES = new Set(["drill", "rectPocket", "circPocket"]);
+// Contour ("Kontur Kesme") cuts along the stock's OWN outer rectangular
+// boundary — this MVP scope has no separate shape/position for it (see
+// stockCamPlanService.js's "contour" registry entry: "footprint == stock/
+// part outline"), matching its real-world use: trimming/separating the
+// finished part from the raw stock along its true outer edge, after every
+// other feature is already cut.
+//
+// Side='Inside' is a confirmed real Path.Op.Profile enum value (Path/Op/
+// Profile.py) — it offsets the toolpath INWARD from the drawn boundary by
+// the tool's own radius, so the cutting edge travels along the true edge
+// itself. 'Outside' would offset outward into open space beyond the stock
+// (nothing there to cut, since the boundary already IS the stock's edge),
+// so it's deliberately not used here.
+function contourOpPy(index, p, stock) {
+  const varName = `contour_${index}`;
+  const feat = `_cface_${index}`;
+  const depth = Number(p.depth);
+  const sd = pyFloat(stock.h);
+  const fd = pyFloat(Number(stock.h) - depth);
+  const hw = pyFloat(Number(stock.w) / 2), hl = pyFloat(Number(stock.d) / 2);
+  return [
+    `_chw_${index}, _chl_${index} = ${hw}, ${hl}`,
+    `_cp0_${index} = App.Vector(-_chw_${index}, -_chl_${index}, ${sd})`,
+    `_cp1_${index} = App.Vector(_chw_${index}, -_chl_${index}, ${sd})`,
+    `_cp2_${index} = App.Vector(_chw_${index}, _chl_${index}, ${sd})`,
+    `_cp3_${index} = App.Vector(-_chw_${index}, _chl_${index}, ${sd})`,
+    `_cwire_${index} = Part.makePolygon([_cp0_${index}, _cp1_${index}, _cp2_${index}, _cp3_${index}, _cp0_${index}])`,
+    `${feat} = doc.addObject('Part::Feature', ${pyStr(`ContourProfile_${index}`)})`,
+    `${feat}.Shape = Part.Face(_cwire_${index})`,
+    "doc.recompute()",
+    `${varName} = PathProfile.Create(${pyStr(`Contour_${index}`)})`,
+    `${varName}.Base = [(${feat}, ["Face1"])]`,
+    `${varName}.Side = 'Inside'`,
+    setDepthPy(varName, "StartDepth", sd),
+    setDepthPy(varName, "FinalDepth", fd),
+    setDepthPy(varName, "StepDown", pyFloat(Math.min(depth, 3.0))),
+    `${varName}.ToolController = tc`,
+    assertDepthPy(varName, sd, fd),
+  ].join("\n");
+}
+
+// MVP scope (Faz 4 + Kontur follow-up): drill, rectPocket, circPocket,
+// contour. hexPocket/slot/face/chamfer intentionally raise here rather
+// than silently machine something wrong.
+const SUPPORTED_TYPES = new Set(["drill", "rectPocket", "circPocket", "contour"]);
 
 export function isStockGenerationSupported(type) {
   return SUPPORTED_TYPES.has(type);
@@ -277,13 +333,14 @@ function operationPy(index, op, stock) {
   if (!isStockGenerationSupported(op.type)) {
     throw new Error(
       `'${OPERATION_TYPES[op.type].label}' islemi henuz gercek Topkapi AI uretimini desteklemiyor ` +
-      "(MVP kapsaminda sadece Delik Delme, Dikdortgen Cep, Daire Cep var).",
+      "(MVP kapsaminda sadece Delik Delme, Dikdortgen Cep, Daire Cep, Kontur Kesme var).",
     );
   }
   const p = op.params;
   if (op.type === "drill") return drillOpPy(index, p, stock);
   if (op.type === "rectPocket") return pocketOpPy(index, p, stock, rectFacePy(index, p, stock));
   if (op.type === "circPocket") return pocketOpPy(index, p, stock, circFacePy(index, p, stock));
+  if (op.type === "contour") return contourOpPy(index, p, stock);
   throw new Error(`operationPy: eslesmeyen tip ${op.type}`); // unreachable given the guards above
 }
 
