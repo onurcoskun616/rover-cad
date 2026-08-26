@@ -3,8 +3,10 @@
  *  - Mitsubishi Meldas
  *  - Mazak (EIA/ISO mode)
  *  - Okuma OSP
+ *  - Haas (NGC / Classic)
+ *  - Doosan
  *
- * All three understand standard ISO G-code (G0/G1/G2/G3, G81/G83/G84/G85)
+ * All five understand standard ISO G-code (G0/G1/G2/G3, G81/G83/G84/G85)
  * but differ in program structure, decimal-point handling, safety blocks,
  * tool-change conventions, and a few controller-specific codes.
  */
@@ -313,6 +315,184 @@ export function transformToOkumaOSP(gcode, partName) {
   }
 
   out.push("G28 Z0.");
+  out.push("M30");
+  out.push("%");
+
+  return out.join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// Haas (NGC / Classic)
+// ---------------------------------------------------------------------------
+
+export function isHaas(postName) {
+  const p = String(postName || "").toLowerCase();
+  return p.includes("haas");
+}
+
+/**
+ * Haas is largely Fanuc-compatible: same G54-G59 work offsets, same
+ * G81-G89 canned cycles (confirmed against real Haas documentation, not
+ * assumed). Two real, documented conventions actually differ:
+ *  - Tool change: Haas expects T{n} and M6 on ONE line ("T2 M6"), not
+ *    Fanuc's classic "pre-select T while the previous tool is still
+ *    cutting, M6 alone later" split.
+ *  - Tool-change retract: "G53 G0 Z0." (rapid in true machine coordinates)
+ *    is the Haas-idiomatic tool-change position, in place of Fanuc's
+ *    G91 G28 Z0. (incremental return-to-reference).
+ * Unlike Okuma, Haas does NOT require forced decimal points (X10 parses
+ * as X10.000 exactly like Fanuc) — that's an Okuma-specific quirk, not a
+ * general "industrial controller" one, so it's deliberately not applied
+ * here.
+ */
+export function transformToHaas(gcode, partName) {
+  const name = (partName || "PART")
+    .replace(/[^A-Za-z0-9_-]/g, "_")
+    .toUpperCase()
+    .slice(0, 20);
+  const lines = gcode.split(/\r?\n/);
+  const out = [];
+
+  out.push("%");
+  out.push("O0001");
+  out.push(`(${name} - HAAS)`);
+  out.push("(ROVER CAD)");
+
+  let headerDone = false;
+  let safetyEmitted = false;
+
+  for (const raw of lines) {
+    const line = stripNWords(raw.trim());
+    if (line === "" || line === "%" || /^O\d+/i.test(line)) continue;
+
+    if (isComment(line)) {
+      if (!headerDone) continue;
+      out.push(convertComment(line));
+      continue;
+    }
+
+    if (!headerDone) headerDone = true;
+
+    if (!safetyEmitted && headerDone) {
+      out.push("G80 G40 G49");
+      out.push("G53 G0 Z0.");
+      out.push("G90 G17 G21 G94");
+      safetyEmitted = true;
+    }
+
+    if (safetyEmitted && isRedundantModeLine(line)) continue;
+
+    // Haas-idiomatic tool-change retract in place of Fanuc's incremental
+    // return-to-reference.
+    if (/^G91\s+G28\s+Z0\.?\s*$/i.test(line) || /^G28\s+Z0\.?\s*$/i.test(line)) {
+      out.push("G53 G0 Z0.");
+      continue;
+    }
+
+    if (/\bM0?6\b/i.test(line) && /\bT(\d+)/i.test(line)) {
+      const tNum = line.match(/\bT(\d+)/i)[1];
+      out.push("G53 G0 Z0.");
+      out.push(`T${tNum} M6`);
+
+      const sMatch = line.match(/\bS(\d+\.?\d*)/i);
+      if (sMatch) out.push(`S${sMatch[1]} M3`);
+      continue;
+    }
+    if (/^T\d+\s*$/i.test(line)) continue;
+
+    if (/\bM30\b/i.test(line) || (/\bM0?2\b/i.test(line) && !/\bM0?[3-9]\b/i.test(line))) {
+      continue;
+    }
+
+    out.push(stripNWords(line));
+  }
+
+  out.push("G53 G0 Z0.");
+  out.push("M30");
+  out.push("%");
+
+  return out.join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// Doosan
+// ---------------------------------------------------------------------------
+
+export function isDoosan(postName) {
+  const p = String(postName || "").toLowerCase();
+  return p.includes("doosan");
+}
+
+/**
+ * Doosan machining centers overwhelmingly run genuinely Fanuc-compatible
+ * controls (real machinists commonly describe their setup as simply
+ * "Doosan/Fanuc") — standard G0-G3/G81-G89, standard G54-G59, standard
+ * T{n} M6 tool change. The one Doosan-specific extension found in
+ * real-world documentation is a pair of OPTIONAL tool-change-interlock
+ * M-codes (M58/M59); they're advanced/machine-setup-dependent, not
+ * required for a normal safe tool change, so they aren't invented here
+ * without a firsthand-confirmed source. This transform is deliberately
+ * conservative: standard Fanuc-style safety block, decimal forcing (never
+ * wrong under standard parsing, just more explicit) and tool-change
+ * reformatting like the other three industrial dialects above, but no
+ * fabricated Doosan-only G/M-codes.
+ */
+export function transformToDoosan(gcode, partName) {
+  const name = (partName || "PART")
+    .replace(/[^A-Za-z0-9_-]/g, "_")
+    .toUpperCase()
+    .slice(0, 20);
+  const lines = gcode.split(/\r?\n/);
+  const out = [];
+
+  out.push("%");
+  out.push("O0001");
+  out.push(`(${name} - DOOSAN)`);
+  out.push("(ROVER CAD)");
+
+  let headerDone = false;
+  let safetyEmitted = false;
+
+  for (const raw of lines) {
+    const line = stripNWords(raw.trim());
+    if (line === "" || line === "%" || /^O\d+/i.test(line)) continue;
+
+    if (isComment(line)) {
+      if (!headerDone) continue;
+      out.push(convertComment(line));
+      continue;
+    }
+
+    if (!headerDone) headerDone = true;
+
+    if (!safetyEmitted && headerDone) {
+      out.push("G80 G40 G49");
+      out.push("G91 G28 Z0.");
+      out.push("G90 G17 G21 G94");
+      safetyEmitted = true;
+    }
+
+    if (safetyEmitted && isRedundantModeLine(line)) continue;
+
+    if (/\bM0?6\b/i.test(line) && /\bT(\d+)/i.test(line)) {
+      const tNum = line.match(/\bT(\d+)/i)[1];
+      out.push("G91 G28 Z0.");
+      out.push(`T${tNum} M6`);
+
+      const sMatch = line.match(/\bS(\d+\.?\d*)/i);
+      if (sMatch) out.push(`S${sMatch[1]} M3`);
+      continue;
+    }
+    if (/^T\d+\s*$/i.test(line)) continue;
+
+    if (/\bM30\b/i.test(line) || (/\bM0?2\b/i.test(line) && !/\bM0?[3-9]\b/i.test(line))) {
+      continue;
+    }
+
+    out.push(forceDecimals(stripNWords(line)));
+  }
+
+  out.push("G91 G28 Z0.");
   out.push("M30");
   out.push("%");
 

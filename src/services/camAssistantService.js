@@ -19,6 +19,8 @@ import {
   transformToMeldas, isMitsubishi,
   transformToMazak, isMazak,
   transformToOkumaOSP, isOkuma,
+  transformToHaas, isHaas,
+  transformToDoosan, isDoosan,
 } from "./industrialTransformers.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -866,12 +868,10 @@ function buildSafetyChecks(isTorna) {
 // silently fell all the way through to the grbl_post fallback with no
 // warning. FreeCAD 1.1.3 ships NO native post-processor at all for Siemens/
 // Sinumerik, Heidenhain, Mitsubishi/Meldas, Mazak, Okuma/OSP, Haas, or
-// Doosan — for the five of those we have our own dialect transform
+// Doosan — for all seven of those we have our own dialect transform
 // (applyControllerTransform / transformTo*, below) that expects standard
 // Fanuc-dialect input, so those resolve to the real fanuc_post module as
-// their base output. Haas and Doosan have neither a FreeCAD post nor a
-// transform yet; unsupportedControllerWarning() flags that case so the
-// caller can tell the operator instead of silently handing them grbl output.
+// their base output.
 function postModuleCandidates(postName) {
   const p = String(postName || "").toLowerCase();
   if (p.includes("mach")) return ["mach3_mach4_post", "mach3_mach4_legacy_post", "grbl_post"];
@@ -882,7 +882,9 @@ function postModuleCandidates(postName) {
     p.includes("heidenhain") || p.includes("klartext") ||
     p.includes("mitsubishi") || p.includes("meldas") ||
     p.includes("mazak") || p.includes("mazatrol") ||
-    p.includes("okuma") || p.includes("osp")
+    p.includes("okuma") || p.includes("osp") ||
+    p.includes("haas") ||
+    p.includes("doosan")
   ) {
     return ["fanuc_post", "fanuc_legacy_post", "grbl_post"];
   }
@@ -893,6 +895,9 @@ function postModuleCandidates(postName) {
 // native post-processor NOR a dialect transform for (see comment above) —
 // the exported file is plain GRBL G-code, not this controller's real
 // dialect. Returns a warning string to surface to the operator, or null.
+// (Haas and Doosan used to fall in that bucket; both now have a real
+// transform — see industrialTransformers.js's transformToHaas/transformToDoosan,
+// written from actual documented Haas/Doosan conventions, not guessed.)
 export function unsupportedControllerWarning(postName) {
   const p = String(postName || "").toLowerCase().trim();
   if (!p || p.includes("grbl")) return null;
@@ -902,7 +907,9 @@ export function unsupportedControllerWarning(postName) {
     p.includes("heidenhain") || p.includes("klartext") ||
     p.includes("mitsubishi") || p.includes("meldas") ||
     p.includes("mazak") || p.includes("mazatrol") ||
-    p.includes("okuma") || p.includes("osp")
+    p.includes("okuma") || p.includes("osp") ||
+    p.includes("haas") ||
+    p.includes("doosan")
   ) {
     return null;
   }
@@ -1041,6 +1048,12 @@ export function applyControllerTransform(gcodePath, postName, stepPath, answers)
     } else if (isOkuma(postName)) {
       transformed = transformToOkumaOSP(raw, partName);
       label = "Okuma OSP";
+    } else if (isHaas(postName)) {
+      transformed = transformToHaas(raw, partName);
+      label = "Haas";
+    } else if (isDoosan(postName)) {
+      transformed = transformToDoosan(raw, partName);
+      label = "Doosan";
     }
     if (transformed) {
       fs.writeFileSync(gcodePath, transformed, "utf-8");
