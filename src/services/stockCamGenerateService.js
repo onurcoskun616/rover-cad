@@ -241,13 +241,22 @@ function pocketOpPy(index, p, stock, facePy) {
     // PocketBase.py's own setDefaultValues() defaults ClearingPattern to
     // "Offset" (confirmed by reading FreeCAD 1.1.3's real source) — a pure
     // inward-ring pattern that stops once the next ring would collapse to
-    // a degenerate size, which is exactly what left a real square boss
-    // uncut in the exact center of a live rectPocket test (the tool's own
-    // radius didn't reach past the innermost ring). "ZigZagOffset" keeps a
-    // clean offset pass near the walls but fills the remaining interior
-    // with a zigzag sweep, which reaches every point in the pocket
-    // (including dead-center) regardless of tool-to-pocket ratio.
-    `${varName}.ClearingPattern = 'ZigZagOffset'`,
+    // a degenerate size, which left a real square boss uncut in the exact
+    // center of a live rectPocket test (the tool's own radius didn't reach
+    // past the innermost ring). Switching to "ZigZagOffset" fixed the
+    // center boss but a follow-up live test then showed the toolpath never
+    // reaching within 2mm of the true wall on any side (confirmed
+    // byte-identical in both Fanuc-native and Sinumerik-translated output,
+    // so it's ZigZagOffset's own coverage, not a dialect-transform bug) —
+    // ZigZagOffset's internal offset-ring-plus-zigzag split isn't reaching
+    // the boundary for this tool/stepover combination. Plain "ZigZag" is
+    // the simpler raster-only pattern (no separate wall-offset ring to go
+    // missing) and should inset only by the tool radius from the true
+    // boundary — still reaches dead-center like ZigZagOffset did, with a
+    // more predictable wall reach. Needs live re-verification: FreeCAD's
+    // actual area-clearing math here is in a compiled module, not
+    // something further readable from source.
+    `${varName}.ClearingPattern = 'ZigZag'`,
     `${varName}.ToolController = tc`,
     assertDepthPy(varName, sd, fd),
   ].join("\n");
