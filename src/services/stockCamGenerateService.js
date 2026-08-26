@@ -500,6 +500,46 @@ export async function verifyStockPlan(plan) {
   }
 }
 
+// The exact uppercased FreeCAD op label used inside "(BEGIN OPERATION: ...)"
+// comments -- must match the Create() name each op*Py function uses
+// (Drilling_${index}, Pocket_${index}, Contour_${index}), uppercased.
+const OP_LABEL_PREFIX = { drill: "DRILLING", rectPocket: "POCKET", circPocket: "POCKET", contour: "CONTOUR" };
+
+function operationLabelFor(type, index) {
+  const prefix = OP_LABEL_PREFIX[type];
+  if (!prefix) return null;
+  return `${prefix}_${index}`;
+}
+
+// A single-tool job never gets an explicit T-word/M6 from FreeCAD's own
+// post-processor -- confirmed via FreeCAD 1.1.3 source (Path/Op/Base.py,
+// Path/Tool/Controller.py): T+M6 is only emitted on an actual mid-job
+// switch between different ToolControllers, never as a static per-op
+// announcement. That leaves the exported file unable to say, on its own,
+// which physical tool the operator must load -- confirmed live: a 32mm
+// magazine tool machined the part correctly, but the file had zero T-words
+// and the simulator's tool model never switched from its default.
+//
+// Fixed as a raw TEXT insertion into the still-Fanuc-dialect G-code, BEFORE
+// applyControllerTransform() runs: every dialect transformer already has
+// working tool-change-detection logic keyed on a line matching both
+// /\bM0?6\b/i and /\bT(\d+)/i (see industrialTransformers.js), so inserting
+// a plain "T{n} M6" line here gets automatically picked up and reformatted
+// per-dialect with zero changes needed to any transformer.
+export function insertToolChangeMarkers(gcodePath, plan) {
+  let text = fs.readFileSync(gcodePath, "utf-8");
+  plan.operations.forEach((op, index) => {
+    const toolNum = Number(op.params?.toolNum);
+    if (!Number.isFinite(toolNum) || toolNum <= 0) return;
+    const label = operationLabelFor(op.type, index);
+    if (!label) return;
+    const marker = `(BEGIN OPERATION: ${label})`;
+    if (!text.includes(marker)) return;
+    text = text.replace(marker, `${marker}\nT${toolNum} M6`);
+  });
+  fs.writeFileSync(gcodePath, text, "utf-8");
+}
+
 /**
  * Faz 7: final G-code export for the whole plan — same rebuild discipline,
  * same safety checks, this time through postEpiloguePy so a real .gcode
@@ -530,6 +570,10 @@ export async function exportStockPlanGcode(plan, gcodePath, postName) {
     if (safetyError) {
       return { ok: false, error: `Guvenlik kontrolu basarisiz: ${safetyError}` };
     }
+    // Must run before applyControllerTransform: it inserts a plain "T{n} M6"
+    // line into the still-Fanuc-dialect text, which every dialect transform's
+    // own tool-change-detection logic then picks up and reformats itself.
+    insertToolChangeMarkers(gcodePath, plan);
     // The stock-cam flow shares postEpiloguePy/postModuleCandidates with the
     // STEP-file CAM Asistani flow: for controllers with no native FreeCAD
     // post (Siemens/Sinumerik, Heidenhain, Mitsubishi, Mazak, Okuma), what
