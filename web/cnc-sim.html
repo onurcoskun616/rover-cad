@@ -2034,7 +2034,12 @@ function showOpPreview(opType, params){
     case "circPocket": pts2d=polygonCorners((Number(params?.dia)||20)/2,32); break;
     case "hexPocket": pts2d=polygonCorners((Number(params?.dia)||20)/2,6); break;
     case "slot": pts2d=rotatedRectCorners((Number(params?.sl)||40)/2,(Number(params?.sw)||10)/2,Number(params?.dirAngle)||0); break;
-    default: pts2d=null; // face/contour/chamfer act on the whole part — nothing localized to mark
+    // Contour cuts along the stock's OWN outer boundary (no separate shape/
+    // position of its own — see stockCamPlanService.js's "contour" entry),
+    // so its preview outline is just the current stock's own W x D, always
+    // centered at (0,0) like the stock itself.
+    case "contour": pts2d=rectCorners((Number(W)||100)/2,(Number(D)||100)/2); break;
+    default: pts2d=null; // face/chamfer act on the whole part — nothing localized to mark
   }
   if(pts2d){
     outlineFromPoints(pts2d);
@@ -2250,7 +2255,22 @@ const STOCK_CAM_MENU=[
   {type:"drill",label:"Delik Delme"},
   {type:"rectPocket",label:"Dikdörtgen Cep"},
   {type:"circPocket",label:"Daire Cep"},
+  {type:"contour",label:"Kontur Kesme"},
 ];
+
+// Maps a stock-cam operation type + its own params to the (opType, reqDia,
+// reqDepth) triple ToolMagazine.findSlotForOp() already knows how to score
+// (see its own opType branches: drill/pocket/slot/face-contour/chamfer) —
+// mirrors the exact geometry toolDiameterFor() on the server guesses from,
+// so the magazine is asked for "a tool that fits this same job", not a
+// different one.
+function stockCamMagazineQueryFor(opType,params){
+  if(opType==="drill") return {magOpType:"drill", reqDia:Number(params.dia)||0, reqDepth:Number(params.depth)||0};
+  if(opType==="rectPocket") return {magOpType:"pocket", reqDia:Math.min(Number(params.pw)||0,Number(params.pl)||0), reqDepth:Number(params.depth)||0};
+  if(opType==="circPocket") return {magOpType:"pocket", reqDia:Number(params.dia)||0, reqDepth:Number(params.depth)||0};
+  if(opType==="contour") return {magOpType:"contour", reqDia:0, reqDepth:Number(params.depth)||0};
+  return null;
+}
 let stockCamPlanKey=null;   // bu sayfa oturumu boyunca kalıcı
 let stockCamOps=[];         // onaylanmış işlemlerin yerel kopyası (geçmiş paneli için)
 let stockCam=null;          // {opType, opLabel, answers} — sihirbaz sürerken
@@ -2445,6 +2465,7 @@ function stockCamOpSummary(opType,params){
   if(opType==="drill")return `Ø${params.dia}mm, ${params.depth}mm derin, X${params.x} Y${params.y}`;
   if(opType==="rectPocket")return `${params.pw}x${params.pl}mm, ${params.depth}mm derin, X${params.x} Y${params.y}`;
   if(opType==="circPocket")return `Ø${params.dia}mm, ${params.depth}mm derin, X${params.x} Y${params.y}`;
+  if(opType==="contour")return `Stok dış hattı boyunca, ${params.depth}mm derin`;
   return JSON.stringify(params);
 }
 
@@ -2495,6 +2516,20 @@ async function stockCamDoConfirm(){
   stockCamConfirming=true;
   const{opType,opLabel,answers}=stockCamPending;
   const editingId=stockCamEditingId;
+  // Ask the REAL tool magazine for a fitting registered tool before
+  // generating anything — replaces the server's own geometry-based
+  // diameter guess (toolDiameterFor) with an actual tool's real diameter
+  // whenever one fits, same findSlotForOp() this simulator already uses
+  // for its own manual tool changes.
+  const magQuery=stockCamMagazineQueryFor(opType,answers);
+  if(magQuery){
+    const slot=magazine.findSlotForOp(magQuery.magOpType,magQuery.reqDia,magQuery.reqDepth);
+    if(slot>=0){
+      const tl=magazine.getToolInSlot(slot);
+      answers.toolDia=tl.dia;
+      taiMsg(`🔧 Magazinden seçilen takım: <b>${tl.name}</b> (Ø${tl.dia}mm, T${String(slot+1).padStart(2,"0")})`,"bot");
+    }
+  }
   taiMsg("⏳ Topkapı AI gerçek G-code üretiyor ve güvenlik kontrolünden geçiriyor…","bot");
   try{
     const url=editingId?`${MAG_API_BASE}/stock-cam/edit`:`${MAG_API_BASE}/stock-cam/confirm`;
