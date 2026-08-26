@@ -216,7 +216,15 @@ router.post("/stock-cam/gcode", apiKeyAuth, (req, res) => {
       return { ok: true, body: { exported: false, error: result.error } };
     }
     const url = `${req.protocol}://${req.get("host")}/files/${path.basename(result.gcodePath)}`;
-    return { ok: true, body: { exported: true, gcodeUrl: url, warning: result.warning ?? null } };
+    return {
+      ok: true,
+      body: {
+        exported: true,
+        gcodeUrl: url,
+        warning: result.warning ?? null,
+        simulatorPreview: result.simulatorPreview !== false,
+      },
+    };
   }, { exclusive: true });
 
   res.status(202).json({ jobId });

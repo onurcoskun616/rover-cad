@@ -2438,17 +2438,29 @@ async function stockCamDoGenerateGcode(){
     }
     // Faz 7: FreeCAD'in ürettiği G-code'u indirmekle yetinme — hemen simülatörde
     // çalıştırıp gözle doğrula, tıpkı elle yüklenen bir .gcode dosyasında olduğu gibi.
-    try{
-      const gtext=await (await fetch(result.gcodeUrl)).text();
-      const stockDims={w:W,d:D,h:TOP};
-      const parsed=parseGcode(gtext,"mill");
-      if(parsed.q.length>0){
-        millProgramText=gtext;
-        runMillGcode(parsed,stockDims);
-        taiMsg("▶ G-code simülatörde çalıştırıldı, sonucu kontrol edin.","bot");
+    // Ancak bu simülatörün G-code ayrıştırıcısı SADECE standart G0/G1/G2/G3
+    // ("G-kelimeli") hareket sözdizimini anlıyor — Heidenhain Klartext gibi
+    // lehçe-çevrilmiş çıktılar hareket için hiç "G" kelimesi kullanmıyor
+    // (örn. "L X.. Y.. Z.."), bu yüzden otomatik çalıştırılırsa dosyadaki
+    // rastgele sayılar sanki gerçek hareketmiş gibi okunuyor ve takım
+    // hiç derinliğe inmeden rastgele hızlı hareket ediyormuş gibi görünüyor
+    // (canlı testte doğrulandı). Dosyanın kendisi gerçek kontrolcü için
+    // doğru — sadece tarayıcı önizlemesi bu lehçeleri okuyamıyor.
+    if(result.simulatorPreview===false){
+      taiMsg("ℹ️ Bu kontrolcünün G-code lehçesi (örn. Heidenhain/Siemens/Mitsubishi/Mazak/Okuma formatı) bu tarayıcı simülatörünün anladığı standart G-code sözdiziminden farklı — dosya gerçek kontrolcünüz için doğru üretildi, ama burada otomatik önizleme yapılamıyor. Gerçek makinede veya kontrolcünüzün kendi simülatöründe doğrulayın.","bot");
+    } else {
+      try{
+        const gtext=await (await fetch(result.gcodeUrl)).text();
+        const stockDims={w:W,d:D,h:TOP};
+        const parsed=parseGcode(gtext,"mill");
+        if(parsed.q.length>0){
+          millProgramText=gtext;
+          runMillGcode(parsed,stockDims);
+          taiMsg("▶ G-code simülatörde çalıştırıldı, sonucu kontrol edin.","bot");
+        }
+      }catch(e){
+        taiMsg("⚠ G-code indi ama simülatörde otomatik çalıştırılamadı: "+e.message+" — dosyayı elle yükleyebilirsiniz.","bot");
       }
-    }catch(e){
-      taiMsg("⚠ G-code indi ama simülatörde otomatik çalıştırılamadı: "+e.message+" — dosyayı elle yükleyebilirsiniz.","bot");
     }
   }catch(e){
     taiMsg("⛔ Hata: "+e.message,"bot");
