@@ -127,7 +127,15 @@ function stockPy(stock) {
 // fitting tool, or an older client that doesn't send one yet).
 function toolDiameterFor(type, p) {
   const explicit = Number(p?.toolDia);
-  if (Number.isFinite(explicit) && explicit > 0) return Math.min(20, explicit);
+  // No 20mm cap here, unlike the geometry-based guesses below: this is a
+  // REAL registered tool the magazine actually selected (and already told
+  // the operator about) — silently substituting a smaller one would leave
+  // the exported G-code's cutter-compensation assuming a different
+  // diameter than the tool the operator was told to load. Confirmed live:
+  // a 32mm magazine tool got capped to 20mm here, while the chat message
+  // still said "Ø32mm" — FreeCAD's own toolpath comment correctly showed
+  // "DIAMETER: 20.0", i.e. it silently used the WRONG (smaller) tool.
+  if (Number.isFinite(explicit) && explicit > 0) return explicit;
   if (type === "drill") return Math.min(20, Number(p.dia));
   if (type === "rectPocket") return Math.min(20, Math.max(1, Math.min(p.pw, p.pl) * 0.5));
   if (type === "circPocket") return Math.min(20, Math.max(1, Number(p.dia) * 0.4));
