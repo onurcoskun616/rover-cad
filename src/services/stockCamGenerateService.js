@@ -238,6 +238,24 @@ function pocketOpPy(index, p, stock, facePy) {
     // StartDepth/FinalDepth above, so clear it before assigning our own
     // safe per-pass value.
     setDepthPy(varName, "StepDown", pyFloat(stepDown)),
+    // PocketBase.py's own setDefaultValues() defaults ClearingPattern to
+    // "Offset" (confirmed by reading FreeCAD 1.1.3's real source) — a pure
+    // inward-ring pattern that stops once the next ring would collapse to
+    // a degenerate size, which left a real square boss uncut in the exact
+    // center of a live rectPocket test (the tool's own radius didn't reach
+    // past the innermost ring). "ZigZagOffset" fixes that (offset pass for
+    // clean straight walls + zigzag fill for the interior, reaching
+    // dead-center regardless of tool-to-pocket ratio). A live test briefly
+    // switched this to plain "ZigZag" over an apparent ~2mm wall gap, but
+    // that gap was a misdiagnosis (from assuming the wrong tool diameter —
+    // toolDiameterFor() actually auto-selects a tool sized so the
+    // toolpath's own radius reaches exactly the true wall); plain "ZigZag"
+    // has no dedicated wall-following pass at all, and a live rectPocket
+    // test with it came out looking like a stepped octagon instead of a
+    // rectangle (its 45-degree raster lines clipped against the square
+    // boundary, with nothing to square off the corners afterward) — so
+    // ZigZagOffset is correct and stays.
+    `${varName}.ClearingPattern = 'ZigZagOffset'`,
     `${varName}.ToolController = tc`,
     assertDepthPy(varName, sd, fd),
   ].join("\n");
