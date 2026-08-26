@@ -147,17 +147,23 @@ export function transformToSinumerik(gcode, partName) {
       continue;
     }
 
-    if (
-      activeCycle &&
-      /\b[XY]/i.test(line) &&
-      !/\bG[0-3]\d?\b/i.test(line) &&
-      !/\bG8/i.test(line)
-    ) {
-      const p = parseParams(line);
-      if (p.X !== undefined || p.Y !== undefined) {
+    if (activeCycle) {
+      // Another modal continuation under the same active cycle: a new
+      // hole (X/Y changed), the same hole redone at a different depth (Z
+      // changed — common when consecutive drilling operations share a
+      // test/part coordinate), or both. Without re-emitting CYCLE81/83/84/85
+      // here, a Z-only depth-change line (no X/Y) fell through to the
+      // generic pass-through below and was written out as a bare orphaned
+      // fragment (e.g. "Z40.000 R53.000") instead of actually re-running
+      // the drill cycle at the new depth.
+      const stripped2 = line.replace(/^N\d+\s*/i, "");
+      if (/^[XYZ]/i.test(stripped2) && !/^[GMTSO]/i.test(stripped2)) {
+        const p = parseParams(stripped2);
         const pos = positionLine(p);
         if (pos) out.push(pos);
         if (p.Z !== undefined) lastZ = p.Z;
+        if (p.R !== undefined) lastR = p.R;
+        if (p.F !== undefined) lastF = p.F;
         const builder = CYCLE_BUILDERS[activeCycle];
         if (builder) {
           out.push(builder(lastZ, lastR, 0, lastQ, lastF, lastS));
