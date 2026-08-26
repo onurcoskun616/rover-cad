@@ -1245,6 +1245,16 @@ function parseGcode(text, type){
   // for "tool at rest") means an omitted-Z move is read the way it's
   // actually meant: "no change from a safe position", not "go to the table".
   let cur={x:0,y:type==="mill"?90:0,z:type==="mill"?TOP+30:0}, feed=200, lastG=0, prevWasRapid=false, approachZ=Infinity;
+  // Standard canned-cycle modal state (G81-G89: R=retract plane, Z=depth,
+  // Q=peck increment — only R/Z matter for simulation, Q is unused).
+  let cycleR=null, cycleZ=null;
+  // Heidenhain Klartext has no G-words for motion at all, so its canned
+  // cycles are tracked separately: CYCL DEF's SET UP/DEPTH (legacy) or
+  // Q200=/Q201= (modern) give the retract plane and target depth, applied
+  // when the following "L ... M99" call line actually runs the cycle.
+  let hdRetractZ=null, hdDepthZ=null;
+  // Heidenhain CC sets the next arc's center for a following C endpoint line.
+  let hdCCx=null, hdCCy=null;
   const bounds={xMin:Infinity,xMax:-Infinity,yMin:Infinity,yMax:-Infinity,zMin:Infinity,zMax:-Infinity};
   function pushMillPoint(isRapid,nx,ny,nz){
     if(!isRapid&&prevWasRapid) approachZ=Math.min(approachZ,cur.z);
@@ -1254,13 +1264,112 @@ function parseGcode(text, type){
     prevWasRapid=isRapid;
   }
   for(let raw of lines){
-    raw=raw.replace(/;.*$/,"").replace(/\(.*?\)/g,"").trim().toUpperCase();
+    raw=raw.replace(/;.*$/,"").trim().toUpperCase();
+    if(!raw) continue;
+
+    // Sinumerik canned-cycle CALLS (CYCLE81/83/84/85(...)) look like a
+    // function call — read their real arguments here, before the generic
+    // "(...)" comment-strip below would otherwise eat them as a comment.
+    // All four share the layout we need: arg0 = retract plane (absolute Z,
+    // this app's convention), arg3 = target depth — the cycle executes at
+    // whatever X/Y the preceding G0 already moved to.
+    const sinuCycle = type==="mill" && raw.match(/\bCYCLE8[1345]\(([^)]*)\)/);
+    if(sinuCycle){
+      const args=sinuCycle[1].split(",").map((s)=>parseFloat(s.trim()));
+      const retractZ=args[0], targetZ=args[3];
+      if(Number.isFinite(retractZ)&&Number.isFinite(targetZ)){
+        pushMillPoint(true,cur.x,cur.y,retractZ);
+        pushMillPoint(false,cur.x,cur.y,targetZ);
+        pushMillPoint(true,cur.x,cur.y,retractZ);
+      }
+      continue;
+    }
+
+    // Heidenhain Klartext: motion words are "L"/"C"/"CC"/"CR", never a
+    // G-word, so none of the standard G-word dispatch below ever triggers
+    // for it. Real programs prefix every line with a line number
+    // ("14 L X+0 ...") — strip that first so the real keyword is first.
+    if(type==="mill"){
+      const noLineNum=raw.replace(/^\d+\s+/,"");
+      const firstWord=noLineNum.split(/\s+/)[0];
+      const setupM=noLineNum.match(/\bQ200=([\d.+-]+)/)||noLineNum.match(/\bSET[ -]?UP\s+([\d.+-]+)/);
+      const depthM=noLineNum.match(/\bQ201=([\d.+-]+)/)||noLineNum.match(/\bDEPTH\s+([\d.+-]+)/);
+      if(setupM||depthM){
+        if(setupM) hdRetractZ=parseFloat(setupM[1]);
+        if(depthM) hdDepthZ=parseFloat(depthM[1]);
+        continue;
+      }
+      if(firstWord==="BEGIN"||firstWord==="END"||firstWord==="BLK"||firstWord==="CYCL") continue;
+      if(firstWord==="TOOL"){
+        const nums=noLineNum.match(/[A-Z][+-]?[\d.]+/g)||[];
+        for(const t of nums){
+          const c=t[0],v=parseFloat(t.slice(1));
+          if(c==="T"){const tSlot=clamp(Math.round(v),1,40)-1;q.push({type:"tc",targetSlot:tSlot});}
+          if(c==="S"){mill.spindleRpm=clamp(v,0,12000);}
+        }
+        continue;
+      }
+      if(firstWord==="CC"){
+        const nums=noLineNum.match(/[A-Z][+-]?[\d.]+/g)||[];
+        for(const t of nums){
+          if(t[0]==="X") hdCCx=parseFloat(t.slice(1));
+          if(t[0]==="Y") hdCCy=parseFloat(t.slice(1));
+        }
+        continue;
+      }
+      if(firstWord==="L"||firstWord==="C"||firstWord==="CR"){
+        const hTokens=noLineNum.match(/[A-Z][+-]?[\d.]+/g)||[];
+        const hp={};
+        for(const t of hTokens) hp[t[0]]=parseFloat(t.slice(1));
+        if("M" in hp){
+          if(hp.M===3||hp.M===4) mill.spindleOn=true;
+          if(hp.M===5) mill.spindleOn=false;
+          if(hp.M===7) mill.coolantMode="mist";
+          if(hp.M===8) mill.coolantMode="flood";
+          if(hp.M===9) mill.coolantMode="off";
+        }
+        const isRapid=/\bFMAX\b/.test(noLineNum);
+        if("F" in hp) feed=hp.F;
+        const nx="X" in hp?hp.X:cur.x, ny="Y" in hp?hp.Y:cur.y, nz="Z" in hp?hp.Z:cur.z;
+        if(firstWord==="L"){
+          pushMillPoint(isRapid,nx,ny,nz);
+        }else{
+          const isCW=/\bDR-\b/.test(noLineNum);
+          let cx,cy;
+          if(firstWord==="C"&&hdCCx!=null){cx=hdCCx;cy=hdCCy;}
+          else{
+            // CR gives a radius, not a center — approximate the center as
+            // the chord's perpendicular offset (fine for verification,
+            // not exact for near-180 degree arcs).
+            const r=Math.abs(hp.R||0);
+            const mx=(cur.x+nx)/2, my=(cur.y+ny)/2;
+            const ddx=nx-cur.x, ddy=ny-cur.y;
+            const len=Math.hypot(ddx,ddy)||1;
+            const h=Math.sqrt(Math.max(0,r*r-(len/2)*(len/2)));
+            const perp=isCW?{x:ddy/len,y:-ddx/len}:{x:-ddy/len,y:ddx/len};
+            cx=mx+perp.x*h; cy=my+perp.y*h;
+          }
+          const pts=millArcPoints(cur.x,cur.y,cur.z,nx,ny,nz,cx-cur.x,cy-cur.y,isCW);
+          for(const pt of pts) pushMillPoint(false,pt.x,pt.y,pt.z);
+        }
+        if(/\bM99\b/.test(noLineNum)&&hdDepthZ!=null){
+          const retractZ=hdRetractZ!=null?hdRetractZ:cur.z;
+          pushMillPoint(true,cur.x,cur.y,retractZ);
+          pushMillPoint(false,cur.x,cur.y,hdDepthZ);
+          pushMillPoint(true,cur.x,cur.y,retractZ);
+        }
+        continue;
+      }
+    }
+
+    raw=raw.replace(/\(.*?\)/g,"").trim();
     if(!raw) continue;
     const tokens=raw.match(/[A-Z][+-]?[\d.]+/g);
     if(!tokens) continue;
     const p={};
     for(const t of tokens){const c=t[0],v=parseFloat(t.slice(1));p[c]=v;}
     if("G" in p) lastG=p.G;
+    if(lastG===80){ cycleR=null; cycleZ=null; }
     if("F" in p) feed=p.F;
     if("S" in p && type==="mill") mill.spindleRpm=clamp(p.S,0,12000);
     if("S" in p && type==="lathe") lathe.setSpindleRpm(p.S);
@@ -1296,6 +1405,26 @@ function parseGcode(text, type){
         if(lastG!==0){bounds.xMin=Math.min(bounds.xMin,nx);bounds.xMax=Math.max(bounds.xMax,nx);bounds.zMin=Math.min(bounds.zMin,nz);bounds.zMax=Math.max(bounds.zMax,nz);}
         q.push(lastG===0?{type:"rapid",x:nx,z:nz}:{type:"feed",x:nx,z:nz,gcodeFeed:feed});
         cur={x:nx,z:nz};
+      }
+    } else if(type==="mill"&&lastG>=81&&lastG<=89){
+      // Standard canned drilling cycles (G81 simple, G82/G86/G89 with
+      // dwell/boring variants, G83 peck, G84/G85 tapping/reaming) —
+      // modal, so X/Y/Z/R often aren't repeated on later lines under the
+      // same active cycle (a new hole just gives new X/Y, a re-drilled
+      // depth just gives new Z). Simplified to one clean rapid-to-retract,
+      // feed-to-depth, retract sequence rather than exact peck stepping —
+      // enough to verify the tool actually reaches the right depth at the
+      // right place instead of a bare rapid straight into the material.
+      if("R" in p) cycleR=p.R;
+      const nx="X" in p?p.X:cur.x, ny="Y" in p?p.Y:cur.y;
+      if("Z" in p) cycleZ=p.Z;
+      const retractZ=cycleR!=null?cycleR:cur.z;
+      const feedRetract=(lastG===85||lastG===86||lastG===89);
+      pushMillPoint(true,nx,ny,cur.z);
+      if(retractZ!==cur.z) pushMillPoint(true,nx,ny,retractZ);
+      if(cycleZ!=null){
+        pushMillPoint(false,nx,ny,cycleZ);
+        pushMillPoint(!feedRetract,nx,ny,retractZ);
       }
     } else if(type==="lathe"&&lastG===33){
       // Thread cutting (single synchronized pass, as written — real G33
@@ -2433,8 +2562,15 @@ async function stockCamDoGenerateGcode(){
     const result=await stockCamPollJob(start.jobId);
     if(!result.exported){ taiMsg("⛔ G-code üretilemedi: "+(result.error||"bilinmeyen hata"),"bot"); return; }
     taiMsg(`<span class="tai-msg-action">✓ G-code hazır:</span> <a href="${result.gcodeUrl}" target="_blank" rel="noopener">indir</a>`,"bot");
+    if(result.warning){
+      taiMsg("⚠️ "+result.warning,"bot");
+    }
     // Faz 7: FreeCAD'in ürettiği G-code'u indirmekle yetinme — hemen simülatörde
     // çalıştırıp gözle doğrula, tıpkı elle yüklenen bir .gcode dosyasında olduğu gibi.
+    // parseGcode artık Heidenhain Klartext (L/C/CC/CR, CYCL DEF+M99) ve Sinumerik
+    // (CYCLE81/83/84/85(...)) sözdizimini de standart G0-G3/G8x ile birlikte
+    // anlıyor, bu yüzden hangi kontrolcü seçilirse seçilsin ayrım yapmadan
+    // otomatik çalıştırılabilir.
     try{
       const gtext=await (await fetch(result.gcodeUrl)).text();
       const stockDims={w:W,d:D,h:TOP};
