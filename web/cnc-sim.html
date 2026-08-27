@@ -2505,7 +2505,7 @@ function stockCamOpSummary(opType,params){
   if(opType==="drill")return `Ø${params.dia}mm, ${params.depth}mm derin, X${params.x} Y${params.y}`;
   if(opType==="rectPocket")return `${params.pw}x${params.pl}mm, ${params.depth}mm derin, X${params.x} Y${params.y}`;
   if(opType==="circPocket")return `Ø${params.dia}mm, ${params.depth}mm derin, X${params.x} Y${params.y}`;
-  if(opType==="contour")return `Stok dış hattı boyunca, ${params.depth}mm derin`;
+  if(opType==="contour")return `Stok dış hattı boyunca, ${params.depth}mm derin`+(Number(params.tabs)>0?` (${params.tabs} tutucu köprü ile)`:"");
   if(opType==="slot")return `${params.sw}x${params.sl}mm kanal, ${params.dirAngle||0}° yön, ${params.depth}mm derin, X${params.x} Y${params.y}`;
   if(opType==="chamfer")return `Stok dış kenarı boyunca, ${params.depth}mm pah`;
   if(opType==="drillGrid")return `${params.rows}x${params.cols} delik ızgarası, Ø${params.dia}mm, ${params.depth}mm derin, aralık X${params.spacingX} Y${params.spacingY}, merkez X${params.x} Y${params.y}`;
