@@ -190,6 +190,10 @@ export const OPERATION_TYPES = Object.freeze({
     label: "Kontur Kesme",
     params: [
       { name: "depth", label: "Derinlik", unit: "mm", type: "number", min: 0.1, max: 500 },
+      // Opt-in (default 0 = off): only meaningful when depth fully severs
+      // the part from the stock (depth >= stock height) -- see
+      // contourOpPy's own comment for why this defaults off rather than on.
+      { name: "tabs", label: "Tutucu Köprü Sayısı", unit: "", type: "number", default: 0, min: 0, max: 20 },
     ],
     bounds: () => null, // outer profile of the part — footprint == stock/part outline
   },

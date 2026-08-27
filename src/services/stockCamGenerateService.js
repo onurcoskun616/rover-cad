@@ -559,15 +559,33 @@ function pocketOpPy(index, p, stock, facePy) {
 // itself. 'Outside' would offset outward into open space beyond the stock
 // (nothing there to cut, since the boundary already IS the stock's edge),
 // so it's deliberately not used here.
+// A full-depth Kontur Kesme cuts the part completely free of the stock --
+// a spinning tool finishing that cut can leave the (now loose) part free
+// to move, a real safety risk. Optional "tabs" support (Path.Dressup.Tags,
+// confirmed real: Path/Dressup/Tags.py's ObjectTagDressup) leaves small
+// uncut bridges so the part stays attached until manually snapped off.
+// Defaults to 0 (off, byte-for-byte the same generated Python as before
+// this feature existed) -- opt-in until live-verified at least once, since
+// this dressup-wrapping mechanism (a Path object wrapping ANOTHER Path
+// object, rather than every other op's flat Base-face pattern) is the
+// least-tested piece of Python this codebase generates.
 function contourOpPy(index, p, stock) {
-  const varName = `contour_${index}`;
-  const feat = `_cface_${index}`;
   const depth = Number(p.depth);
+  const fullCutThrough = depth >= Number(stock.h) - 1e-6;
+  const tabCount = Math.max(0, Math.round(Number(p.tabs) || 0));
+  const useTabs = fullCutThrough && tabCount > 0;
+  // When tabs are added, the DRESSUP (not the raw profile) becomes what the
+  // post-processor actually emits G-code for, so it must claim the
+  // "Contour_N" name insertToolChangeMarkers()/OP_LABEL_PREFIX expect --
+  // the underlying raw profile gets a different internal name to avoid a
+  // FreeCAD auto-renamed collision (e.g. "Contour_0001").
+  const varName = useTabs ? `contourbase_${index}` : `contour_${index}`;
+  const profileName = useTabs ? `ContourBase_${index}` : `Contour_${index}`;
+  const feat = `_cface_${index}`;
   const sd = pyFloat(stock.h);
   const fd = pyFloat(Number(stock.h) - depth);
-  const hw = pyFloat(Number(stock.w) / 2), hl = pyFloat(Number(stock.d) / 2);
-  return [
-    `_chw_${index}, _chl_${index} = ${hw}, ${hl}`,
+  const lines = [
+    `_chw_${index}, _chl_${index} = ${pyFloat(Number(stock.w) / 2)}, ${pyFloat(Number(stock.d) / 2)}`,
     `_cp0_${index} = App.Vector(-_chw_${index}, -_chl_${index}, ${sd})`,
     `_cp1_${index} = App.Vector(_chw_${index}, -_chl_${index}, ${sd})`,
     `_cp2_${index} = App.Vector(_chw_${index}, _chl_${index}, ${sd})`,
@@ -576,7 +594,7 @@ function contourOpPy(index, p, stock) {
     `${feat} = doc.addObject('Part::Feature', ${pyStr(`ContourProfile_${index}`)})`,
     `${feat}.Shape = Part.Face(_cwire_${index})`,
     "doc.recompute()",
-    `${varName} = PathProfile.Create(${pyStr(`Contour_${index}`)})`,
+    `${varName} = PathProfile.Create(${pyStr(profileName)})`,
     `${varName}.Base = [(${feat}, ["Face1"])]`,
     `${varName}.Side = 'Inside'`,
     setDepthPy(varName, "StartDepth", sd),
@@ -584,7 +602,26 @@ function contourOpPy(index, p, stock) {
     setDepthPy(varName, "StepDown", pyFloat(Math.min(depth, 3.0))),
     `${varName}.ToolController = tc`,
     assertDepthPy(varName, sd, fd),
-  ].join("\n");
+  ];
+  if (!useTabs) return lines.join("\n");
+  const tagVar = `contourtag_${index}`;
+  lines.push(
+    "import Path.Dressup.Tags as PathDressupTag",
+    `${tagVar} = PathDressupTag.Create(${varName}, ${pyStr(`Contour_${index}`)})`,
+    `${tagVar}.Proxy.generateTags(${tagVar}, ${tabCount})`,
+    // Create() inserts the dressup into the job's Operations group WITHOUT
+    // removing the raw base (confirmed: Job.py's addOperation() defaults
+    // removeBefore=False) -- left alone, the base would ALSO independently
+    // feed a second, undressed (fully-severing) toolpath into the combined
+    // job path/G-code. Removing it explicitly here is the one thing our
+    // headless script must do that the GUI command path would otherwise
+    // handle implicitly.
+    `_ops_group_${index} = job.Operations.Group`,
+    `if ${varName} in _ops_group_${index}:`,
+    `    _ops_group_${index}.remove(${varName})`,
+    `    job.Operations.Group = _ops_group_${index}`,
+  );
+  return lines.join("\n");
 }
 
 /// "Pah Kırma" (chamfer) reuses the exact same "trace the stock's own outer
@@ -677,24 +714,55 @@ function operationPy(index, op, stock) {
   throw new Error(`operationPy: eslesmeyen tip ${op.type}`); // unreachable given the guards above
 }
 
+// Groups operations that can share a single physical tool -- avoids a
+// pointless tool change (and, downstream, an extra T-word/M6) between two
+// operations that could just stay on the same loaded tool. "Same tool"
+// means the same tool FAMILY (endmill/tap/threadmill are never
+// interchangeable) at the same resolved diameter -- tapping additionally
+// requires an exact pitch match (a different pitch is a physically
+// different tap; see toolDiameterFor's own tapping comment), while
+// threadMilling only needs the same CUTTING diameter (the thread's own
+// size lives on the operation, not the tool, so one thread-mill cutter
+// already serves many different thread sizes). Diameter is rounded to 6
+// decimals so floating-point noise from a geometry guess never splits two
+// operations that are asking for the functionally identical tool.
+function toolSignatureFor(op, toolDia) {
+  const dia = Math.round(Number(toolDia) * 1e6) / 1e6;
+  if (op.type === "tapping") return `tap:${dia}:${Number(op.params.pitch)}`;
+  if (op.type === "threadMilling") return `threadmill:${dia}`;
+  return `endmill:${dia}`;
+}
+
 // Builds the full, deterministic Python for a plan: stock + every confirmed
-// operation IN ORDER, each with its own ToolController set explicitly (tool
-// diameter varies per operation, so — unlike the STEP-file flow's usual
-// single-tool case — every op here gets a fresh, explicitly-diametered
-// ToolController; see cam-code-system-prompt.txt's own warning about never
-// leaving an op's ToolController to implicit inheritance once there's more
-// than one).
+// operation IN ORDER. The first operation to need a given physical tool
+// (see toolSignatureFor) creates its ToolController exactly as before
+// (operationPyWithOwnTool: the job's own default `tc` for the very first
+// operation overall, a fresh tc_<i> for every one after that); every LATER
+// operation whose own resolved tool matches an EARLIER one's signature
+// skips tool creation entirely and just points its own `.ToolController`
+// at that already-created ToolController -- see cam-code-system-prompt.txt's
+// own warning about never leaving an op's ToolController to implicit
+// inheritance still holds: every operation still gets an EXPLICIT
+// ToolController assignment, it's just shared rather than always fresh.
 export function buildStockJobPy(plan) {
   const lines = [stockPy(plan.stock)];
+  const toolGroups = new Map(); // signature -> already-created tc variable name
   plan.operations.forEach((op, i) => {
-    // Every operation gets its own ToolController sized to its own geometry
-    // (see toolDiameterFor) rather than sharing the job's single default
-    // `tc` — reusing one tool size across a 50mm pocket and an 8mm drill
-    // would be geometrically wrong, not just suboptimal. operationPyWithOwnTool
-    // creates that ToolController itself (tc_<i>) for every op after the
-    // first, which reuses the job's own default `tc`.
     const dia = toolDiameterFor(op.type, op.params);
+    const signature = toolSignatureFor(op, dia);
+    const existingTcVar = toolGroups.get(signature);
+    if (existingTcVar !== undefined) {
+      const body = operationPy(i, op, plan.stock);
+      const rewired =
+        existingTcVar === "tc" ? body : body.replace(/\.ToolController = tc$/m, `.ToolController = ${existingTcVar}`);
+      lines.push(rewired);
+      return;
+    }
     lines.push(operationPyWithOwnTool(i, op, plan.stock, dia));
+    // Mirrors operationPyWithOwnTool's own naming exactly: the very first
+    // operation overall (any type) reuses/reassigns the job's default
+    // `tc`; every operation after that creates its own `tc_<i>`.
+    toolGroups.set(signature, i === 0 ? "tc" : `tc_${i}`);
   });
   return lines.join("\n\n");
 }
