@@ -136,7 +136,7 @@ function toolDiameterFor(type, p) {
   // still said "Ø32mm" — FreeCAD's own toolpath comment correctly showed
   // "DIAMETER: 20.0", i.e. it silently used the WRONG (smaller) tool.
   if (Number.isFinite(explicit) && explicit > 0) return explicit;
-  if (type === "drill") return Math.min(20, Number(p.dia));
+  if (type === "drill" || type === "drillGrid" || type === "drillCircle") return Math.min(20, Number(p.dia));
   if (type === "rectPocket") return Math.min(20, Math.max(1, Math.min(p.pw, p.pl) * 0.5));
   if (type === "circPocket") return Math.min(20, Math.max(1, Number(p.dia) * 0.4));
   if (type === "contour") return 10;
@@ -208,6 +208,69 @@ function drillOpPy(index, p, stock) {
     `${toolVar}_tool_dia = ${pyFloat(dia)}`,
     `${varName} = PathDrilling.Create(${pyStr(`Drilling_${index}`)})`,
     `${varName}.Locations = [App.Vector(${pyFloat(p.x)}, ${pyFloat(p.y)}, 0.0)]`,
+    setDepthPy(varName, "StartDepth", sd),
+    setDepthPy(varName, "FinalDepth", fd),
+    `${varName}.ToolController = tc`,
+    assertDepthPy(varName, sd, fd),
+  ].join("\n");
+}
+
+// "Delik Izgarası" (grid) and "Delik Çemberi" (bolt circle) hole patterns
+// both reuse PathDrilling.Create's OWN multi-location support directly --
+// its `Locations` property already takes a LIST (drillOpPy above just
+// passes a single-element one), so expanding to many holes needs no new
+// Path.Op at all, only more App.Vector entries computed here in JS. Every
+// hole in the pattern still gets the exact same single-tool safety
+// checking (plungeCheckPy/collisionCheckPy) as any other op, since it's
+// still one Drilling operation under the hood.
+function drillGridOpPy(index, p, stock) {
+  const varName = `drill_${index}`;
+  const sd = pyFloat(stock.h);
+  const fd = pyFloat(Number(stock.h) - Number(p.depth));
+  const rows = Math.max(1, Math.round(Number(p.rows)));
+  const cols = Math.max(1, Math.round(Number(p.cols)));
+  const sx = Number(p.spacingX) || 0, sy = Number(p.spacingY) || 0;
+  const cx = Number(p.x), cy = Number(p.y);
+  const totalW = (cols - 1) * sx, totalH = (rows - 1) * sy;
+  const locations = [];
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const px = cx - totalW / 2 + c * sx;
+      const py = cy - totalH / 2 + r * sy;
+      locations.push(`App.Vector(${pyFloat(px)}, ${pyFloat(py)}, 0.0)`);
+    }
+  }
+  return [
+    `${varName} = PathDrilling.Create(${pyStr(`Drilling_${index}`)})`,
+    `${varName}.Locations = [${locations.join(", ")}]`,
+    setDepthPy(varName, "StartDepth", sd),
+    setDepthPy(varName, "FinalDepth", fd),
+    `${varName}.ToolController = tc`,
+    assertDepthPy(varName, sd, fd),
+  ].join("\n");
+}
+
+function drillCircleOpPy(index, p, stock) {
+  const varName = `drill_${index}`;
+  const sd = pyFloat(stock.h);
+  const fd = pyFloat(Number(stock.h) - Number(p.depth));
+  const count = Math.max(2, Math.round(Number(p.count)));
+  const radius = Number(p.radius);
+  const startAngle = Number(p.startAngle) || 0;
+  const cx = Number(p.x), cy = Number(p.y);
+  // Round away cos/sin floating-point noise at "clean" angles, same fix as
+  // slotFacePy's rotation math (e.g. cos(90deg) is 6.12e-17, not exactly 0).
+  const round6 = (n) => Math.round(n * 1e6) / 1e6;
+  const locations = [];
+  for (let i = 0; i < count; i++) {
+    const rad = ((startAngle + (360 / count) * i) * Math.PI) / 180;
+    const px = round6(cx + radius * Math.cos(rad));
+    const py = round6(cy + radius * Math.sin(rad));
+    locations.push(`App.Vector(${pyFloat(px)}, ${pyFloat(py)}, 0.0)`);
+  }
+  return [
+    `${varName} = PathDrilling.Create(${pyStr(`Drilling_${index}`)})`,
+    `${varName}.Locations = [${locations.join(", ")}]`,
     setDepthPy(varName, "StartDepth", sd),
     setDepthPy(varName, "FinalDepth", fd),
     `${varName}.ToolController = tc`,
@@ -414,7 +477,9 @@ function chamferOpPy(index, p, stock) {
 // MVP scope (Faz 4 + Kontur follow-up): drill, rectPocket, circPocket,
 // contour, slot, chamfer. hexPocket/face intentionally raise here rather
 // than silently machine something wrong.
-const SUPPORTED_TYPES = new Set(["drill", "rectPocket", "circPocket", "contour", "slot", "chamfer"]);
+const SUPPORTED_TYPES = new Set([
+  "drill", "rectPocket", "circPocket", "contour", "slot", "chamfer", "drillGrid", "drillCircle",
+]);
 
 export function isStockGenerationSupported(type) {
   return SUPPORTED_TYPES.has(type);
@@ -427,7 +492,8 @@ function operationPy(index, op, stock) {
   if (!isStockGenerationSupported(op.type)) {
     throw new Error(
       `'${OPERATION_TYPES[op.type].label}' islemi henuz gercek Topkapi AI uretimini desteklemiyor ` +
-      "(MVP kapsaminda sadece Delik Delme, Dikdortgen Cep, Daire Cep, Kontur Kesme, Kanal, Pah Kirma var).",
+      "(MVP kapsaminda sadece Delik Delme, Dikdortgen Cep, Daire Cep, Kontur Kesme, Kanal, Pah Kirma, " +
+      "Delik Izgarasi, Delik Cemberi var).",
     );
   }
   const p = op.params;
@@ -437,6 +503,8 @@ function operationPy(index, op, stock) {
   if (op.type === "contour") return contourOpPy(index, p, stock);
   if (op.type === "slot") return pocketOpPy(index, p, stock, slotFacePy(index, p, stock));
   if (op.type === "chamfer") return chamferOpPy(index, p, stock);
+  if (op.type === "drillGrid") return drillGridOpPy(index, p, stock);
+  if (op.type === "drillCircle") return drillCircleOpPy(index, p, stock);
   throw new Error(`operationPy: eslesmeyen tip ${op.type}`); // unreachable given the guards above
 }
 
@@ -598,6 +666,8 @@ const OP_LABEL_PREFIX = {
   contour: "CONTOUR",
   slot: "POCKET",
   chamfer: "CHAMFER",
+  drillGrid: "DRILLING",
+  drillCircle: "DRILLING",
 };
 
 function operationLabelFor(type, index) {
