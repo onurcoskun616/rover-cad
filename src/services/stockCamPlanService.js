@@ -90,6 +90,23 @@ export const OPERATION_TYPES = Object.freeze({
     ],
     bounds: (p) => centeredBounds(p.x, p.y, p.dia / 2, p.dia / 2),
   },
+  // "Freze ile Diş Açma" (thread milling): cuts an internal thread with a
+  // small thread-mill endmill via helical interpolation, instead of a tap.
+  // Same "never guess" discipline as tapping for dia/pitch -- MinorDiameter
+  // gets computed from these two via the exact ISO 68-1 formula (real math,
+  // not a guess), never asked separately.
+  threadMilling: {
+    label: "Freze ile Diş Açma",
+    params: [
+      { name: "dia", label: "Diş Çapı (ör. M8 için 8)", unit: "mm", type: "number", min: 3, max: 100 },
+      { name: "pitch", label: "Diş Adımı (Pitch)", unit: "mm", type: "number", min: 0.1, max: 10 },
+      { name: "depth", label: "Derinlik", unit: "mm", type: "number", min: 0.1, max: 500 },
+      { name: "x", label: "Merkez X", unit: "mm", type: "number" },
+      { name: "y", label: "Merkez Y", unit: "mm", type: "number" },
+      { name: "passes", label: "Paso Sayısı", unit: "", type: "number", default: 3, min: 1, max: 20 },
+    ],
+    bounds: (p) => centeredBounds(p.x, p.y, p.dia / 2, p.dia / 2),
+  },
   rectPocket: {
     label: "Dikdörtgen Cep",
     params: [

@@ -2033,6 +2033,9 @@ function showOpPreview(opType, params){
     // A tapped hole looks like a plain round hole from above -- same
     // preview shape as drill, sized from the thread's own nominal diameter.
     case "tapping": pts2d=polygonCorners((Number(params?.dia)||6)/2,24); break;
+    // Same round-hole preview as tapping -- both cut an internal thread
+    // in a round hole, just with a different tool/toolpath strategy.
+    case "threadMilling": pts2d=polygonCorners((Number(params?.dia)||6)/2,24); break;
     case "rectPocket": pts2d=rectCorners((Number(params?.pw)||20)/2,(Number(params?.pl)||20)/2); break;
     case "circPocket": pts2d=polygonCorners((Number(params?.dia)||20)/2,32); break;
     case "hexPocket": pts2d=polygonCorners((Number(params?.dia)||20)/2,6); break;
@@ -2287,6 +2290,7 @@ const STOCK_CAM_MENU=[
   {type:"hexPocket",label:"Altıgen Cep"},
   {type:"face",label:"Yüzey Düzeltme"},
   {type:"tapping",label:"Kılavuz Çekme"},
+  {type:"threadMilling",label:"Freze ile Diş Açma"},
 ];
 
 // Maps a stock-cam operation type + its own params to the (opType, reqDia,
@@ -2509,6 +2513,7 @@ function stockCamOpSummary(opType,params){
   if(opType==="hexPocket")return `Ø${params.dia}mm (köşeden köşeye), ${params.depth}mm derin, X${params.x} Y${params.y}`;
   if(opType==="face")return `Stoğun tüm üst yüzeyi, ${params.depth}mm talaş derinliği`;
   if(opType==="tapping")return `M${params.dia} diş (adım ${params.pitch}mm), ${params.depth}mm derin, X${params.x} Y${params.y}`;
+  if(opType==="threadMilling")return `M${params.dia} diş (adım ${params.pitch}mm, ${params.passes||3} paso), ${params.depth}mm derin, X${params.x} Y${params.y}`;
   return JSON.stringify(params);
 }
 
