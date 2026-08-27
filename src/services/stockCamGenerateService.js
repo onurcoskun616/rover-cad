@@ -145,6 +145,11 @@ function toolDiameterFor(type, p) {
   // most of that width. 80% leaves ZigZagOffset's own wall-offset pass room
   // to true up both side walls instead of using the full width with none.
   if (type === "slot") return Math.min(20, Math.max(1, Number(p.sw) * 0.8));
+  // Chamfer's own registry schema has no separate diameter/width field (see
+  // stockCamPlanService.js's "chamfer" entry) -- falls through to the same
+  // 6mm default as every other unmatched type, which happens to match this
+  // codebase's own Ø6 "Pah Freze" tool.
+  if (type === "chamfer") return 6;
   return 6;
 }
 
@@ -364,10 +369,52 @@ function contourOpPy(index, p, stock) {
   ].join("\n");
 }
 
+/// "Pah Kırma" (chamfer) reuses the exact same "trace the stock's own outer
+// boundary" geometry as contourOpPy (Path.Op.Profile, Side='Inside') --
+// the only real difference is depth: Kontur Kesme cuts all the way through,
+// this cuts only a shallow pass (the chamfer amount). Assumes a standard
+// 45-degree included chamfer bit (this codebase's own "Pah Freze" tools,
+// e.g. cnc-sim.html's TOOL_LIBRARY Ø3/Ø6 entries) -- at that angle, the
+// tool plunged `depth` mm below the top surface and traced along the true
+// edge (Side='Inside' offsets the tool center inward by its own radius,
+// same reasoning as contour) cuts a bevel whose width equals `depth`
+// itself. FreeCAD 1.1.3's Path workbench has no dedicated chamfer/dressup
+// operation for cutting a real edge bevel on a plain box (its dressups —
+// Tag, Boundary, Dogbone, etc. — modify an existing toolpath's shape, they
+// don't generate one), so reusing Profile the same way contour does is the
+// same low-risk, already-validated machinery rather than a new Path.Op.
+function chamferOpPy(index, p, stock) {
+  const varName = `chamfer_${index}`;
+  const feat = `_chmfface_${index}`;
+  const depth = Number(p.depth);
+  const sd = pyFloat(stock.h);
+  const fd = pyFloat(Number(stock.h) - depth);
+  const hw = pyFloat(Number(stock.w) / 2), hl = pyFloat(Number(stock.d) / 2);
+  return [
+    `_chmfhw_${index}, _chmfhl_${index} = ${hw}, ${hl}`,
+    `_chmfp0_${index} = App.Vector(-_chmfhw_${index}, -_chmfhl_${index}, ${sd})`,
+    `_chmfp1_${index} = App.Vector(_chmfhw_${index}, -_chmfhl_${index}, ${sd})`,
+    `_chmfp2_${index} = App.Vector(_chmfhw_${index}, _chmfhl_${index}, ${sd})`,
+    `_chmfp3_${index} = App.Vector(-_chmfhw_${index}, _chmfhl_${index}, ${sd})`,
+    `_chmfwire_${index} = Part.makePolygon([_chmfp0_${index}, _chmfp1_${index}, _chmfp2_${index}, _chmfp3_${index}, _chmfp0_${index}])`,
+    `${feat} = doc.addObject('Part::Feature', ${pyStr(`ChamferProfile_${index}`)})`,
+    `${feat}.Shape = Part.Face(_chmfwire_${index})`,
+    "doc.recompute()",
+    `${varName} = PathProfile.Create(${pyStr(`Chamfer_${index}`)})`,
+    `${varName}.Base = [(${feat}, ["Face1"])]`,
+    `${varName}.Side = 'Inside'`,
+    setDepthPy(varName, "StartDepth", sd),
+    setDepthPy(varName, "FinalDepth", fd),
+    setDepthPy(varName, "StepDown", pyFloat(Math.min(depth, 3.0))),
+    `${varName}.ToolController = tc`,
+    assertDepthPy(varName, sd, fd),
+  ].join("\n");
+}
+
 // MVP scope (Faz 4 + Kontur follow-up): drill, rectPocket, circPocket,
-// contour. hexPocket/slot/face/chamfer intentionally raise here rather
+// contour, slot, chamfer. hexPocket/face intentionally raise here rather
 // than silently machine something wrong.
-const SUPPORTED_TYPES = new Set(["drill", "rectPocket", "circPocket", "contour", "slot"]);
+const SUPPORTED_TYPES = new Set(["drill", "rectPocket", "circPocket", "contour", "slot", "chamfer"]);
 
 export function isStockGenerationSupported(type) {
   return SUPPORTED_TYPES.has(type);
@@ -380,7 +427,7 @@ function operationPy(index, op, stock) {
   if (!isStockGenerationSupported(op.type)) {
     throw new Error(
       `'${OPERATION_TYPES[op.type].label}' islemi henuz gercek Topkapi AI uretimini desteklemiyor ` +
-      "(MVP kapsaminda sadece Delik Delme, Dikdortgen Cep, Daire Cep, Kontur Kesme, Kanal var).",
+      "(MVP kapsaminda sadece Delik Delme, Dikdortgen Cep, Daire Cep, Kontur Kesme, Kanal, Pah Kirma var).",
     );
   }
   const p = op.params;
@@ -389,6 +436,7 @@ function operationPy(index, op, stock) {
   if (op.type === "circPocket") return pocketOpPy(index, p, stock, circFacePy(index, p, stock));
   if (op.type === "contour") return contourOpPy(index, p, stock);
   if (op.type === "slot") return pocketOpPy(index, p, stock, slotFacePy(index, p, stock));
+  if (op.type === "chamfer") return chamferOpPy(index, p, stock);
   throw new Error(`operationPy: eslesmeyen tip ${op.type}`); // unreachable given the guards above
 }
 
@@ -543,7 +591,14 @@ export async function verifyStockPlan(plan) {
 // The exact uppercased FreeCAD op label used inside "(BEGIN OPERATION: ...)"
 // comments -- must match the Create() name each op*Py function uses
 // (Drilling_${index}, Pocket_${index}, Contour_${index}), uppercased.
-const OP_LABEL_PREFIX = { drill: "DRILLING", rectPocket: "POCKET", circPocket: "POCKET", contour: "CONTOUR", slot: "POCKET" };
+const OP_LABEL_PREFIX = {
+  drill: "DRILLING",
+  rectPocket: "POCKET",
+  circPocket: "POCKET",
+  contour: "CONTOUR",
+  slot: "POCKET",
+  chamfer: "CHAMFER",
+};
 
 function operationLabelFor(type, index) {
   const prefix = OP_LABEL_PREFIX[type];
