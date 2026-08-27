@@ -148,7 +148,14 @@ export function validateOperationParams(type, params, stock) {
   const problems = [];
 
   for (const field of def.params) {
-    const v = params?.[field.name];
+    let v = params?.[field.name];
+    // A field with its own `default` (e.g. slot's dirAngle=0) is genuinely
+    // optional -- the LLM step layer (stockCamStepService.js) already fills
+    // it in before a normal wizard confirm reaches here, but a caller that
+    // skips that layer shouldn't be rejected for omitting an optional value.
+    if ((v === undefined || v === null || v === "") && field.default !== undefined) {
+      v = field.default;
+    }
     if (v === undefined || v === null || v === "") {
       problems.push(`${field.label} belirtilmedi.`);
       continue;
