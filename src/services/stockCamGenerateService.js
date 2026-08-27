@@ -80,6 +80,19 @@ function stockPy(stock) {
     // a plain endmill tool silently produces zero toolpath. See
     // _rover_make_tap_tool in operationPyWithOwnTool.
     "    import Path.Op.Tapping as PathTapping",
+    // Path.Op.ThreadMilling — confirmed real module (Path/Op/ThreadMilling.py,
+    // class ObjectThreadMilling), used for "Freze ile Diş Açma" (cuts a
+    // thread with a small helical-interpolating endmill instead of a tap).
+    // Its own circularHoleFeatures() does NOT include FeatureLocations
+    // (unlike Drilling/Tapping's CircularHoleBase) -- confirmed the
+    // Locations shortcut is a silent no-op here, so a real Base reference
+    // (a Part::Feature Vertex at the hole center) is built instead. Also
+    // requires a tool with BOTH Diameter AND Crest (`isToolSupported`:
+    // `hasattr(tool, "Diameter") and hasattr(tool, "Crest")`) -- built from
+    // the real 'thread-mill.fcstd' shape (Tools/Bit/5mm-thread-cutter.fctb
+    // confirms Crest is a real shape-template parameter). See
+    // _rover_make_threadmill_tool in operationPyWithOwnTool.
+    "    import Path.Op.ThreadMilling as PathThreadMilling",
     // Path.Op.Profile — confirmed real module (Path/Op/Profile.py,
     // class ObjectProfile), used for the "Kontur Kesme" operation: cuts
     // along a boundary wire/face rather than clearing its interior. Its
@@ -88,7 +101,7 @@ function stockPy(stock) {
     // material from.
     "    import Path.Op.Profile as PathProfile",
     "except Exception:",
-    "    from PathScripts import PathJob, PathPocket, PathDrilling, PathProfile, PathTapping",
+    "    from PathScripts import PathJob, PathPocket, PathDrilling, PathProfile, PathTapping, PathThreadMilling",
     "try:",
     "    import Path.Tool.Controller as PathToolController",
     "except Exception:",
@@ -157,6 +170,17 @@ function toolDiameterFor(type, p) {
   // Same conservative fraction-of-diameter guess as circPocket -- dia here
   // is the hexagon's across-corner (circumscribed) diameter.
   if (type === "hexPocket") return Math.min(20, Math.max(1, Number(p.dia) * 0.4));
+  // Unlike tapping, a thread mill's diameter isn't fixed to one exact thread
+  // size -- any sufficiently small cutter works via the helical toolpath,
+  // so the magazine's explicit-toolDia override above is fine here. This
+  // fallback guess must clear the thread's own MINOR diameter (the actual
+  // hole the tool plunges into before spiraling outward), not the major
+  // diameter -- half of minor is a conservative default real thread mills
+  // commonly satisfy.
+  if (type === "threadMilling") {
+    const minorDia = Number(p.dia) - 1.0825317547305483 * Number(p.pitch);
+    return Math.max(1, minorDia * 0.5);
+  }
   if (type === "contour") return 10;
   // Facing has no separate width/diameter of its own (whole stock top
   // surface) -- same flat fallback as contour, another "whole-part, no
@@ -250,6 +274,52 @@ function tappingOpPy(index, p, stock) {
   return [
     `${varName} = PathTapping.Create(${pyStr(`Tapping_${index}`)})`,
     `${varName}.Locations = [App.Vector(${pyFloat(p.x)}, ${pyFloat(p.y)}, 0.0)]`,
+    setDepthPy(varName, "StartDepth", sd),
+    setDepthPy(varName, "FinalDepth", fd),
+    `${varName}.ToolController = tc`,
+    assertDepthPy(varName, sd, fd),
+  ].join("\n");
+}
+
+// "Freze ile Diş Açma" (thread milling): unlike Drilling/Tapping,
+// ThreadMilling's own circularHoleFeatures() does NOT include
+// FeatureLocations -- confirmed via real source (Path/Op/ThreadMilling.py):
+// its opFeatures() only ORs in FeatureBaseGeometry, so haveLocations()
+// (Path/Op/CircularHoleBase.py) always returns False regardless of what
+// gets set on `.Locations`. A real Base reference is required instead --
+// the simplest valid one confirmed by holePosition()'s own first branch
+// (`if shape.ShapeType == "Vertex": return FreeCAD.Vector(shape.X, shape.Y, 0)`)
+// is a plain Part::Feature holding a Part.Vertex at the hole center.
+//
+// MinorDiameter is computed from MajorDiameter (dia) and Pitch via the
+// exact ISO 68-1 basic-minor-diameter formula (D1 = D - 1.0825317547305483*P,
+// using math.sqrt(3)/2 as the 60-degree thread height constant -- the same
+// constant ThreadMilling.py itself defines as SQRT_3_DIVIDED_BY_2) -- real
+// math, not a guess, so it's never asked as a separate parameter.
+function threadMillOpPy(index, p, stock) {
+  const varName = `threadmill_${index}`;
+  const vertexVar = `_tmvertex_${index}`;
+  const sd = pyFloat(stock.h);
+  const fd = pyFloat(Number(stock.h) - Number(p.depth));
+  const majorDia = Number(p.dia);
+  const pitch = Number(p.pitch);
+  const minorDia = majorDia - 1.0825317547305483 * pitch;
+  const passes = Math.max(1, Math.round(Number(p.passes) || 3));
+  return [
+    `${vertexVar} = doc.addObject('Part::Feature', ${pyStr(`ThreadMillLoc_${index}`)})`,
+    `${vertexVar}.Shape = Part.Vertex(App.Vector(${pyFloat(p.x)}, ${pyFloat(p.y)}, 0.0))`,
+    "doc.recompute()",
+    `${varName} = PathThreadMilling.Create(${pyStr(`ThreadMilling_${index}`)})`,
+    `${varName}.Base = [(${vertexVar}, ["Vertex1"])]`,
+    `${varName}.ThreadType = 'MetricInternal6H'`,
+    `${varName}.ThreadOrientation = 'RightHand'`,
+    `${varName}.Direction = 'Climb'`,
+    `${varName}.LeadInOut = False`,
+    `${varName}.MajorDiameter = ${pyFloat(majorDia)}`,
+    `${varName}.MinorDiameter = ${pyFloat(minorDia)}`,
+    `${varName}.Pitch = ${pyFloat(pitch)}`,
+    `${varName}.TPI = 0`,
+    `${varName}.Passes = ${passes}`,
     setDepthPy(varName, "StartDepth", sd),
     setDepthPy(varName, "FinalDepth", fd),
     `${varName}.ToolController = tc`,
@@ -567,7 +637,7 @@ function chamferOpPy(index, p, stock) {
 // written yet from silently machining something wrong.
 const SUPPORTED_TYPES = new Set([
   "drill", "rectPocket", "circPocket", "hexPocket", "contour", "slot", "face", "chamfer",
-  "drillGrid", "drillCircle", "tapping",
+  "drillGrid", "drillCircle", "tapping", "threadMilling",
 ]);
 
 export function isStockGenerationSupported(type) {
@@ -603,6 +673,7 @@ function operationPy(index, op, stock) {
   if (op.type === "drillGrid") return drillGridOpPy(index, p, stock);
   if (op.type === "drillCircle") return drillCircleOpPy(index, p, stock);
   if (op.type === "tapping") return tappingOpPy(index, p, stock);
+  if (op.type === "threadMilling") return threadMillOpPy(index, p, stock);
   throw new Error(`operationPy: eslesmeyen tip ${op.type}`); // unreachable given the guards above
 }
 
@@ -698,8 +769,68 @@ function tapToolSetupPy(index, op, toolDia) {
   return [...setup, ...create];
 }
 
+// ThreadMilling's own isToolSupported() requires the tool to have BOTH
+// Diameter AND Crest (confirmed: `hasattr(tool, "Diameter") and
+// hasattr(tool, "Crest")`) -- a plain endmill has no Crest, so (like
+// tapping) op 0's job-default tool must be swapped, not just resized.
+// Unlike tapping, feed here comes from the ToolController's own regular
+// HorizFeed/VertFeed (not a pitch*rpm synchronized cycle), so the normal
+// 600/150/4000rpm milling defaults are fine -- no special override needed.
+function threadMillToolSetupPy(index, toolDia) {
+  const setup = [
+    `def _rover_make_threadmill_tool(_diameter, _crest, _label):`,
+    "    try:",
+    "        from Path.Tool.toolbit import ToolBit",
+    "        _t = ToolBit.from_shape_id('thread-mill.fcstd').attach_to_doc(doc=doc)",
+    "        _t.Diameter = float(_diameter)",
+    "        _t.Crest = float(_crest)",
+    "        try:",
+    "            _t.Label = _label",
+    "        except Exception:",
+    "            pass",
+    "        return _t",
+    "    except Exception:",
+    "        _t = Path.Tool()",
+    "        _t.Diameter = float(_diameter)",
+    "        _t.ToolType = 'ThreadMill'",
+    "        try:",
+    "            _t.addProperty('App::PropertyLength', 'Crest', 'ThreadMill', 'Crest width')",
+    "        except Exception:",
+    "            pass",
+    "        try:",
+    "            _t.Crest = float(_crest)",
+    "        except Exception:",
+    "            pass",
+    "        try:",
+    "            _t.Name = _label",
+    "        except Exception:",
+    "            pass",
+    "        return _t",
+  ];
+  // 0.1mm crest width matches this codebase's own reference thread mill
+  // (Tools/Bit/5mm-thread-cutter.fctb) -- a real, small, tool-specific
+  // constant no requested thread size can derive.
+  const create = [
+    `_tool_${index} = _rover_make_threadmill_tool(${pyFloat(toolDia)}, 0.1, ${pyStr(`Tool_${index}`)})`,
+  ];
+  if (index === 0) {
+    create.push(`tc.Tool = _tool_${index}`);
+  } else {
+    const tcVar = `tc_${index}`;
+    create.push(
+      `${tcVar} = PathToolController.Create(${pyStr(`TC_${index}`)}, tool=_tool_${index}, toolNumber=${index + 1})`,
+      "job.Proxy.addToolController(" + tcVar + ")",
+      `${tcVar}.HorizFeed = '600 mm/min'`,
+      `${tcVar}.VertFeed = '150 mm/min'`,
+      `${tcVar}.SpindleSpeed = 4000.0`,
+      "doc.recompute()",
+    );
+  }
+  return [...setup, ...create];
+}
+
 function operationPyWithOwnTool(index, op, stock, toolDia) {
-  if (index === 0 && op.type !== "tapping") {
+  if (index === 0 && op.type !== "tapping" && op.type !== "threadMilling") {
     // stockPy() gives the job's default `tc` a fixed placeholder diameter
     // (6mm) since it's built before any operation exists to size it from.
     // This was never corrected afterward, so operation 0 — whatever its own
@@ -721,6 +852,11 @@ function operationPyWithOwnTool(index, op, stock, toolDia) {
     // rewriting is needed there, unlike index>0's fresh tc_N.
     const rewired = index === 0 ? body : body.replace(/\.ToolController = tc$/m, `.ToolController = tc_${index}`);
     return [...tapSetup, rewired].join("\n");
+  }
+  if (op.type === "threadMilling") {
+    const tmSetup = threadMillToolSetupPy(index, toolDia);
+    const rewired = index === 0 ? body : body.replace(/\.ToolController = tc$/m, `.ToolController = tc_${index}`);
+    return [...tmSetup, rewired].join("\n");
   }
   const tcVar = `tc_${index}`;
   const setup = [
@@ -839,6 +975,7 @@ const OP_LABEL_PREFIX = {
   drillGrid: "DRILLING",
   drillCircle: "DRILLING",
   tapping: "TAPPING",
+  threadMilling: "THREADMILLING",
 };
 
 function operationLabelFor(type, index) {
