@@ -8,6 +8,7 @@ import {
   removeOperation,
   listOperationTypes,
   validateOperationParams,
+  setLastEstimatedMinutes,
   OPERATION_TYPES,
 } from "../services/stockCamPlanService.js";
 import { getNextParamStep } from "../services/stockCamStepService.js";
@@ -16,6 +17,7 @@ import {
   verifyStockPlan,
   exportStockPlanGcode,
 } from "../services/stockCamGenerateService.js";
+import { buildSetupSheetHtml } from "../services/stockCamSetupSheetService.js";
 import { createJob, runJob } from "../services/jobStore.js";
 import { config } from "../config.js";
 import path from "node:path";
@@ -143,6 +145,9 @@ router.post("/stock-cam/confirm", apiKeyAuth, (req, res) => {
       // record something the plan's own validator would reject.
       return { ok: true, body: { confirmed: false, error: "Plan dogrulamasi basarisiz.", problems: result.problems } };
     }
+    // Lets the printable setup sheet show a real total without its own
+    // separate FreeCAD call -- see stockCamPlanService.js's own comment.
+    setLastEstimatedMinutes(planKey, verify.estimatedMinutes);
     return {
       ok: true,
       body: { confirmed: true, operation: result.operation, operations: result.operations, estimatedMinutes: verify.estimatedMinutes },
@@ -185,6 +190,7 @@ router.post("/stock-cam/edit", apiKeyAuth, (req, res) => {
     if (!result.ok) {
       return { ok: true, body: { confirmed: false, error: "Plan dogrulamasi basarisiz.", problems: result.problems } };
     }
+    setLastEstimatedMinutes(planKey, verify.estimatedMinutes);
     return { ok: true, body: { confirmed: true, operations: result.operations, estimatedMinutes: verify.estimatedMinutes } };
   }, { exclusive: true });
 
@@ -195,6 +201,22 @@ router.delete("/stock-cam/plan/:planKey/op/:opId", apiKeyAuth, (req, res) => {
   const result = removeOperation(req.params.planKey, req.params.opId);
   if (!result.ok) return res.status(404).json(result);
   res.json(result);
+});
+
+// Printable job/routing sheet: synchronous, plan-data-only (no FreeCAD/LLM
+// call — see stockCamSetupSheetService.js's own comment). Deliberately NOT
+// behind apiKeyAuth: it's opened directly in a browser tab/print dialog
+// (window.open can't attach a custom auth header), the exact same
+// unauthenticated-but-unguessable-key precedent already used for the
+// G-code download itself (server.js's plain `express.static` mount on
+// /files, no apiKeyAuth there either) — the random planKey is the only
+// protection either one relies on.
+router.get("/stock-cam/plan/:planKey/setup-sheet", (req, res) => {
+  const plan = getPlan(req.params.planKey);
+  if (!plan) return res.status(404).send("Plan bulunamadi.");
+  if (!plan.operations.length) return res.status(400).send("Planda henuz onaylanmis islem yok.");
+  const postName = typeof req.query.postProcessor === "string" ? req.query.postProcessor : "";
+  res.type("html").send(buildSetupSheetHtml(plan, postName));
 });
 
 // Faz 7: final G-code export for the whole plan.

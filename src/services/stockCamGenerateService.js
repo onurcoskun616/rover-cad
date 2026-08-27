@@ -164,7 +164,10 @@ function toolDiameterFor(type, p) {
   // still said "Ø32mm" — FreeCAD's own toolpath comment correctly showed
   // "DIAMETER: 20.0", i.e. it silently used the WRONG (smaller) tool.
   if (Number.isFinite(explicit) && explicit > 0) return explicit;
-  if (type === "drill" || type === "drillGrid" || type === "drillCircle") return Math.min(20, Number(p.dia));
+  if (type === "drill" || type === "drillGrid" || type === "drillCircle" || type === "countersink") {
+    return Math.min(20, Number(p.dia));
+  }
+  if (type === "counterbore") return Math.min(20, Math.max(1, Number(p.dia) * 0.4));
   if (type === "rectPocket") return Math.min(20, Math.max(1, Math.min(p.pw, p.pl) * 0.5));
   if (type === "circPocket") return Math.min(20, Math.max(1, Number(p.dia) * 0.4));
   // Same conservative fraction-of-diameter guess as circPocket -- dia here
@@ -253,6 +256,27 @@ function drillOpPy(index, p, stock) {
   return [
     `${toolVar}_tool_dia = ${pyFloat(dia)}`,
     `${varName} = PathDrilling.Create(${pyStr(`Drilling_${index}`)})`,
+    `${varName}.Locations = [App.Vector(${pyFloat(p.x)}, ${pyFloat(p.y)}, 0.0)]`,
+    setDepthPy(varName, "StartDepth", sd),
+    setDepthPy(varName, "FinalDepth", fd),
+    `${varName}.ToolController = tc`,
+    assertDepthPy(varName, sd, fd),
+  ].join("\n");
+}
+
+// "Havşa Açma (Konik)" (countersink): structurally IDENTICAL to drillOpPy --
+// FreeCAD's Path.Op.Drilling has no concept of a conical tip at all, it
+// just plunges straight to FinalDepth (the same simplification plain
+// drilling already relies on). The actual cone shape comes entirely from
+// whichever physical countersink bit the operator loads; `angle` is kept
+// on the operation's own params purely so the chat summary can tell them
+// which bit angle to use -- it never appears in the generated Python.
+function countersinkOpPy(index, p, stock) {
+  const varName = `countersink_${index}`;
+  const sd = pyFloat(stock.h);
+  const fd = pyFloat(Number(stock.h) - Number(p.depth));
+  return [
+    `${varName} = PathDrilling.Create(${pyStr(`Countersink_${index}`)})`,
     `${varName}.Locations = [App.Vector(${pyFloat(p.x)}, ${pyFloat(p.y)}, 0.0)]`,
     setDepthPy(varName, "StartDepth", sd),
     setDepthPy(varName, "FinalDepth", fd),
@@ -674,7 +698,7 @@ function chamferOpPy(index, p, stock) {
 // written yet from silently machining something wrong.
 const SUPPORTED_TYPES = new Set([
   "drill", "rectPocket", "circPocket", "hexPocket", "contour", "slot", "face", "chamfer",
-  "drillGrid", "drillCircle", "tapping", "threadMilling",
+  "drillGrid", "drillCircle", "tapping", "threadMilling", "countersink", "counterbore",
 ]);
 
 export function isStockGenerationSupported(type) {
@@ -711,6 +735,10 @@ function operationPy(index, op, stock) {
   if (op.type === "drillCircle") return drillCircleOpPy(index, p, stock);
   if (op.type === "tapping") return tappingOpPy(index, p, stock);
   if (op.type === "threadMilling") return threadMillOpPy(index, p, stock);
+  if (op.type === "countersink") return countersinkOpPy(index, p, stock);
+  // "Havşa Açma (Düz Dip)" (counterbore): geometrically a shallow, wide
+  // circPocket -- reuses that exact machinery, same as circPocket itself.
+  if (op.type === "counterbore") return pocketOpPy(index, p, stock, circFacePy(index, p, stock));
   throw new Error(`operationPy: eslesmeyen tip ${op.type}`); // unreachable given the guards above
 }
 
@@ -1044,6 +1072,8 @@ const OP_LABEL_PREFIX = {
   drillCircle: "DRILLING",
   tapping: "TAPPING",
   threadMilling: "THREADMILLING",
+  countersink: "COUNTERSINK",
+  counterbore: "POCKET",
 };
 
 function operationLabelFor(type, index) {
