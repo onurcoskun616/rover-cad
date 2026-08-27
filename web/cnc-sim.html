@@ -2043,6 +2043,20 @@ function showOpPreview(opType, params){
     // chamferOpPy's real-generation comment), so its preview reuses the
     // exact same outline.
     case "chamfer": pts2d=rectCorners((Number(W)||100)/2,(Number(D)||100)/2); break;
+    // Bounding box of the whole hole grid — mirrors gridBounds()'s exact
+    // same math (stockCamPlanService.js), so the preview never disagrees
+    // with the stock-bounds check run at confirm time.
+    case "drillGrid": {
+      const rows=Math.max(1,Number(params?.rows)||1), cols=Math.max(1,Number(params?.cols)||1);
+      const sx=Number(params?.spacingX)||0, sy=Number(params?.spacingY)||0;
+      const dia=Number(params?.dia)||10;
+      const totalW=(cols-1)*sx, totalH=(rows-1)*sy;
+      pts2d=rectCorners(totalW/2+dia/2,totalH/2+dia/2);
+      break;
+    }
+    // The circle the hole centers actually sit on (bolt circle) — more
+    // informative than a bounding box for this pattern shape.
+    case "drillCircle": pts2d=polygonCorners(Number(params?.radius)||20,48); break;
     default: pts2d=null; // face acts on the whole part — nothing localized to mark
   }
   if(pts2d){
@@ -2262,6 +2276,8 @@ const STOCK_CAM_MENU=[
   {type:"contour",label:"Kontur Kesme"},
   {type:"slot",label:"Kanal"},
   {type:"chamfer",label:"Pah Kırma"},
+  {type:"drillGrid",label:"Delik Izgarası"},
+  {type:"drillCircle",label:"Delik Çemberi"},
 ];
 
 // Maps a stock-cam operation type + its own params to the (opType, reqDia,
@@ -2277,6 +2293,7 @@ function stockCamMagazineQueryFor(opType,params){
   if(opType==="contour") return {magOpType:"contour", reqDia:0, reqDepth:Number(params.depth)||0};
   if(opType==="slot") return {magOpType:"slot", reqDia:Number(params.sw)||0, reqDepth:Number(params.depth)||0};
   if(opType==="chamfer") return {magOpType:"chamfer", reqDia:0, reqDepth:Number(params.depth)||0};
+  if(opType==="drillGrid"||opType==="drillCircle") return {magOpType:"drill", reqDia:Number(params.dia)||0, reqDepth:Number(params.depth)||0};
   return null;
 }
 let stockCamPlanKey=null;   // bu sayfa oturumu boyunca kalıcı
@@ -2476,6 +2493,8 @@ function stockCamOpSummary(opType,params){
   if(opType==="contour")return `Stok dış hattı boyunca, ${params.depth}mm derin`;
   if(opType==="slot")return `${params.sw}x${params.sl}mm kanal, ${params.dirAngle||0}° yön, ${params.depth}mm derin, X${params.x} Y${params.y}`;
   if(opType==="chamfer")return `Stok dış kenarı boyunca, ${params.depth}mm pah`;
+  if(opType==="drillGrid")return `${params.rows}x${params.cols} delik ızgarası, Ø${params.dia}mm, ${params.depth}mm derin, aralık X${params.spacingX} Y${params.spacingY}, merkez X${params.x} Y${params.y}`;
+  if(opType==="drillCircle")return `${params.count} delik, Ø${params.dia}mm çember (R${params.radius}mm), ${params.depth}mm derin, merkez X${params.x} Y${params.y}`;
   return JSON.stringify(params);
 }
 

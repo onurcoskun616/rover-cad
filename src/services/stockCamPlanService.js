@@ -47,6 +47,22 @@ function rotatedSlotBounds(x, y, sl, sw, dirAngle) {
   return centeredBounds(x, y, bx, by);
 }
 
+// Bounding box of an (rows x cols) hole grid centered at (x,y), expanded by
+// each hole's own radius -- mirrors drillGridOpPy's exact same layout math
+// (stockCamGenerateService.js), so the bounds check and the real toolpath
+// never disagree about where the outermost holes land.
+function gridBounds(x, y, rows, cols, spacingX, spacingY, dia) {
+  const totalW = Math.max(0, (cols || 1) - 1) * (spacingX || 0);
+  const totalH = Math.max(0, (rows || 1) - 1) * (spacingY || 0);
+  return centeredBounds(x, y, totalW / 2 + dia / 2, totalH / 2 + dia / 2);
+}
+
+// Conservative bounding box of a bolt-circle hole pattern: the circle the
+// hole centers sit on (radius) plus each hole's own radius (dia/2).
+function circlePatternBounds(x, y, radius, dia) {
+  return centeredBounds(x, y, radius + dia / 2, radius + dia / 2);
+}
+
 export const OPERATION_TYPES = Object.freeze({
   drill: {
     label: "Delik Delme",
@@ -102,6 +118,33 @@ export const OPERATION_TYPES = Object.freeze({
       { name: "dirAngle", label: "Yön Açısı", unit: "derece", type: "number", default: 0, min: -360, max: 360 },
     ],
     bounds: (p) => rotatedSlotBounds(p.x, p.y, p.sl, p.sw, p.dirAngle || 0),
+  },
+  drillGrid: {
+    label: "Delik Izgarası",
+    params: [
+      { name: "dia", label: "Çap", unit: "mm", type: "number", min: 0.5, max: 200 },
+      { name: "depth", label: "Derinlik", unit: "mm", type: "number", min: 0.1, max: 500 },
+      { name: "rows", label: "Satır Sayısı", unit: "", type: "number", min: 1, max: 50 },
+      { name: "cols", label: "Sütun Sayısı", unit: "", type: "number", min: 1, max: 50 },
+      { name: "spacingX", label: "X Aralığı", unit: "mm", type: "number", min: 0, max: 2000 },
+      { name: "spacingY", label: "Y Aralığı", unit: "mm", type: "number", min: 0, max: 2000 },
+      { name: "x", label: "Merkez X", unit: "mm", type: "number" },
+      { name: "y", label: "Merkez Y", unit: "mm", type: "number" },
+    ],
+    bounds: (p) => gridBounds(p.x, p.y, p.rows, p.cols, p.spacingX, p.spacingY, p.dia),
+  },
+  drillCircle: {
+    label: "Delik Çemberi",
+    params: [
+      { name: "dia", label: "Çap", unit: "mm", type: "number", min: 0.5, max: 200 },
+      { name: "depth", label: "Derinlik", unit: "mm", type: "number", min: 0.1, max: 500 },
+      { name: "count", label: "Delik Sayısı", unit: "", type: "number", min: 2, max: 200 },
+      { name: "radius", label: "Dağılım Yarıçapı", unit: "mm", type: "number", min: 0.1, max: 2000 },
+      { name: "startAngle", label: "Başlangıç Açısı", unit: "derece", type: "number", default: 0, min: -360, max: 360 },
+      { name: "x", label: "Merkez X", unit: "mm", type: "number" },
+      { name: "y", label: "Merkez Y", unit: "mm", type: "number" },
+    ],
+    bounds: (p) => circlePatternBounds(p.x, p.y, p.radius, p.dia),
   },
   face: {
     label: "Yüzey Düzeltme",
