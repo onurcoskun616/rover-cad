@@ -71,6 +71,15 @@ function stockPy(stock) {
     // point at the right module.
     "    import Path.Op.PocketShape as PathPocket",
     "    import Path.Op.Drilling as PathDrilling",
+    // Path.Op.Tapping — confirmed real module (Path/Op/Tapping.py, class
+    // ObjectTapping), used for "Kılavuz Çekme" (internal thread cutting).
+    // Shares Locations/StartDepth/FinalDepth/ToolController with Drilling
+    // (same CircularHoleBase), but REQUIRES its ToolController's Tool to
+    // have a real "Pitch" property (confirmed:
+    // `if not hasattr(obj.ToolController.Tool, "Pitch"): ... return`) --
+    // a plain endmill tool silently produces zero toolpath. See
+    // _rover_make_tap_tool in operationPyWithOwnTool.
+    "    import Path.Op.Tapping as PathTapping",
     // Path.Op.Profile — confirmed real module (Path/Op/Profile.py,
     // class ObjectProfile), used for the "Kontur Kesme" operation: cuts
     // along a boundary wire/face rather than clearing its interior. Its
@@ -79,7 +88,7 @@ function stockPy(stock) {
     // material from.
     "    import Path.Op.Profile as PathProfile",
     "except Exception:",
-    "    from PathScripts import PathJob, PathPocket, PathDrilling, PathProfile",
+    "    from PathScripts import PathJob, PathPocket, PathDrilling, PathProfile, PathTapping",
     "try:",
     "    import Path.Tool.Controller as PathToolController",
     "except Exception:",
@@ -126,6 +135,12 @@ function stockPy(stock) {
 // the geometry-based guesses below only run as a fallback (magazine has no
 // fitting tool, or an older client that doesn't send one yet).
 function toolDiameterFor(type, p) {
+  // Tapping's `dia` is the tap's own exact nominal thread diameter, not a
+  // geometry guess a bigger/smaller tool can stand in for -- skip the
+  // magazine's explicit-toolDia override entirely (a substituted tool here
+  // would cut the WRONG thread, unlike an endmill where "close enough"
+  // still works).
+  if (type === "tapping") return Number(p.dia);
   const explicit = Number(p?.toolDia);
   // No 20mm cap here, unlike the geometry-based guesses below: this is a
   // REAL registered tool the magazine actually selected (and already told
@@ -214,6 +229,26 @@ function drillOpPy(index, p, stock) {
   return [
     `${toolVar}_tool_dia = ${pyFloat(dia)}`,
     `${varName} = PathDrilling.Create(${pyStr(`Drilling_${index}`)})`,
+    `${varName}.Locations = [App.Vector(${pyFloat(p.x)}, ${pyFloat(p.y)}, 0.0)]`,
+    setDepthPy(varName, "StartDepth", sd),
+    setDepthPy(varName, "FinalDepth", fd),
+    `${varName}.ToolController = tc`,
+    assertDepthPy(varName, sd, fd),
+  ].join("\n");
+}
+
+// "Kılavuz Çekme" (tapping): structurally almost identical to drillOpPy
+// (same CircularHoleBase -- Locations/StartDepth/FinalDepth/ToolController
+// all work the same way), but PathTapping.Create instead of
+// PathDrilling.Create. The actual tap TOOL (with its required Pitch
+// property) and its own low-SpindleSpeed ToolController are built by
+// operationPyWithOwnTool's tapping-specific branch, never here.
+function tappingOpPy(index, p, stock) {
+  const varName = `tap_${index}`;
+  const sd = pyFloat(stock.h);
+  const fd = pyFloat(Number(stock.h) - Number(p.depth));
+  return [
+    `${varName} = PathTapping.Create(${pyStr(`Tapping_${index}`)})`,
     `${varName}.Locations = [App.Vector(${pyFloat(p.x)}, ${pyFloat(p.y)}, 0.0)]`,
     setDepthPy(varName, "StartDepth", sd),
     setDepthPy(varName, "FinalDepth", fd),
@@ -532,7 +567,7 @@ function chamferOpPy(index, p, stock) {
 // written yet from silently machining something wrong.
 const SUPPORTED_TYPES = new Set([
   "drill", "rectPocket", "circPocket", "hexPocket", "contour", "slot", "face", "chamfer",
-  "drillGrid", "drillCircle",
+  "drillGrid", "drillCircle", "tapping",
 ]);
 
 export function isStockGenerationSupported(type) {
@@ -567,6 +602,7 @@ function operationPy(index, op, stock) {
   if (op.type === "chamfer") return chamferOpPy(index, p, stock);
   if (op.type === "drillGrid") return drillGridOpPy(index, p, stock);
   if (op.type === "drillCircle") return drillCircleOpPy(index, p, stock);
+  if (op.type === "tapping") return tappingOpPy(index, p, stock);
   throw new Error(`operationPy: eslesmeyen tip ${op.type}`); // unreachable given the guards above
 }
 
@@ -600,8 +636,70 @@ export function buildStockJobPy(plan) {
 // neutralizes as a second line of defense, but avoiding it structurally is
 // still the primary fix). The very first operation uses the job's default
 // `tc`; every operation after that gets its own explicit ToolController.
-function operationPyWithOwnTool(index, op, stock, toolDia) {
+// Tapping needs a fundamentally different TOOL (a real Tap with a "Pitch"
+// property, confirmed via FreeCAD 1.1.3 source: Tools/Bit/*.fctb templates
+// like M8x1.25_Tap define one) than every other op's plain endmill -- and
+// a much lower SpindleSpeed: Tapping.py computes its synchronized feed as
+// pitch * spindle_speed internally, so the shared 4000rpm milling default
+// would imply an absurd (and unsafe) tapping feed rate (e.g. 1.25mm pitch
+// * 4000rpm = 5000 mm/min). 300rpm is a conservative, generic default that
+// keeps the resulting feed sane across common tap sizes.
+function tapToolSetupPy(index, op, toolDia) {
+  const pitch = Number(op.params.pitch);
+  const setup = [
+    `def _rover_make_tap_tool(_diameter, _pitch, _label):`,
+    "    try:",
+    "        from Path.Tool.toolbit import ToolBit",
+    "        _t = ToolBit.from_shape_id('tap.fcstd').attach_to_doc(doc=doc)",
+    "        _t.Diameter = float(_diameter)",
+    "        _t.Pitch = float(_pitch)",
+    "        try:",
+    "            _t.Label = _label",
+    "        except Exception:",
+    "            pass",
+    "        return _t",
+    "    except Exception:",
+    "        _t = Path.Tool()",
+    "        _t.Diameter = float(_diameter)",
+    "        _t.ToolType = 'Tap'",
+    "        try:",
+    "            _t.addProperty('App::PropertyLength', 'Pitch', 'Tap', 'Thread pitch')",
+    "        except Exception:",
+    "            pass",
+    "        try:",
+    "            _t.Pitch = float(_pitch)",
+    "        except Exception:",
+    "            pass",
+    "        try:",
+    "            _t.Name = _label",
+    "        except Exception:",
+    "            pass",
+    "        return _t",
+  ];
+  const create = [`_tool_${index} = _rover_make_tap_tool(${pyFloat(toolDia)}, ${pyFloat(pitch)}, ${pyStr(`Tool_${index}`)})`];
   if (index === 0) {
+    // Reassign the job's own default `tc` to point at a real tap tool,
+    // rather than the "resize Diameter in place" shortcut every other op
+    // 0 uses -- the default tool has no Pitch property, so Tapping's own
+    // `hasattr(obj.ToolController.Tool, "Pitch")` guard would otherwise
+    // silently produce zero G-code for a tapping op confirmed first.
+    create.push(`tc.Tool = _tool_${index}`, `tc.SpindleSpeed = 300.0`);
+  } else {
+    const tcVar = `tc_${index}`;
+    create.push(
+      `${tcVar} = PathToolController.Create(${pyStr(`TC_${index}`)}, tool=_tool_${index}, toolNumber=${index + 1})`,
+      "job.Proxy.addToolController(" + tcVar + ")",
+      `${tcVar}.HorizFeed = '600 mm/min'`,
+      `${tcVar}.VertFeed = '150 mm/min'`,
+      `${tcVar}.SpindleSpeed = 300.0`,
+      "doc.recompute()",
+    );
+  }
+  return [...setup, ...create];
+}
+
+function operationPyWithOwnTool(index, op, stock, toolDia) {
+  if (index === 0 && op.type !== "tapping") {
     // stockPy() gives the job's default `tc` a fixed placeholder diameter
     // (6mm) since it's built before any operation exists to size it from.
     // This was never corrected afterward, so operation 0 — whatever its own
@@ -616,6 +714,14 @@ function operationPyWithOwnTool(index, op, stock, toolDia) {
     return [`tc.Tool.Diameter = ${pyFloat(toolDia)}`, operationPy(index, op, stock)].join("\n");
   }
   const body = operationPy(index, op, stock);
+  if (op.type === "tapping") {
+    const tapSetup = tapToolSetupPy(index, op, toolDia);
+    // index 0's body already says ".ToolController = tc" -- since `tc`
+    // itself was just reassigned above (to the new tap tool), no text
+    // rewriting is needed there, unlike index>0's fresh tc_N.
+    const rewired = index === 0 ? body : body.replace(/\.ToolController = tc$/m, `.ToolController = tc_${index}`);
+    return [...tapSetup, rewired].join("\n");
+  }
   const tcVar = `tc_${index}`;
   const setup = [
     `def _rover_make_endmill_tool(_diameter, _label):`,
@@ -732,6 +838,7 @@ const OP_LABEL_PREFIX = {
   chamfer: "CHAMFER",
   drillGrid: "DRILLING",
   drillCircle: "DRILLING",
+  tapping: "TAPPING",
 };
 
 function operationLabelFor(type, index) {

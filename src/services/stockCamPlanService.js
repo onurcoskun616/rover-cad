@@ -74,6 +74,22 @@ export const OPERATION_TYPES = Object.freeze({
     ],
     bounds: (p) => centeredBounds(p.x, p.y, p.dia / 2, p.dia / 2),
   },
+  // "Kılavuz Çekme" (tapping): cuts an internal thread. Unlike every other
+  // op's `dia`, this one is NOT a geometry guess a bigger/smaller tool can
+  // stand in for -- it's the tap's own exact nominal thread diameter, and
+  // `pitch` (thread pitch, mm/rev) has no safe default (a wrong guess cuts
+  // the wrong thread) -- both are required, never auto-filled.
+  tapping: {
+    label: "Kılavuz Çekme",
+    params: [
+      { name: "dia", label: "Diş Çapı (ör. M8 için 8)", unit: "mm", type: "number", min: 1, max: 100 },
+      { name: "pitch", label: "Diş Adımı (Pitch)", unit: "mm", type: "number", min: 0.1, max: 10 },
+      { name: "depth", label: "Derinlik", unit: "mm", type: "number", min: 0.1, max: 500 },
+      { name: "x", label: "Merkez X", unit: "mm", type: "number" },
+      { name: "y", label: "Merkez Y", unit: "mm", type: "number" },
+    ],
+    bounds: (p) => centeredBounds(p.x, p.y, p.dia / 2, p.dia / 2),
+  },
   rectPocket: {
     label: "Dikdörtgen Cep",
     params: [
