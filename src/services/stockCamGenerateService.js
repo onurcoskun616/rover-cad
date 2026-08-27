@@ -140,6 +140,11 @@ function toolDiameterFor(type, p) {
   if (type === "rectPocket") return Math.min(20, Math.max(1, Math.min(p.pw, p.pl) * 0.5));
   if (type === "circPocket") return Math.min(20, Math.max(1, Number(p.dia) * 0.4));
   if (type === "contour") return 10;
+  // A slot's own width (sw) is the hard ceiling -- unlike a pocket, there's
+  // no interior to rough out first, so the geometry guess can safely use
+  // most of that width. 80% leaves ZigZagOffset's own wall-offset pass room
+  // to true up both side walls instead of using the full width with none.
+  if (type === "slot") return Math.min(20, Math.max(1, Number(p.sw) * 0.8));
   return 6;
 }
 
@@ -244,6 +249,40 @@ function circFacePy(index, p, stock) {
   ].join("\n");
 }
 
+// "Kanal" (slot): a rotated rectangular channel -- geometrically just a
+// rectPocket face rotated by dirAngle around its own center, so it plugs
+// straight into pocketOpPy's existing PocketShape/ZigZagOffset clearing
+// (same machinery already validated for rectPocket/circPocket). Corners are
+// rotated here in JS (not emitted as a live Python rotation) since
+// dirAngle is a fixed, already-confirmed parameter -- matches every other
+// op*Py function's "deterministic template substitution" discipline.
+function slotFacePy(index, p, stock) {
+  const feat = `_face_${index}`;
+  const cx = Number(p.x), cy = Number(p.y);
+  const hl = Number(p.sl) / 2, hw = Number(p.sw) / 2; // half-length along local X, half-width along local Y
+  const rad = ((Number(p.dirAngle) || 0) * Math.PI) / 180;
+  const cos = Math.cos(rad), sin = Math.sin(rad);
+  const z = pyFloat(stock.h);
+  // Round away floating-point noise from cos/sin at "clean" angles (90,
+  // 180, 270...) -- e.g. cos(90deg) is 6.12e-17, not exactly 0, which would
+  // otherwise leave a corner at 4.999999999999999 instead of 5.0.
+  const round6 = (n) => Math.round(n * 1e6) / 1e6;
+  const corners = [[-hl, -hw], [hl, -hw], [hl, hw], [-hl, hw]].map(([lx, ly]) => [
+    round6(cx + lx * cos - ly * sin),
+    round6(cy + lx * sin + ly * cos),
+  ]);
+  const pointLines = corners.map(
+    ([x, y], i) => `_sp${i}_${index} = App.Vector(${pyFloat(x)}, ${pyFloat(y)}, ${z})`,
+  );
+  return [
+    ...pointLines,
+    `_swire_${index} = Part.makePolygon([_sp0_${index}, _sp1_${index}, _sp2_${index}, _sp3_${index}, _sp0_${index}])`,
+    `${feat} = doc.addObject('Part::Feature', ${pyStr(`PocketProfile_${index}`)})`,
+    `${feat}.Shape = Part.Face(_swire_${index})`,
+    "doc.recompute()",
+  ].join("\n");
+}
+
 function pocketOpPy(index, p, stock, facePy) {
   const varName = `pocket_${index}`;
   const depth = Number(p.depth);
@@ -328,7 +367,7 @@ function contourOpPy(index, p, stock) {
 // MVP scope (Faz 4 + Kontur follow-up): drill, rectPocket, circPocket,
 // contour. hexPocket/slot/face/chamfer intentionally raise here rather
 // than silently machine something wrong.
-const SUPPORTED_TYPES = new Set(["drill", "rectPocket", "circPocket", "contour"]);
+const SUPPORTED_TYPES = new Set(["drill", "rectPocket", "circPocket", "contour", "slot"]);
 
 export function isStockGenerationSupported(type) {
   return SUPPORTED_TYPES.has(type);
@@ -341,7 +380,7 @@ function operationPy(index, op, stock) {
   if (!isStockGenerationSupported(op.type)) {
     throw new Error(
       `'${OPERATION_TYPES[op.type].label}' islemi henuz gercek Topkapi AI uretimini desteklemiyor ` +
-      "(MVP kapsaminda sadece Delik Delme, Dikdortgen Cep, Daire Cep, Kontur Kesme var).",
+      "(MVP kapsaminda sadece Delik Delme, Dikdortgen Cep, Daire Cep, Kontur Kesme, Kanal var).",
     );
   }
   const p = op.params;
@@ -349,6 +388,7 @@ function operationPy(index, op, stock) {
   if (op.type === "rectPocket") return pocketOpPy(index, p, stock, rectFacePy(index, p, stock));
   if (op.type === "circPocket") return pocketOpPy(index, p, stock, circFacePy(index, p, stock));
   if (op.type === "contour") return contourOpPy(index, p, stock);
+  if (op.type === "slot") return pocketOpPy(index, p, stock, slotFacePy(index, p, stock));
   throw new Error(`operationPy: eslesmeyen tip ${op.type}`); // unreachable given the guards above
 }
 
@@ -503,7 +543,7 @@ export async function verifyStockPlan(plan) {
 // The exact uppercased FreeCAD op label used inside "(BEGIN OPERATION: ...)"
 // comments -- must match the Create() name each op*Py function uses
 // (Drilling_${index}, Pocket_${index}, Contour_${index}), uppercased.
-const OP_LABEL_PREFIX = { drill: "DRILLING", rectPocket: "POCKET", circPocket: "POCKET", contour: "CONTOUR" };
+const OP_LABEL_PREFIX = { drill: "DRILLING", rectPocket: "POCKET", circPocket: "POCKET", contour: "CONTOUR", slot: "POCKET" };
 
 function operationLabelFor(type, index) {
   const prefix = OP_LABEL_PREFIX[type];

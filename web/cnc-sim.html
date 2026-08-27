@@ -2256,6 +2256,7 @@ const STOCK_CAM_MENU=[
   {type:"rectPocket",label:"Dikdörtgen Cep"},
   {type:"circPocket",label:"Daire Cep"},
   {type:"contour",label:"Kontur Kesme"},
+  {type:"slot",label:"Kanal"},
 ];
 
 // Maps a stock-cam operation type + its own params to the (opType, reqDia,
@@ -2269,6 +2270,7 @@ function stockCamMagazineQueryFor(opType,params){
   if(opType==="rectPocket") return {magOpType:"pocket", reqDia:Math.min(Number(params.pw)||0,Number(params.pl)||0), reqDepth:Number(params.depth)||0};
   if(opType==="circPocket") return {magOpType:"pocket", reqDia:Number(params.dia)||0, reqDepth:Number(params.depth)||0};
   if(opType==="contour") return {magOpType:"contour", reqDia:0, reqDepth:Number(params.depth)||0};
+  if(opType==="slot") return {magOpType:"slot", reqDia:Number(params.sw)||0, reqDepth:Number(params.depth)||0};
   return null;
 }
 let stockCamPlanKey=null;   // bu sayfa oturumu boyunca kalıcı
@@ -2466,6 +2468,7 @@ function stockCamOpSummary(opType,params){
   if(opType==="rectPocket")return `${params.pw}x${params.pl}mm, ${params.depth}mm derin, X${params.x} Y${params.y}`;
   if(opType==="circPocket")return `Ø${params.dia}mm, ${params.depth}mm derin, X${params.x} Y${params.y}`;
   if(opType==="contour")return `Stok dış hattı boyunca, ${params.depth}mm derin`;
+  if(opType==="slot")return `${params.sw}x${params.sl}mm kanal, ${params.dirAngle||0}° yön, ${params.depth}mm derin, X${params.x} Y${params.y}`;
   return JSON.stringify(params);
 }
 
