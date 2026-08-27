@@ -2527,6 +2527,7 @@ async function stockCamDoConfirm(){
     if(slot>=0){
       const tl=magazine.getToolInSlot(slot);
       answers.toolDia=tl.dia;
+      answers.toolNum=slot+1;
       taiMsg(`🔧 Magazinden seçilen takım: <b>${tl.name}</b> (Ø${tl.dia}mm, T${String(slot+1).padStart(2,"0")})`,"bot");
     }
   }
