@@ -2066,6 +2066,10 @@ function showOpPreview(opType, params){
     // The circle the hole centers actually sit on (bolt circle) — more
     // informative than a bounding box for this pattern shape.
     case "drillCircle": pts2d=polygonCorners(Number(params?.radius)||20,48); break;
+    // Both havşa (countersink/counterbore) variants look like a plain
+    // round recess from above -- same round preview as drill/tapping.
+    case "countersink": pts2d=polygonCorners((Number(params?.dia)||10)/2,24); break;
+    case "counterbore": pts2d=polygonCorners((Number(params?.dia)||20)/2,32); break;
     default: pts2d=null; // face acts on the whole part — nothing localized to mark
   }
   if(pts2d){
@@ -2291,6 +2295,8 @@ const STOCK_CAM_MENU=[
   {type:"face",label:"Yüzey Düzeltme"},
   {type:"tapping",label:"Kılavuz Çekme"},
   {type:"threadMilling",label:"Freze ile Diş Açma"},
+  {type:"countersink",label:"Havşa Açma (Konik)"},
+  {type:"counterbore",label:"Havşa Açma (Düz Dip)"},
 ];
 
 // Maps a stock-cam operation type + its own params to the (opType, reqDia,
@@ -2309,6 +2315,8 @@ function stockCamMagazineQueryFor(opType,params){
   if(opType==="drillGrid"||opType==="drillCircle") return {magOpType:"drill", reqDia:Number(params.dia)||0, reqDepth:Number(params.depth)||0};
   if(opType==="hexPocket") return {magOpType:"pocket", reqDia:Number(params.dia)||0, reqDepth:Number(params.depth)||0};
   if(opType==="face") return {magOpType:"face", reqDia:0, reqDepth:Number(params.depth)||0};
+  if(opType==="countersink") return {magOpType:"drill", reqDia:Number(params.dia)||0, reqDepth:Number(params.depth)||0};
+  if(opType==="counterbore") return {magOpType:"pocket", reqDia:Number(params.dia)||0, reqDepth:Number(params.depth)||0};
   return null;
 }
 let stockCamPlanKey=null;   // bu sayfa oturumu boyunca kalıcı
@@ -2362,6 +2370,7 @@ function stockCamContextChips(){
   if(stockCamOps.length){
     chips.push({l:"📋 Geçmiş ("+stockCamOps.length+")",c:"geçmiş"});
     chips.push({l:"⬇️ G-code Oluştur",c:"g-code oluştur"});
+    chips.push({l:"🖨️ İş Emri Yazdır",c:"iş emri yazdır"});
   }
   return chips;
 }
@@ -2514,6 +2523,8 @@ function stockCamOpSummary(opType,params){
   if(opType==="face")return `Stoğun tüm üst yüzeyi, ${params.depth}mm talaş derinliği`;
   if(opType==="tapping")return `M${params.dia} diş (adım ${params.pitch}mm), ${params.depth}mm derin, X${params.x} Y${params.y}`;
   if(opType==="threadMilling")return `M${params.dia} diş (adım ${params.pitch}mm, ${params.passes||3} paso), ${params.depth}mm derin, X${params.x} Y${params.y}`;
+  if(opType==="countersink")return `Ø${params.dia}mm havşa (${params.angle||90}°), ${params.depth}mm derin, X${params.x} Y${params.y}`;
+  if(opType==="counterbore")return `Ø${params.dia}mm düz-dip havşa, ${params.depth}mm derin, X${params.x} Y${params.y}`;
   return JSON.stringify(params);
 }
 
@@ -2672,6 +2683,22 @@ async function stockCamDoGenerateGcode(){
   }
 }
 
+// Yazdırılabilir iş emri: senkron, plan verisinden üretilen bir HTML sayfası
+// (bkz. stockCamSetupSheetService.js) -- G-code'un aksine ayrı bir FreeCAD
+// çağrısı tetiklemiyor, bu yüzden jobId/polling akışı gerekmiyor, doğrudan
+// yeni sekmede açılıyor (tarayıcının kendi Ctrl+P / yazdır diyaloğuyla).
+async function stockCamDoSetupSheet(){
+  if(!stockCamPlanKey||!stockCamOps.length){ taiMsg("Henüz onaylanmış işlem yok.","bot"); return; }
+  const postProcessor=await stockCamResolvePostProcessor();
+  const url=`${MAG_API_BASE}/stock-cam/plan/${stockCamPlanKey}/setup-sheet?postProcessor=${encodeURIComponent(postProcessor||"")}`;
+  const win=window.open(url,"_blank");
+  if(!win){
+    taiMsg(`⚠ Açılır pencere engellendi olabilir — <a href="${url}" target="_blank" rel="noopener">iş emrini buradan açın</a>.`,"bot");
+  }else{
+    taiMsg("🖨️ İş emri yeni sekmede açıldı — yazdırmak için Ctrl+P kullanabilirsiniz.","bot");
+  }
+}
+
 // taiUserInput'a bağlanan giriş noktası — true dönerse normal taiExec akışı
 // atlanır (bu metin sihirbaz tarafından ele alındı demektir).
 async function stockCamHandleInput(text){
@@ -2720,6 +2747,10 @@ async function stockCamHandleInput(text){
   }
   if(/(g.?code\s*olustur|gkodu\s*olustur)/i.test(t)){
     await stockCamDoGenerateGcode();
+    return true;
+  }
+  if(/(is\s*emri|setup\s*sheet)/i.test(t)){
+    await stockCamDoSetupSheet();
     return true;
   }
   const ctrlMatch=text.match(/^(?:kontrolc[uü]|controller|makine)\s+(.+)/i);

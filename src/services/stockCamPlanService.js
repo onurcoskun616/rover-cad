@@ -107,6 +107,42 @@ export const OPERATION_TYPES = Object.freeze({
     ],
     bounds: (p) => centeredBounds(p.x, p.y, p.dia / 2, p.dia / 2),
   },
+  // "Havşa Açma (Konik)" (countersink): a shallow conical recess (vida
+  // başı oturma yeri) -- FreeCAD's own G-code generation for Path.Op.
+  // Drilling only ever plunges straight to a Z depth (no cone-shape
+  // concept in the G-code itself, same simplification already relied on
+  // by plain drilling); the CONE shape comes entirely from whichever
+  // physical countersink bit the operator loads. `angle` is kept purely
+  // informational (tells the operator which bit angle to load) -- `depth`
+  // stays a normal, explicit, required field like every other op (rather
+  // than derived from dia+angle) so the shared stock-height bounds check
+  // keeps working unchanged.
+  countersink: {
+    label: "Havşa Açma (Konik)",
+    params: [
+      { name: "dia", label: "Havşa Çapı (üst)", unit: "mm", type: "number", min: 1, max: 100 },
+      { name: "depth", label: "Derinlik", unit: "mm", type: "number", min: 0.1, max: 50 },
+      { name: "angle", label: "Havşa Açısı (bilgi amaçlı)", unit: "derece", type: "number", default: 90, min: 60, max: 150 },
+      { name: "x", label: "Merkez X", unit: "mm", type: "number" },
+      { name: "y", label: "Merkez Y", unit: "mm", type: "number" },
+    ],
+    bounds: (p) => centeredBounds(p.x, p.y, p.dia / 2, p.dia / 2),
+  },
+  // "Havşa Açma (Düz Dip)" (counterbore): a flat-bottom cylindrical recess
+  // (örn. altıgen başlı vida için) -- geometrically just a shallow, wide
+  // circPocket, so it reuses that exact same PocketShape/ZigZagOffset
+  // machinery (see counterboreOpPy's own comment in
+  // stockCamGenerateService.js) rather than inventing anything new.
+  counterbore: {
+    label: "Havşa Açma (Düz Dip)",
+    params: [
+      { name: "dia", label: "Çap", unit: "mm", type: "number", min: 1, max: 200 },
+      { name: "depth", label: "Derinlik", unit: "mm", type: "number", min: 0.1, max: 500 },
+      { name: "x", label: "Merkez X", unit: "mm", type: "number" },
+      { name: "y", label: "Merkez Y", unit: "mm", type: "number" },
+    ],
+    bounds: (p) => centeredBounds(p.x, p.y, p.dia / 2, p.dia / 2),
+  },
   rectPocket: {
     label: "Dikdörtgen Cep",
     params: [
@@ -350,6 +386,16 @@ export function removeOperation(planKey, opId) {
 export function listOperations(planKey) {
   const plan = plans.get(planKey);
   return plan ? plan.operations.map((o) => ({ ...o })) : null;
+}
+
+// Faz X: the setup-sheet route persists the most recent FreeCAD time
+// estimate here (from confirm/edit's own verifyStockPlan call) so the
+// printable job sheet can show a real total without triggering its own,
+// separate FreeCAD rebuild -- purely informational, never read by anything
+// that affects what actually gets machined.
+export function setLastEstimatedMinutes(planKey, minutes) {
+  const plan = plans.get(planKey);
+  if (plan && Number.isFinite(minutes)) plan.lastEstimatedMinutes = minutes;
 }
 
 setInterval(() => {
