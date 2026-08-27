@@ -139,7 +139,14 @@ function toolDiameterFor(type, p) {
   if (type === "drill" || type === "drillGrid" || type === "drillCircle") return Math.min(20, Number(p.dia));
   if (type === "rectPocket") return Math.min(20, Math.max(1, Math.min(p.pw, p.pl) * 0.5));
   if (type === "circPocket") return Math.min(20, Math.max(1, Number(p.dia) * 0.4));
+  // Same conservative fraction-of-diameter guess as circPocket -- dia here
+  // is the hexagon's across-corner (circumscribed) diameter.
+  if (type === "hexPocket") return Math.min(20, Math.max(1, Number(p.dia) * 0.4));
   if (type === "contour") return 10;
+  // Facing has no separate width/diameter of its own (whole stock top
+  // surface) -- same flat fallback as contour, another "whole-part, no
+  // separate footprint" operation.
+  if (type === "face") return 10;
   // A slot's own width (sw) is the hard ceiling -- unlike a pocket, there's
   // no interior to rough out first, so the geometry guess can safely use
   // most of that width. 80% leaves ZigZagOffset's own wall-offset pass room
@@ -317,6 +324,49 @@ function circFacePy(index, p, stock) {
   ].join("\n");
 }
 
+// "Altıgen Cep" (hex pocket): a regular, vertex-up hexagon centered at
+// (x,y). `dia` is the ACROSS-CORNER (circumscribed) diameter -- matches
+// stockCamPlanService.js's own bounds check comment ("Bounding circle of
+// the hexagon"), so the stock-bounds validation and this real geometry
+// never disagree. Feeds into the exact same PocketShape/ZigZagOffset
+// clearing as rectPocket/circPocket.
+function hexFacePy(index, p, stock) {
+  const feat = `_face_${index}`;
+  const cx = Number(p.x), cy = Number(p.y);
+  const r = Number(p.dia) / 2;
+  const z = pyFloat(stock.h);
+  // Round away cos/sin floating-point noise at the hexagon's own "clean"
+  // 60-degree steps, same fix as slotFacePy's/drillCircleOpPy's rotations.
+  const round6 = (n) => Math.round(n * 1e6) / 1e6;
+  const pointLines = [];
+  for (let i = 0; i < 6; i++) {
+    const rad = (i * 60 * Math.PI) / 180;
+    const px = round6(cx + r * Math.cos(rad));
+    const py = round6(cy + r * Math.sin(rad));
+    pointLines.push(`_hexp${i}_${index} = App.Vector(${pyFloat(px)}, ${pyFloat(py)}, ${z})`);
+  }
+  const wireArgs = [0, 1, 2, 3, 4, 5, 0].map((i) => `_hexp${i}_${index}`).join(", ");
+  return [
+    ...pointLines,
+    `_hexwire_${index} = Part.makePolygon([${wireArgs}])`,
+    `${feat} = doc.addObject('Part::Feature', ${pyStr(`PocketProfile_${index}`)})`,
+    `${feat}.Shape = Part.Face(_hexwire_${index})`,
+    "doc.recompute()",
+  ].join("\n");
+}
+
+// "Yüzey Düzeltme" (facing) clears the ENTIRE stock top surface -- its own
+// registry schema has no separate x/y/width/length (see
+// stockCamPlanService.js's "face" entry: bounds=null, whole top surface),
+// so this reuses rectFacePy's exact rectangle-face builder with the
+// stock's own full W x D centered at (0,0), same as contourOpPy does for
+// its own boundary. Feeds into the same PocketShape/ZigZagOffset clearing
+// as every other pocket-family op.
+function faceOpPy(index, p, stock) {
+  const facePy = rectFacePy(index, { pw: stock.w, pl: stock.d, x: 0, y: 0 }, stock);
+  return pocketOpPy(index, p, stock, facePy);
+}
+
 // "Kanal" (slot): a rotated rectangular channel -- geometrically just a
 // rectPocket face rotated by dirAngle around its own center, so it plugs
 // straight into pocketOpPy's existing PocketShape/ZigZagOffset clearing
@@ -475,10 +525,14 @@ function chamferOpPy(index, p, stock) {
 }
 
 // MVP scope (Faz 4 + Kontur follow-up): drill, rectPocket, circPocket,
-// contour, slot, chamfer. hexPocket/face intentionally raise here rather
-// than silently machine something wrong.
+// contour, slot, chamfer, drillGrid, drillCircle, hexPocket, face -- every
+// registered OPERATION_TYPES entry now has real generation. Kept as a
+// guard (rather than assuming every registry entry is always covered):
+// protects a future registry addition that hasn't had its own op*Py
+// written yet from silently machining something wrong.
 const SUPPORTED_TYPES = new Set([
-  "drill", "rectPocket", "circPocket", "contour", "slot", "chamfer", "drillGrid", "drillCircle",
+  "drill", "rectPocket", "circPocket", "hexPocket", "contour", "slot", "face", "chamfer",
+  "drillGrid", "drillCircle",
 ]);
 
 export function isStockGenerationSupported(type) {
@@ -490,18 +544,26 @@ function operationPy(index, op, stock) {
     throw new Error(`Bilinmeyen islem tipi: ${op.type}`);
   }
   if (!isStockGenerationSupported(op.type)) {
+    // Dynamically built from SUPPORTED_TYPES/OPERATION_TYPES so this never
+    // goes stale again the way the old hardcoded Turkish list did every
+    // time a new op type gained real generation support.
+    const supportedLabels = [...SUPPORTED_TYPES]
+      .map((t) => OPERATION_TYPES[t]?.label)
+      .filter(Boolean)
+      .join(", ");
     throw new Error(
       `'${OPERATION_TYPES[op.type].label}' islemi henuz gercek Topkapi AI uretimini desteklemiyor ` +
-      "(MVP kapsaminda sadece Delik Delme, Dikdortgen Cep, Daire Cep, Kontur Kesme, Kanal, Pah Kirma, " +
-      "Delik Izgarasi, Delik Cemberi var).",
+      `(su an desteklenenler: ${supportedLabels}).`,
     );
   }
   const p = op.params;
   if (op.type === "drill") return drillOpPy(index, p, stock);
   if (op.type === "rectPocket") return pocketOpPy(index, p, stock, rectFacePy(index, p, stock));
   if (op.type === "circPocket") return pocketOpPy(index, p, stock, circFacePy(index, p, stock));
+  if (op.type === "hexPocket") return pocketOpPy(index, p, stock, hexFacePy(index, p, stock));
   if (op.type === "contour") return contourOpPy(index, p, stock);
   if (op.type === "slot") return pocketOpPy(index, p, stock, slotFacePy(index, p, stock));
+  if (op.type === "face") return faceOpPy(index, p, stock);
   if (op.type === "chamfer") return chamferOpPy(index, p, stock);
   if (op.type === "drillGrid") return drillGridOpPy(index, p, stock);
   if (op.type === "drillCircle") return drillCircleOpPy(index, p, stock);
@@ -663,8 +725,10 @@ const OP_LABEL_PREFIX = {
   drill: "DRILLING",
   rectPocket: "POCKET",
   circPocket: "POCKET",
+  hexPocket: "POCKET",
   contour: "CONTOUR",
   slot: "POCKET",
+  face: "POCKET",
   chamfer: "CHAMFER",
   drillGrid: "DRILLING",
   drillCircle: "DRILLING",

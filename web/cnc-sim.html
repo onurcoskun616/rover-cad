@@ -2043,6 +2043,9 @@ function showOpPreview(opType, params){
     // chamferOpPy's real-generation comment), so its preview reuses the
     // exact same outline.
     case "chamfer": pts2d=rectCorners((Number(W)||100)/2,(Number(D)||100)/2); break;
+    // Facing clears the whole stock top surface, same outline as
+    // contour/chamfer (see faceOpPy's real-generation comment).
+    case "face": pts2d=rectCorners((Number(W)||100)/2,(Number(D)||100)/2); break;
     // Bounding box of the whole hole grid — mirrors gridBounds()'s exact
     // same math (stockCamPlanService.js), so the preview never disagrees
     // with the stock-bounds check run at confirm time.
@@ -2278,6 +2281,8 @@ const STOCK_CAM_MENU=[
   {type:"chamfer",label:"Pah Kırma"},
   {type:"drillGrid",label:"Delik Izgarası"},
   {type:"drillCircle",label:"Delik Çemberi"},
+  {type:"hexPocket",label:"Altıgen Cep"},
+  {type:"face",label:"Yüzey Düzeltme"},
 ];
 
 // Maps a stock-cam operation type + its own params to the (opType, reqDia,
@@ -2294,6 +2299,8 @@ function stockCamMagazineQueryFor(opType,params){
   if(opType==="slot") return {magOpType:"slot", reqDia:Number(params.sw)||0, reqDepth:Number(params.depth)||0};
   if(opType==="chamfer") return {magOpType:"chamfer", reqDia:0, reqDepth:Number(params.depth)||0};
   if(opType==="drillGrid"||opType==="drillCircle") return {magOpType:"drill", reqDia:Number(params.dia)||0, reqDepth:Number(params.depth)||0};
+  if(opType==="hexPocket") return {magOpType:"pocket", reqDia:Number(params.dia)||0, reqDepth:Number(params.depth)||0};
+  if(opType==="face") return {magOpType:"face", reqDia:0, reqDepth:Number(params.depth)||0};
   return null;
 }
 let stockCamPlanKey=null;   // bu sayfa oturumu boyunca kalıcı
@@ -2495,6 +2502,8 @@ function stockCamOpSummary(opType,params){
   if(opType==="chamfer")return `Stok dış kenarı boyunca, ${params.depth}mm pah`;
   if(opType==="drillGrid")return `${params.rows}x${params.cols} delik ızgarası, Ø${params.dia}mm, ${params.depth}mm derin, aralık X${params.spacingX} Y${params.spacingY}, merkez X${params.x} Y${params.y}`;
   if(opType==="drillCircle")return `${params.count} delik, Ø${params.dia}mm çember (R${params.radius}mm), ${params.depth}mm derin, merkez X${params.x} Y${params.y}`;
+  if(opType==="hexPocket")return `Ø${params.dia}mm (köşeden köşeye), ${params.depth}mm derin, X${params.x} Y${params.y}`;
+  if(opType==="face")return `Stoğun tüm üst yüzeyi, ${params.depth}mm talaş derinliği`;
   return JSON.stringify(params);
 }
 
