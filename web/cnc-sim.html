@@ -930,6 +930,7 @@ function resizeMillStock(newW, newD, newTop){
     stockCamAwaitingCostInputs=false;
     stockCamAwaitingTemplateName=false; stockCamTemplatePicking=false; stockCamTemplateList=null;
     stockCamNoteEditIdx=null;
+    stockCamPendingStockSize=null;
     if(typeof clearOpPreview==="function") clearOpPreview();
     if(typeof taiMsg==="function") taiMsg("ℹ️ Stok boyutu değişti — önceki CAM planı sıfırlandı, yeni işlemler bu boyuta göre planlanacak.","bot");
   }
@@ -2728,6 +2729,20 @@ function stockCamMatchMaterialKey(text){
   return null;
 }
 
+// Stok Boyutu Önerisi: a well-published metric plate/flat-bar THICKNESS
+// series (real supply-catalog values -- rolled/cast stock genuinely only
+// comes in these fixed thicknesses). Deliberately does NOT try to suggest
+// a "standard" width/length: in real practice a supplier cuts w/d to
+// whatever size is ordered, only the thickness itself is a fixed catalog
+// value -- inventing a fake w/d catalog here would be exactly the kind of
+// guessed number this whole app avoids elsewhere.
+const STOCK_STANDARD_THICKNESSES_MM=[10,12,15,20,25,30,40,50,60,80,100,120,150,200];
+let stockCamPendingStockSize=null; // {w,d,h,suggestedH} -- standart kalinlik onerisi bekleniyor
+
+function stockCamNearestStandardThickness(h){
+  return STOCK_STANDARD_THICKNESSES_MM.find(t=>t>=h)||null; // h katalogdaki en buyuk degerden de kalinsa oneri yok
+}
+
 function stockCamContextChips(){
   if(!isMill())return null;
   if(stockCamSetupStage&&stockCamSetupStage!=="done"){
@@ -2741,6 +2756,12 @@ function stockCamContextChips(){
     }
     if(stockCamSetupStage==="material"){
       return Object.entries(MAT_DB).map(([key,md])=>({l:md.label,c:`malzeme ${key}`}));
+    }
+    if(stockCamSetupStage==="stockSize"&&stockCamPendingStockSize){
+      return[
+        {l:`✓ Standart (${stockCamPendingStockSize.suggestedH}mm)`,c:"stok kalinlik standart"},
+        {l:`Tam istediğim (${stockCamPendingStockSize.h}mm)`,c:"stok kalinlik ozel"},
+      ];
     }
     return null; // 'stockSize' — serbest metin girişi bekleniyor, chip yok
   }
@@ -2878,6 +2899,25 @@ async function stockCamHandleSetupInput(text){
     return true;
   }
   if(stockCamSetupStage==="stockSize"){
+    // Stok Boyutu Önerisi: bir önceki turda kalınlık standart değildi ve
+    // operatörden seçim bekleniyor -- yeni bir WxDxH metni değil, "standart"
+    // ya da "özel" seçimi.
+    if(stockCamPendingStockSize){
+      const choice=t;
+      let finalH=null;
+      if(/standart/i.test(choice))finalH=stockCamPendingStockSize.suggestedH;
+      else if(/ozel|özel/i.test(choice))finalH=stockCamPendingStockSize.h;
+      if(finalH===null){
+        taiMsg("Lütfen aşağıdan bir seçenek seçin.","bot");
+        return true;
+      }
+      const{w,d}=stockCamPendingStockSize;
+      stockCamPendingStockSize=null;
+      resizeMillStock(w,d,finalH);
+      stockCamSetupStage="done";
+      taiMsg(`✓ Stok boyutu: ${w}x${d}x${finalH}mm. Kurulum tamamlandı — şimdi işlem menüsünden devam edebilirsiniz.`,"bot");
+      return true;
+    }
     const dims=text.match(/(\d+\.?\d*)\s*x\s*(\d+\.?\d*)\s*(?:x\s*(\d+\.?\d*))?/i);
     if(!dims){
       taiMsg("Lütfen stok boyutunu \"genişlik x derinlik x yükseklik\" formatında yazın, örn: 200x140x60.","bot");
@@ -2885,6 +2925,18 @@ async function stockCamHandleSetupInput(text){
     }
     const w=Math.max(40,Math.round(parseFloat(dims[1]))), d=Math.max(30,Math.round(parseFloat(dims[2]))),
       h=Math.max(10,Math.round(dims[3]?parseFloat(dims[3]):TOP));
+    // Stok Boyutu Önerisi: yalnızca KALINLIK (h) için standart bir metrik
+    // plaka/lama kalınlık serisi öneriliyor -- gerçek tedarik pratiğinde
+    // levha/lama kalınlığı sabit bir katalogdan gelir (haddehane/döküm
+    // üretimi), en/boy ise neredeyse her zaman istenen ölçüye kesilir; bu
+    // yüzden w/d için sahte bir "standart" uydurmuyoruz, sadece h'yi kontrol
+    // ediyoruz.
+    const suggestedH=stockCamNearestStandardThickness(h);
+    if(suggestedH&&suggestedH!==h){
+      stockCamPendingStockSize={w,d,h,suggestedH};
+      taiMsg(`Belirttiğiniz kalınlık (${h}mm) standart bir plaka/lama kalınlığı değil. En yakın standart kalınlık: <b>${suggestedH}mm</b> (tedarik/fire açısından daha uygun olabilir). Hangisini kullanalım?`,"bot");
+      return true;
+    }
     resizeMillStock(w,d,h);
     stockCamSetupStage="done";
     taiMsg(`✓ Stok boyutu: ${w}x${d}x${h}mm. Kurulum tamamlandı — şimdi işlem menüsünden devam edebilirsiniz.`,"bot");
