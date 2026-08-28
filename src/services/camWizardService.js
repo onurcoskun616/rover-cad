@@ -1,12 +1,36 @@
 import fs from "node:fs";
 import { describeStepGeometry, resolveStepPath } from "./camService.js";
 import { detectThreads, THREAD_METHOD_QUESTION } from "./threadSpec.js";
+import { listMachines, effectiveAnswers as machineEffectiveAnswers } from "./inventoryService.js";
 import {
-  listMachines,
-  suitableTools,
-  toolLabel,
-  effectiveAnswers,
-} from "./inventoryService.js";
+  listMagazineTools,
+  suitableMagazineTools,
+  magazineToolLabel,
+  slotNumberForTool,
+} from "./cncMagazineService.js";
+
+// Tool selection is sourced from the CNC Simülatör's magazine — the single
+// shared tool inventory across the simulator and real production, so a tool
+// picked here is the exact same tool a machinist sees in the magazine. Layers
+// on top of inventoryService's machine resolution (machines/tools profiles
+// remain a separate, unrelated concept).
+function effectiveAnswers(answers) {
+  const a = machineEffectiveAnswers(answers);
+  if (a.tool) {
+    const tool = listMagazineTools().find((t) => magazineToolLabel(t) === a.tool);
+    if (tool) {
+      a.endmillDiameter = tool.dia;
+      a._toolMaterial = tool.material;
+      a._toolFlutes = tool.flutes;
+      a._toolName = tool.name;
+      // The real magazine slot this tool sits in, if placed — lets code-gen
+      // set the DEFAULT ToolController's ToolNumber to match what the
+      // machinist actually sees on the machine, not FreeCAD's generic "1".
+      a._toolSlot = slotNumberForTool(tool.id);
+    }
+  }
+  return a;
+}
 
 // --- Deterministic machining data -------------------------------------------
 // Cutting parameters must be reproducible, so they come from a table + the
@@ -67,6 +91,15 @@ const MACHINE_TYPE_OPTIONS = [
 const MACHINE_CLASS_OPTIONS = [
   "Hobi / masaustu CNC",
   "Endustriyel CNC",
+];
+// M6, tezgaha takim degistirmesini soyler. Otomatik degistiricisi olmayan bir
+// router'da Mach3'un varsayilani M6'da durup Cycle Start beklemektir — iki
+// takimli bir programda ilk M6 daha ilk satirlarda geldigi icin program hic
+// hareket etmeden duruyor gibi gorunur. Elle degisimde T (takim secimi) yazilir
+// ama M6 yazilmaz; hangi takimin takilacagi yorum satiriyla belirtilir.
+const TOOL_CHANGER_OPTIONS = [
+  "Yok (elle degisim)",
+  "Otomatik degistirici (ATC)",
 ];
 const ENTRY_METHOD_OPTIONS = [
   "Ramp (acili giris)",
@@ -252,6 +285,7 @@ function buildApplicableSteps({ geometry, threads, answers }) {
   const is2D = isTwoDGeometry(geometry);
   const repeats = repeatedFeatures(geometry);
   const opSuggestion = suggestOperations(geometry);
+  const isTorna = String(a.machineType || "").toLowerCase().includes("torna");
 
   const steps = [];
 
@@ -269,6 +303,9 @@ function buildApplicableSteps({ geometry, threads, answers }) {
   steps.push({
     id: "material",
     title: "2. Malzeme secimi",
+    intro: isTorna
+      ? "⚠️ CAM Assistant su anda torna (lathe) icin gercek takim yolu uretmiyor — FreeCAD'in torna operasyonlari resmi olarak deneysel bir eklentiye bagli, bu yuzden henuz eklenmedi. Torna parcalari icin CNC Simulator'deki torna modunu veya CNC sohbet asistanini kullanin; onlar dogru eksen kurallarina (X=cap, Z=boy) gore dogrudan G-code uretiyor. Buradan devam ederseniz sonuc yanlis/kullanilamaz olabilir."
+      : null,
     fields: [
       selectField("material", "Malzeme", MATERIAL_OPTIONS, pick(a, "material", MATERIAL_OPTIONS[0])),
     ],
@@ -342,19 +379,19 @@ function buildApplicableSteps({ geometry, threads, answers }) {
   //    offered; picking one overrides the manual diameter. Otherwise the
   //    geometry-recommended diameter is used.
   const toolFields = [];
-  const savedTools = suitableTools(endmill);
+  const savedTools = suitableMagazineTools(endmill);
   let toolIntro = holeDiametersNote(geometry);
   if (savedTools.length) {
-    const opts = [...savedTools.map((t) => toolLabel(t)), "Elle gir (yeni takim)"];
+    const opts = [...savedTools.map((t) => magazineToolLabel(t)), "Elle gir (yeni takim)"];
     toolFields.push(
-      selectField("tool", "Kayitli takim", opts, pick(a, "tool", opts[0])),
+      selectField("tool", "Kayitli takim (magazin)", opts, pick(a, "tool", opts[0])),
     );
     const nearest = savedTools[0];
     toolIntro =
-      `${toolIntro} Envanterden en yakin: ${nearest.name} O${nearest.diameter}mm (onerilen O${endmill}mm).`.trim();
+      `${toolIntro} Magazinden en yakin: ${nearest.name} O${nearest.dia}mm (onerilen O${endmill}mm).`.trim();
   } else {
     toolIntro =
-      `${toolIntro} Envanterinizde kayitli takim yok; onerilen O${endmill}mm.`.trim();
+      `${toolIntro} Magazinde kayitli takim yok; onerilen O${endmill}mm. Once CNC Simulator > Magazin'den takim ekleyin.`.trim();
   }
   const faceMillDia = pick(a, "faceMillDiameter", recommendFaceMill(geometry));
   toolIntro += ` Yuzey tarama (face) icin onerilen face mill: O${faceMillDia}mm.`;
@@ -367,6 +404,16 @@ function buildApplicableSteps({ geometry, threads, answers }) {
       "Takim yaricap kompanzasyonu (torna: kesici ucu yaricapi)",
       CUTTER_COMP_OPTIONS,
       pick(a, "cutterComp", CUTTER_COMP_OPTIONS[0]),
+    ),
+    // Varsayilan tezgah sinifina gore: hobi/masaustu CNC'lerde otomatik
+    // degistirici olmaz, endustriyel tezgahlarda genelde olur.
+    selectField(
+      "toolChanger",
+      "Takim degistirici",
+      TOOL_CHANGER_OPTIONS,
+      pick(a, "toolChanger", String(a.machineClass || "").toLowerCase().includes("endustriyel")
+        ? TOOL_CHANGER_OPTIONS[1]
+        : TOOL_CHANGER_OPTIONS[0]),
     ),
   );
   if (threads?.hasThread) {
@@ -504,6 +551,7 @@ export function camParamsBlock(answers, geometry) {
     `- Referans/sifir (WCS): ${a.wcs ?? "?"}`,
     `- Calisma duzlemi: ${a.workPlane ?? "G17 / XY"}`,
     a._toolName ? `- Takim profili: ${a._toolName} (${a._toolMaterial ?? ""}, ${a._toolFlutes ?? "?"} agiz)` : null,
+    a._toolName ? `- Bu takimin magazin slotu: ${a._toolSlot ?? "atanmamis"} (Job'un varsayilan ToolController'inin ToolNumber'ini BUNA esitle)` : null,
     `- Ana freze capi: ${a.endmillDiameter ?? "?"} mm`,
     a.faceMillDiameter ? `- Face mill (yuzey tarama) capi: ${a.faceMillDiameter} mm` : null,
     `- Giris yontemi: ${a.entryMethod ?? "Ramp (acili giris)"}`,
@@ -519,9 +567,33 @@ export function camParamsBlock(answers, geometry) {
     `- Kesme yonu: ${a.millingDirection ?? "Climb"}`,
     a.stepStrategy ? `- Kademe stratejisi: ${a.stepStrategy}` : null,
     repeatNote ? `- Tekrarlayan ozellikler (${a.groupRepeated ?? "grupla"}): ${repeatNote}` : null,
+    magazineCatalogBlock(),
   ]
     .filter(Boolean)
     .join("\n");
+}
+
+// Full magazine tool catalog (not just the single default selected above) so
+// the plan can assign a DIFFERENT, specific tool per operation (drill for
+// holes, endmill for pockets, ...) and the code-gen step can look up its exact
+// diameter/type when building a matching ToolController. Every "tool" a plan
+// step names must come from this list — it is the single tool source shared
+// with the CNC Simülatör's magazine and real production.
+function magazineCatalogBlock() {
+  const tools = listMagazineTools();
+  if (!tools.length) return null;
+  const lines = tools.map((t) => {
+    const slot = slotNumberForTool(t.id);
+    const slotNote = slot ? `slot T${String(slot).padStart(2, "0")}` : "magazine yerlestirilmemis";
+    return `  - "${t.name}": ${t.type}, O${t.dia}mm, ${t.flutes ?? 2} agiz, ${t.material || "Karbur"}, ${slotNote}`;
+  });
+  return (
+    "\n[TAKIM_MAGAZINI] (plan adimlarindaki 'tool' alani SADECE bu listeden, tam isimle secilmeli. " +
+    "Kod uretirken her takimin ToolController'ina, o takimin buradaki slot numarasini ToolNumber olarak ver " +
+    "— boylece G-code'daki T-kodlari makinistin fiziksel magazin slotlarıyla birebir eslesir. " +
+    "'magazine yerlestirilmemis' takimlar icin ToolNumber olarak sirayla 90, 91, 92... kullan " +
+    "ve notes alaninda bu takimin magazine once yerlestirilmesi gerektigini belirt):\n" + lines.join("\n")
+  );
 }
 
 // The wizard hits /cam-step once per step, so cache the (immutable) geometry

@@ -9,6 +9,7 @@ import { promptToFreecadCodeFromImage } from "../services/promptToCodeService.js
 import { runBuildPipeline } from "../services/buildPipeline.js";
 import { createJob, runJob } from "../services/jobStore.js";
 import { archiveProjectBuildFailOpen } from "../services/projectArchiveService.js";
+import { setLlmFeature } from "../services/llmRequestContext.js";
 
 function makeFileUrl(proto, host, filePath) {
   if (!filePath) return null;
@@ -48,6 +49,7 @@ router.post("/", upload.single("image"), (req, res) => {
   }
 
   const extraPrompt = typeof req.body?.prompt === "string" ? req.body.prompt : "";
+  setLlmFeature((extraPrompt || "Teknik resimden CAD oluştur").replace(/\s+/g, " ").trim());
   const requestedProjectId = req.body?.projectId;
   const projectName = req.body?.projectName;
   const proto = req.protocol;

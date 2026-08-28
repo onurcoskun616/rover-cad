@@ -51,6 +51,16 @@ export function loginWithSupabase({ email, password }) {
   });
 }
 
+export function requestPasswordReset({ email, redirectTo }) {
+  return authRequest("/recover", {
+    method: "POST",
+    body: {
+      email: String(email ?? "").trim().toLowerCase(),
+      ...(redirectTo ? { redirect_to: String(redirectTo) } : {}),
+    },
+  });
+}
+
 export function getSupabaseUser(token) {
   if (!token) return null;
   return authRequest("/user", { token }).catch((error) => {

@@ -31,8 +31,25 @@ export function stripCodeFence(text) {
   return fenceMatch ? fenceMatch[1].trim() : trimmed;
 }
 
+// The CLI's --output-format json is documented as emitting one JSON object,
+// but a live failure showed stdout with a complete, valid JSON object
+// followed by trailing content on a second line ("Unexpected non-whitespace
+// character after JSON at position N") — V8 tells us exactly where the
+// valid JSON ends, so recover by re-parsing just that prefix instead of
+// discarding an otherwise-successful CLI response over stray trailing bytes.
+function parseJsonAllowTrailingGarbage(raw) {
+  const s = String(raw);
+  try {
+    return JSON.parse(s);
+  } catch (err) {
+    const m = /position (\d+)/.exec(err.message);
+    if (!m) throw err;
+    return JSON.parse(s.slice(0, Number(m[1])));
+  }
+}
+
 export function parseClaudeCliJson(raw) {
-  const payload = JSON.parse(String(raw));
+  const payload = parseJsonAllowTrailingGarbage(raw);
   const text = String(payload.result ?? "").trim();
   if (!text) throw new Error("Claude Code CLI JSON did not contain a result");
   const usage = payload.usage ?? {};
@@ -228,11 +245,20 @@ export async function runLlm(input, { systemPromptFile, allowRead = false, image
       + (usage.cacheWriteTokens || 0) * prices.cacheWritePerMillion
     ) / 1_000_000;
     if (reservation?.reservation_id) {
-      await settleLlmTokens(reservation.reservation_id, {
-        ...usage,
-        providerRequestId: result.providerRequestId,
-        costUsd: result.costUsd ?? calculatedCost,
-      });
+      // Billing/quota bookkeeping, not the actual work — a network blip
+      // reaching Supabase (observed live: ConnectTimeoutError) must never
+      // throw away an LLM answer that was already successfully obtained.
+      // Worst case here is a stale reservation reconciled later, not a
+      // discarded CAM step the operator has to re-answer from scratch.
+      try {
+        await settleLlmTokens(reservation.reservation_id, {
+          ...usage,
+          providerRequestId: result.providerRequestId,
+          costUsd: result.costUsd ?? calculatedCost,
+        });
+      } catch (settleError) {
+        console.error("LLM token settlement failed (keeping the LLM result anyway):", settleError);
+      }
     }
     return result.text;
   } catch (error) {

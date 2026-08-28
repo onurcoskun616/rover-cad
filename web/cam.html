@@ -5,14 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>CAM Asistanı · Topkapı Okulları</title>
     <link rel="stylesheet" href="style.css" />
-    <script type="importmap">
-      {
-        "imports": {
-          "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-          "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
-        }
-      }
-    </script>
   </head>
   <body>
     <header class="site-header">
@@ -26,8 +18,8 @@
       <h1 class="brand-title">CAM Asistanı</h1>
       <p class="brand-subtitle">Topkapı Okulları · Yapay Zeka Destekli CAD/CAM</p>
       <p class="subtitle">
-        CAM sihirbazı ile işleme planı oluşturun, takım yolu simülasyonunu
-        izleyin ve G-code üretin.
+        CAM sihirbazı ile işleme planı oluşturun ve G-code üretin.
+        Üretilen G-code'u CNC Simülatör'de test edin.
       </p>
     </header>
 
@@ -37,22 +29,6 @@
       </section>
 
       <section id="result-section" class="result-section">
-        <div id="sim-workspace" class="sim-workspace">
-          <div class="sim-viewer-wrap">
-            <div id="viewer-container" class="viewer-container"></div>
-            <div id="coord-display" class="coord-display" hidden>
-              <div class="coord-row"><span class="coord-label">X</span><span id="coord-x" class="coord-val">0.000</span></div>
-              <div class="coord-row"><span class="coord-label">Y</span><span id="coord-y" class="coord-val">0.000</span></div>
-              <div class="coord-row"><span class="coord-label">Z</span><span id="coord-z" class="coord-val">0.000</span></div>
-              <div class="coord-row coord-feed"><span class="coord-label">F</span><span id="coord-f" class="coord-val">0</span></div>
-            </div>
-          </div>
-          <div id="gcode-panel" class="gcode-panel" hidden>
-            <div class="gcode-header">G-Code</div>
-            <div id="gcode-lines" class="gcode-lines"></div>
-          </div>
-        </div>
-
         <div id="cam-status" class="status-section" hidden>
           <div id="cam-spinner" class="spinner" hidden></div>
           <p id="cam-status-text"></p>
@@ -76,58 +52,54 @@
 
           <div id="cam-plan-view" class="cam-plan" hidden>
             <h4>Önerilen İşleme Planı</h4>
-            <pre id="cam-plan-text"></pre>
+            <p id="cam-plan-summary" class="cam-plan-summary"></p>
+            <div class="cam-plan-table-wrap">
+              <table class="cam-plan-table">
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>Operasyon / Takım</th>
+                    <th>StepDown (mm)</th>
+                    <th>İlerleme (mm/dk)</th>
+                    <th>Başlangıç Z (mm)</th>
+                    <th>Bitiş Z (mm)</th>
+                  </tr>
+                </thead>
+                <tbody id="cam-plan-tbody"></tbody>
+              </table>
+            </div>
+            <p class="cam-plan-hint">Kritik parametreleri (StepDown, ilerleme, derinlik) G-code üretmeden önce gerekirse düzenleyebilirsiniz. StepDown güvenlik nedeniyle 10mm'i geçemez.</p>
+            <p id="cam-plan-notes" class="cam-plan-notes"></p>
             <div class="cam-plan-actions">
-              <button id="cam-preview-btn" type="button">Simülasyonu Görüntüle</button>
+              <button id="cam-generate-btn" type="button">G-code Üret</button>
               <button id="cam-revise-btn" type="button" class="secondary">Planı Değiştir</button>
             </div>
             <div id="cam-revise-box" class="cam-revise-box" hidden>
               <textarea id="cam-revise-input" rows="2" placeholder="Planda neyi değiştirmek istersiniz? (örn: dış konturu son adıma al)"></textarea>
               <button id="cam-revise-submit" type="button">Yeni Plan Oluştur</button>
             </div>
-
-            <div id="cam-preview-view" class="cam-preview-view" hidden>
-              <div class="cnc-header">
-                <p class="cnc-header-title">CNC Simülasyon</p>
-                <span class="cnc-header-badge">TopkapiAI CAM</span>
-              </div>
-              <p class="cam-preview-note">
-                Takım yolu yukarıdaki 3D görüntüleyicide gösteriliyor (mavi:
-                kesme, turuncu: hızlı hareket). Kırmızı takım, yolu sırayla
-                izler. İzleyip onaylayın.
-              </p>
-              <div class="cnc-info-strip">
-                <div class="cnc-info-item"><span class="cnc-info-label">Birim</span><span class="cnc-info-value">mm</span></div>
-                <div class="cnc-info-item"><span class="cnc-info-label">Koordinat</span><span class="cnc-info-value">G54</span></div>
-                <div class="cnc-info-item"><span class="cnc-info-label">Mod</span><span id="cnc-cam-mode" class="cnc-info-value">Frezeleme</span></div>
-                <div class="cnc-info-item"><span class="cnc-info-label">Durum</span><span id="cnc-cam-status" class="cnc-info-value" style="color:#3ddc84">Hazır</span></div>
-              </div>
-
-              <div class="cam-sim-controls">
-                <p id="cam-sim-op" class="cam-sim-op">Operasyon: —</p>
-                <input id="cam-sim-progress" class="cam-sim-progress" type="range" min="0" max="1000" value="0" />
-                <div class="cam-sim-buttons">
-                  <button id="cam-sim-play" type="button">▶ Oynat</button>
-                  <span class="cam-sim-speed-label">Hız:</span>
-                  <button id="cam-sim-1x" type="button" class="secondary sim-speed active">1x</button>
-                  <button id="cam-sim-2x" type="button" class="secondary sim-speed">2x</button>
-                  <button id="cam-sim-5x" type="button" class="secondary sim-speed">5x</button>
-                </div>
-              </div>
-
-              <div class="cnc-footer">
-                <div class="cnc-coord">X <span id="cnc-cam-x">0.000</span> Y <span id="cnc-cam-y">0.000</span> Z <span id="cnc-cam-z">0.000</span></div>
-                <div class="cnc-footer-actions">
-                  <button id="cam-confirm-btn" class="cnc-btn-approve" type="button">Onayla — G-code Üret</button>
-                  <button id="cam-reject-btn" class="cnc-btn-reject" type="button">Reddet</button>
-                </div>
-              </div>
-            </div>
           </div>
         </div>
 
-        <a id="gcode-link" class="file-link" href="#" target="_blank" rel="noopener" hidden>G-code dosyasını indir</a>
-        <button id="cnc-sim-btn" type="button" class="secondary" hidden>CNC Simülatörde Aç</button>
+        <!-- G-code çıktı alanı -->
+        <div id="gcode-output" class="cam-gcode-output" hidden>
+          <h4 class="cam-gcode-output-title">G-code Hazır</h4>
+          <div id="cam-safety-summary" class="cam-safety-summary" hidden>
+            <h5>Güvenlik Kontrolleri</h5>
+            <ul id="cam-safety-list" class="cam-safety-list"></ul>
+          </div>
+          <div id="gcode-preview" class="cam-gcode-preview"></div>
+          <div class="cam-gcode-actions">
+            <a id="gcode-link" class="cam-gcode-download" href="#" target="_blank" rel="noopener">
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5 5-5M12 15V3"/></svg>
+              G-code İndir
+            </a>
+            <button id="cnc-sim-btn" type="button" class="cam-gcode-sim-btn">
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/><path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+              CNC Simülatörde Aç
+            </button>
+          </div>
+        </div>
 
         <div id="cam-quote" class="cam-quote" hidden>
           <h4>Teklif / Maliyet</h4>

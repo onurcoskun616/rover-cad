@@ -2,8 +2,9 @@ name: Deploy to GitHub Pages
 
 on:
   push:
-    branches: [claude/devam-et-vumbm2]
-    paths: [web/**]
+    branches:
+      - claude/buradan-devam-ai84bz
+      - claude/devam-et-vumbm2
   workflow_dispatch:
 
 permissions:

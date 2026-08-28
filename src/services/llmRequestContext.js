@@ -9,3 +9,10 @@ export function runWithLlmContext(context, callback) {
 export function getLlmContext() {
   return storage.getStore() ?? null;
 }
+
+export function setLlmFeature(feature) {
+  const context = storage.getStore();
+  if (context && typeof feature === "string" && feature.trim()) {
+    context.feature = feature.trim().slice(0, 160);
+  }
+}

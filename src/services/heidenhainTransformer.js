@@ -315,6 +315,16 @@ export function transformToHeidenhain(gcode, partName, opts = {}) {
     if (/\bM30\b/i.test(line) || (/\bM0?2\b/i.test(line) && !/\bM0?[3-9]\b/i.test(line))) continue;
 
     // --- Canned drilling cycles ---
+    // Real Fanuc-style modal canned-cycle output very often omits X/Y (or
+    // Z) on a given line whenever it hasn't changed since the previous one
+    // — the cycle-invoking line itself is frequently just "G81 Z.. F.. R.."
+    // with X/Y already set by an earlier rapid. A Heidenhain CYCL DEF only
+    // actually runs the drill on a following "M99" call line, so gating
+    // that call on "this exact line repeats X/Y" (the previous logic)
+    // silently dropped the cycle call whenever a line didn't happen to
+    // repeat X/Y — on real hardware that means the drill cycle never
+    // fires, and the machine instead rapids (FMAX) straight to the target
+    // depth on whatever plain move comes next.
     const cycleMatch = line.match(/\bG(8[1345])\b/i);
     if (cycleMatch) {
       const code = "G" + cycleMatch[1];
@@ -323,29 +333,42 @@ export function transformToHeidenhain(gcode, partName, opts = {}) {
       if (p.Q !== undefined) lastQ = p.Q;
       if (p.F !== undefined) lastF = p.F;
       const z = p.Z !== undefined ? p.Z : curZ;
+      curZ = z;
 
       const builder = cycleDefs[code];
       if (builder) out.push(...builder(z, lastR, lastQ, lastF, lastS, surface));
 
-      if (p.X !== undefined || p.Y !== undefined) {
-        const x = p.X !== undefined ? p.X : curX;
-        const y = p.Y !== undefined ? p.Y : curY;
-        out.push(`L ${fmtCoord("X", x)} ${fmtCoord("Y", y)} R0 FMAX M99`);
-        curX = x; curY = y;
-      }
+      const x = p.X !== undefined ? p.X : curX;
+      const y = p.Y !== undefined ? p.Y : curY;
+      out.push(`L ${fmtCoord("X", x)} ${fmtCoord("Y", y)} R0 FMAX M99`);
+      curX = x; curY = y;
       activeCycle = code;
       continue;
     }
 
     if (/\bG80\b/i.test(line)) { activeCycle = null; continue; }
 
-    if (activeCycle && /\b[XY]/i.test(line) && !/\bG[0-3]\d?\b/i.test(line) && !/\bG8/i.test(line)) {
-      const p = parseParams(line);
-      if (p.X !== undefined || p.Y !== undefined) {
+    if (activeCycle) {
+      // Another modal continuation under the same active cycle: a new
+      // hole (X/Y changed), the same hole redone at a different depth (Z
+      // changed — common when consecutive drilling operations share a
+      // test/part coordinate), or both. Heidenhain bakes the depth into
+      // the CYCL DEF itself (unlike Fanuc's modal G81), so a depth change
+      // needs a fresh CYCL DEF before the M99 call, not just the call.
+      const stripped2 = line.replace(/^N\d+\s*/i, "");
+      if (/^[XYZ]/i.test(stripped2) && !/^[GMTSO]/i.test(stripped2)) {
+        const p = parseParams(stripped2);
+        if (p.R !== undefined) lastR = p.R;
+        if (p.F !== undefined) lastF = p.F;
         const x = p.X !== undefined ? p.X : curX;
         const y = p.Y !== undefined ? p.Y : curY;
+        const z = p.Z !== undefined ? p.Z : curZ;
+        if (p.Z !== undefined) {
+          const builder = cycleDefs[activeCycle];
+          if (builder) out.push(...builder(z, lastR, lastQ, lastF, lastS, surface));
+        }
         out.push(`L ${fmtCoord("X", x)} ${fmtCoord("Y", y)} R0 FMAX M99`);
-        curX = x; curY = y;
+        curX = x; curY = y; curZ = z;
         continue;
       }
     }
