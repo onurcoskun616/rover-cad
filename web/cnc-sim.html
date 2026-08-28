@@ -2553,6 +2553,7 @@ async function stockCamConfirmArrayList(){
   stockCamArrayPendingList=null;
   stockCamArraySourceIdx=null; stockCamArrayKind=null;
   clearOpPreview();
+  taiRenderChips(); // stockCamDoConfirm'deki aynı sebeple: "Tümünü Onayla" butonunu anında gizle
   try{
     taiMsg(`⏳ ${list.length} kopya Topkapı AI güvenlik kontrolünden tek tek geçiriliyor…`,"bot");
     let okCount=0;
@@ -2792,7 +2793,14 @@ function stockCamContextChips(){
     }
     return null; // 'stockSize' — serbest metin girişi bekleniyor, chip yok
   }
-  if(stockCamPending)return[{l:"✅ Onayla",c:"onayla"},{l:"❌ İptal",c:"iptal"}];
+  if(stockCamPending){
+    // stockCamConfirming true iken (FreeCAD'de gerçek üretim/güvenlik kontrolü
+    // sürerken) Onayla/İptal butonlarını gizle -- görünür kalmaları operatörü
+    // tekrar tıklanabilirmiş gibi yanıltıyordu (canlı testte görüldü); zaten
+    // "Topkapı AI gerçek G-code üretiyor…" mesajı işlemin sürdüğünü söylüyor.
+    if(stockCamConfirming)return[];
+    return[{l:"✅ Onayla",c:"onayla"},{l:"❌ İptal",c:"iptal"}];
+  }
   if(stockCam)return[{l:"❌ İptal",c:"iptal"}];
   if(stockCamMirrorPickIdx!==null){
     return[
@@ -3143,9 +3151,20 @@ async function stockCamDoConfirm(){
   if(!stockCamPending)return;
   if(stockCamConfirming){ taiMsg("⏳ Zaten işleniyor, lütfen sonucu bekleyin.","bot"); return; }
   stockCamConfirming=true;
+  // taiRenderChips() normalde stockCamHandleInput'un await'i bittikten SONRA
+  // çağrılıyor (taiUserInput'ta) -- yani bu fonksiyon bitene kadar hiç
+  // yeniden çizilmiyordu, ve Onayla/İptal butonları FreeCAD üretimi süresince
+  // (birkaç saniye) hâlâ tıklanabilir görünüyordu (canlı testte görüldü).
+  // Burada hemen bir kez çağırarak stockCamContextChips()'in yukarıdaki
+  // "işleniyor" dalını anında yansıtıyoruz.
+  taiRenderChips();
   const{opType,opLabel,answers}=stockCamPending;
   const editingId=stockCamEditingId;
-  stockCamApplyMagazineTool(opType,answers);
+  // Sadece düzenleme yolunda burada çağırıyoruz: yeni-işlem yolu birazdan
+  // stockCamConfirmNewOp'u çağırıyor, o da AYNI takımı zaten kendi içinde
+  // seçiyor -- ikisini de çağırmak "Magazinden seçilen takım" mesajını
+  // operatöre iki kez göstermeye yol açıyordu (canlı testte görüldü).
+  if(editingId)stockCamApplyMagazineTool(opType,answers);
   taiMsg("⏳ Topkapı AI gerçek G-code üretiyor ve güvenlik kontrolünden geçiriyor…","bot");
   try{
     let result;
