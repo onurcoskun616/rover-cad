@@ -6,6 +6,7 @@ import {
   generateCamPreview,
   generateCamGcodeFromPlan,
 } from "../services/camAssistantService.js";
+import { analyzeManufacturability } from "../services/camService.js";
 import { getNextCamStep } from "../services/camWizardService.js";
 import { effectiveAnswers } from "../services/inventoryService.js";
 import { computeQuote, generateQuotePdf, resolveQuoteInputs } from "../services/quoteService.js";
@@ -30,6 +31,25 @@ function requireStepPath(req, res) {
 // router.use) so unrelated requests — e.g. the public /files static downloads —
 // fall through untouched instead of being caught by a router-wide auth gate.
 const router = Router();
+
+// Üretilebilirlik Analizi (DFM): real B-Rep geometry checks (deep/narrow
+// holes, undersized internal-corner fillets) run right after upload, before
+// the wizard -- see analyzeManufacturability (camService.js) for exactly
+// what is and isn't checked. Async (polled via /jobs/:id) for the same
+// reason every other FreeCAD-touching route here is: a real MCP round-trip
+// can exceed Cloudflare's 100s edge timeout. `exclusive: true` for the same
+// reason as /cam-plan below -- it force-closes whatever document the shared
+// FreeCAD GUI process currently has open.
+router.post("/dfm-analyze", apiKeyAuth, (req, res) => {
+  const stepPath = requireStepPath(req, res);
+  if (!stepPath) return;
+  const jobId = createJob();
+  runJob(jobId, async () => {
+    const dfm = await analyzeManufacturability(stepPath);
+    return { ok: true, body: { dfm } };
+  }, { exclusive: true });
+  res.status(202).json({ jobId });
+});
 
 // Step 2: sequential wizard. Given the answers so far, return the next step to
 // ask (its recommendations shaped by earlier answers), or { done: true } once

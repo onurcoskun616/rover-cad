@@ -13,6 +13,9 @@ const uploadBtn = byId("tq-upload-btn");
 const tqStatus = byId("tq-status");
 const tqSpinner = byId("tq-spinner");
 const tqStatusText = byId("tq-status-text");
+const tqDfm = byId("tq-dfm");
+const tqDfmScore = byId("tq-dfm-score");
+const tqDfmList = byId("tq-dfm-list");
 const tqWizard = byId("tq-wizard");
 const tqStepProgress = byId("tq-step-progress");
 const tqStepTitle = byId("tq-step-title");
@@ -112,6 +115,7 @@ async function handleUpload() {
     bbox = result.body.bbox ?? null;
     uploadSection.hidden = true;
     setStatus("", false);
+    await runDfmAnalysis();
     tqStepIndex = 0;
     await loadStep(0);
   } catch (err) {
@@ -119,6 +123,37 @@ async function handleUpload() {
     showError(`Sunucuya bağlanılamadı: ${err.message}`);
     uploadBtn.disabled = false;
   }
+}
+
+// Runs right after upload, before the wizard -- shows the operator a
+// manufacturability read on the part before they spend time answering
+// wizard questions. Deliberately never blocks the flow: if the analysis
+// itself errors out (unsupported geometry, a transient FreeCAD hiccup),
+// the DFM card just stays hidden and the wizard proceeds anyway -- this
+// page's core promise is a price, not a DFM report.
+async function runDfmAnalysis() {
+  setStatus("Üretilebilirlik analizi yapılıyor…", true);
+  try {
+    const result = await runAsyncJob(
+      `${API_BASE}/dfm-analyze`,
+      { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify({ stepPath }) },
+      (seconds) => setStatus(`Üretilebilirlik analizi yapılıyor… (${seconds}s)`, true),
+    );
+    setStatus("", false);
+    if (result.error || !result.ok || !result.body?.dfm) return;
+    renderDfmResult(result.body.dfm);
+  } catch {
+    setStatus("", false);
+  }
+}
+
+function renderDfmResult(dfm) {
+  const status = dfm.score === 100 ? "Üretime Hazır" : "Gözden Geçirin";
+  tqDfmScore.textContent = `Üretilebilirlik Skoru: ${dfm.score}/100 — ${status}`;
+  tqDfmList.innerHTML = (dfm.checks || []).map((c) =>
+    `<li class="${c.ok ? "cam-safety-ok" : "cam-safety-fail"}">${c.ok ? "✓" : "✕"} ${c.label}: ${c.detail}</li>`
+  ).join("");
+  tqDfm.hidden = false;
 }
 
 async function loadStep(targetIndex) {
