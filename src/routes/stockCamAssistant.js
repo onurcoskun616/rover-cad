@@ -47,11 +47,11 @@ router.get("/stock-cam/operation-types", apiKeyAuth, (req, res) => {
 });
 
 router.post("/stock-cam/plan", apiKeyAuth, (req, res) => {
-  const { stock } = req.body ?? {};
+  const { stock, material } = req.body ?? {};
   if (!stock || typeof stock !== "object") {
     return res.status(400).json({ error: "stock is required" });
   }
-  const plan = createPlan(stock);
+  const plan = createPlan(stock, material);
   res.json({ plan });
 });
 
