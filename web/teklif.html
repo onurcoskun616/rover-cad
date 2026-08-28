@@ -5,6 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Anında Teklif Al · Topkapı Okulları</title>
     <link rel="stylesheet" href="style.css" />
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+          "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+        }
+      }
+    </script>
   </head>
   <body>
     <header class="site-header">
@@ -41,6 +49,11 @@
         <div id="tq-spinner" class="spinner" hidden></div>
         <p id="tq-status-text"></p>
       </div>
+
+      <section id="tq-viewer-section" class="result-section" hidden>
+        <div id="viewer-container" class="viewer-container"></div>
+        <button id="tq-toggle-stock" type="button" class="secondary">Stok Göster</button>
+      </section>
 
       <section id="tq-dfm" class="cam-safety-summary" hidden>
         <h5>Üretilebilirlik Analizi</h5>

@@ -13,6 +13,9 @@ const uploadBtn = byId("tq-upload-btn");
 const tqStatus = byId("tq-status");
 const tqSpinner = byId("tq-spinner");
 const tqStatusText = byId("tq-status-text");
+const tqViewerSection = byId("tq-viewer-section");
+const viewerContainer = byId("viewer-container");
+const tqToggleStockBtn = byId("tq-toggle-stock");
 const tqDfm = byId("tq-dfm");
 const tqDfmScore = byId("tq-dfm-score");
 const tqDfmList = byId("tq-dfm-list");
@@ -38,6 +41,9 @@ let tqAnswers = {};
 let tqStepIndex = 0;
 let tqPlan = null;
 let tqEstimatedMinutes = null;
+let tqViewer = null;
+let tqStockMesh = null;
+let tqStockShown = false;
 
 async function readJson(response) {
   try { return await response.json(); } catch { return null; }
@@ -115,6 +121,7 @@ async function handleUpload() {
     bbox = result.body.bbox ?? null;
     uploadSection.hidden = true;
     setStatus("", false);
+    if (result.body.stlUrl) await showPartPreview(result.body.stlUrl);
     await runDfmAnalysis();
     tqStepIndex = 0;
     await loadStep(0);
@@ -124,6 +131,67 @@ async function handleUpload() {
     uploadBtn.disabled = false;
   }
 }
+
+// 3D önizleme: index.html'in kendi CAD üretim akışının zaten kullandığı
+// aynı Three.js STL görüntüleyicisini (viewer.js) yeniden kullanıyor --
+// döndürüp inceleyebilme (OrbitControls) hazır geliyor, yeni bir
+// görüntüleyici yazmaya gerek yok.
+async function showPartPreview(stlUrl) {
+  const { initViewer, loadStl } = await import("./viewer.js");
+  if (!tqViewer) tqViewer = initViewer(viewerContainer);
+  loadStl(tqViewer, stlUrl);
+  if (tqStockMesh) {
+    tqViewer.scene.remove(tqStockMesh);
+    tqStockMesh.geometry.dispose();
+    tqStockMesh.material.dispose();
+    tqStockMesh = null;
+  }
+  tqStockShown = false;
+  tqToggleStockBtn.textContent = "Stok Göster";
+  tqViewerSection.hidden = false;
+}
+
+// "Stok Göster": parçanın etrafına, sihirbazda belirtilen stok ölçülerinde
+// (stockX/Y/Z) yarı saydam bir kutu ekler/kaldırır -- partgo.co'nun kendi
+// "Stok Göster / Sade Görünüm" toggle'ına karşılık gelir. Sihirbaz henüz o
+// soruya gelmediyse (stockX/Y/Z boşsa) parçanın kendi ölçüsüne makul bir
+// görsel pay eklenir -- bu sadece bir ÖNİZLEME kutusu, hiçbir fiyat/plan
+// hesabına girmez, bu yüzden gerçek stok ölçüsü belli olana kadar tahmini
+// bir kutu göstermek zararsızdır (buton metni bu durumda "tahmini stok"
+// diyerek bunu açıkça belirtir).
+async function toggleStockPreview() {
+  if (!tqViewer) return;
+  if (tqStockShown) {
+    if (tqStockMesh) {
+      tqViewer.scene.remove(tqStockMesh);
+      tqStockMesh.geometry.dispose();
+      tqStockMesh.material.dispose();
+      tqStockMesh = null;
+    }
+    tqStockShown = false;
+    tqToggleStockBtn.textContent = "Stok Göster";
+    return;
+  }
+  const THREE = await import("three");
+  const sx = Number(tqAnswers.stockX);
+  const sy = Number(tqAnswers.stockY);
+  const sz = Number(tqAnswers.stockZ);
+  const hasRealStock = sx > 0 && sy > 0 && sz > 0;
+  const bx = Number(bbox?.x) || 10;
+  const by = Number(bbox?.y) || 10;
+  const bz = Number(bbox?.z) || 10;
+  const w = hasRealStock ? sx : bx + Math.max(2, bx * 0.1);
+  const d = hasRealStock ? sy : by + Math.max(2, by * 0.1);
+  const h = hasRealStock ? sz : bz + Math.max(2, bz * 0.1);
+  const geometry = new THREE.BoxGeometry(w, d, h);
+  const material = new THREE.MeshStandardMaterial({ color: 0x4a84fa, transparent: true, opacity: 0.18, depthWrite: false });
+  tqStockMesh = new THREE.Mesh(geometry, material);
+  tqViewer.scene.add(tqStockMesh);
+  tqStockShown = true;
+  tqToggleStockBtn.textContent = hasRealStock ? "Sade Görünüm" : "Sade Görünüm (tahmini stok)";
+}
+
+tqToggleStockBtn.addEventListener("click", toggleStockPreview);
 
 // Runs right after upload, before the wizard -- shows the operator a
 // manufacturability read on the part before they spend time answering
