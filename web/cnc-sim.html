@@ -925,6 +925,8 @@ function resizeMillStock(newW, newD, newTop){
     stockCamEditingId=null; stockCamMenuOpen=false; stockCamHistoryOpen=false;
     stockCamMirrorPickIdx=null;
     stockCamArraySourceIdx=null; stockCamArrayKind=null; stockCamArrayPendingList=null;
+    stockCamOrderPendingOrder=null; stockCamOrderPendingLabels=null;
+    stockCamTapDrillSuggestion=null;
     if(typeof clearOpPreview==="function") clearOpPreview();
     if(typeof taiMsg==="function") taiMsg("ℹ️ Stok boyutu değişti — önceki CAM planı sıfırlandı, yeni işlemler bu boyuta göre planlanacak.","bot");
   }
@@ -2332,6 +2334,8 @@ let stockCamMirrorPickIdx=null; // ayna kopyası alınacak islemin index'i (0-ba
 let stockCamArraySourceIdx=null;   // dizi kopyalanacak islemin index'i (0-based) -- akis suruyor
 let stockCamArrayKind=null;        // 'x'|'y'|'grid' secildi mi -- secildiyse sayi girisi bekleniyor
 let stockCamArrayPendingList=null; // sayilar dogrulandi -- [{opType,opLabel,params}] "onayla" bekliyor
+let stockCamOrderPendingOrder=null;  // Otomatik Takım Sıralama: onerilen yeni sira (id dizisi) -- "onayla" bekliyor
+let stockCamOrderPendingLabels=null; // ayni sirada, gosterim icin islem etiketleri
 
 // Ayna/Simetri Kopyalama: sadece bir XY konumu olan (x,y parametreli)
 // islem turleri kopyalanabilir -- face/contour/chamfer butun parca/kenar
@@ -2537,6 +2541,133 @@ async function stockCamConfirmArrayList(){
     stockCamConfirming=false;
   }
 }
+
+// Otomatik Takım Sıralama: aynı takımı kullanan işlemleri art arda gelecek
+// şekilde yeniden sıralama önerisi -- ne kadar tasarruf sağladığını (takım
+// değişimi sayısı) göstermek için sunucudan hem öneriyi hem "önce/sonra"
+// sayısını istiyor (bkz. stockCamGenerateService.js'in suggestToolOrder/
+// countToolChanges'i -- bütün parça/kenar işlemleri, örn. Kontur Kesme,
+// kendi orijinal konumunda SABİT kalır, asla taşınmaz).
+async function stockCamSuggestOrder(){
+  if(!stockCamPlanKey||stockCamOps.length<2){ taiMsg("Sıralamak için en az 2 onaylanmış işlem gerekir.","bot"); return; }
+  taiMsg("⏳ En iyi takım sırası hesaplanıyor…","bot");
+  try{
+    const r=await fetch(`${MAG_API_BASE}/stock-cam/suggest-order`,{method:"POST",headers:magHeaders(),
+      body:JSON.stringify({planKey:stockCamPlanKey})});
+    const data=await r.json();
+    if(!r.ok)throw new Error(data?.error||"Sunucu hatası.");
+    if(!data.changed){
+      taiMsg(`✓ Zaten en iyi sırada -- takım değişimi sayısı zaten en az (${data.beforeToolChanges}).`,"bot");
+      return;
+    }
+    stockCamOrderPendingOrder=data.order;
+    stockCamOrderPendingLabels=data.labels;
+    const list=data.labels.map((l,i)=>`${i+1}. ${l}`).join("<br>");
+    taiMsg(`Önerilen yeni sıra:<br>${list}<br><br>Takım değişimi: şu an <b>${data.beforeToolChanges}</b> → önerilen <b>${data.afterToolChanges}</b>. Uygulansın mı?`,"bot");
+  }catch(e){ taiMsg("⛔ Hata: "+e.message,"bot"); }
+}
+
+async function stockCamApplyOrder(){
+  const order=stockCamOrderPendingOrder;
+  if(!order)return;
+  stockCamOrderPendingOrder=null; stockCamOrderPendingLabels=null;
+  taiMsg("⏳ Yeni sıra Topkapı AI güvenlik kontrolünden geçiriliyor…","bot");
+  try{
+    const r=await fetch(`${MAG_API_BASE}/stock-cam/reorder`,{method:"POST",headers:magHeaders(),
+      body:JSON.stringify({planKey:stockCamPlanKey,order})});
+    const start=await r.json();
+    if(!r.ok)throw new Error(start?.error||"Sunucu hatası.");
+    const result=await stockCamPollJob(start.jobId);
+    if(!result.reordered){
+      taiMsg("⛔ Sıralama uygulanamadı: "+(result.error||"bilinmeyen hata"),"bot");
+      return;
+    }
+    const byId=new Map(stockCamOps.map((o)=>[o.id,o]));
+    stockCamOps=order.map((id)=>byId.get(id)).filter(Boolean);
+    taiMsg(`<span class="tai-msg-action">✓ İşlemler yeni sırayla kaydedildi.</span>`+
+      (result.estimatedMinutes!=null?` (tahmini süre: ${result.estimatedMinutes} dk)`:""),"bot");
+  }catch(e){
+    taiMsg("⛔ Hata: "+e.message,"bot");
+  }
+}
+
+// Kılavuz Çekme için Otomatik Ön Delik: {tapOpId, x, y, depth, tapDrillDia}
+// -- bir tap açıldığında, o konumda henüz uygun bir ön delik yoksa
+// otomatik ekleme önerisi sunuluyor.
+let stockCamTapDrillSuggestion=null;
+
+// Standart metrik diş-matkabı yaklaşımı (~%75 diş derinliği) -- gerçek
+// diş-matkabı tablolarının kullandığı "D - P" kuralı (ör. M6x1.0 -> 5.0mm,
+// M10x1.5 -> 8.5mm -- her ikisi de standart tablolarla birebir eşleşiyor).
+// Freze ile Diş Açma'nın kendi kök-çap formülünden (D - 1.0825317547305483*P)
+// KASITLI OLARAK farklı: o, frezelenen helisel yol için %100 diş derinliğini
+// hedefliyor; burada gerçek bir kılavuzun (tap) malzemeyi kesmesi/biçmesi
+// için tork dostu %75 derinlik gerekiyor.
+function stockCamTapDrillDia(dia,pitch){
+  const d=Number(dia)-Number(pitch);
+  return d>0?Math.round(d*10)/10:null;
+}
+
+function stockCamHasExistingPreDrill(x,y,tapDrillDia){
+  const tol=0.05; // konum toleransı (mm)
+  return stockCamOps.some(o=>o.type==="drill"
+    &&Math.abs(Number(o.params.x)-x)<tol
+    &&Math.abs(Number(o.params.y)-y)<tol
+    &&Math.abs(Number(o.params.dia)-tapDrillDia)<0.5);
+}
+
+function stockCamMaybeSuggestTapDrill(tapOpId,params){
+  const tapDrillDia=stockCamTapDrillDia(params.dia,params.pitch);
+  if(!tapDrillDia)return; // dejenere durum (pitch >= dia) -- anlamsız bir delik asla önerilmez
+  const x=Number(params.x)||0, y=Number(params.y)||0;
+  if(stockCamHasExistingPreDrill(x,y,tapDrillDia))return;
+  stockCamTapDrillSuggestion={tapOpId,x,y,depth:Number(params.depth),tapDrillDia};
+  taiMsg(`🔩 Bu diş (M${params.dia}x${params.pitch}) için standart ön delik çapı: <b>Ø${tapDrillDia}mm</b> (D−P kuralı). Aynı konuma otomatik ön delik eklensin mi?`,"bot");
+}
+
+async function stockCamAddTapDrill(){
+  const sug=stockCamTapDrillSuggestion;
+  stockCamTapDrillSuggestion=null;
+  if(!sug)return;
+  taiMsg("⏳ Ön delik Topkapı AI güvenlik kontrolünden geçiriliyor…","bot");
+  try{
+    const drillParams={dia:sug.tapDrillDia,depth:sug.depth,x:sug.x,y:sug.y};
+    const result=await stockCamConfirmNewOp("drill",drillParams);
+    if(!result.confirmed){
+      taiMsg("⛔ Ön delik eklenemedi: "+(result.error||"bilinmeyen hata"),"bot");
+      return;
+    }
+    stockCamOps.push({id:result.operation.id,type:"drill",label:"Delik Delme",params:drillParams});
+    // Yeni delik mantıksal olarak diş açmadan ÖNCE gelmeli -- az önce
+    // eklendiği için şu an listenin sonunda; Otomatik Takım Sıralama'nın
+    // /stock-cam/reorder mekanizmasını yeniden kullanarak tam diş açmanın
+    // önüne taşıyoruz (aynı FreeCAD güvenlik doğrulamasından geçerek).
+    const ids=stockCamOps.map(o=>o.id);
+    const drillIdx=ids.indexOf(result.operation.id);
+    ids.splice(drillIdx,1);
+    const insertAt=ids.indexOf(sug.tapOpId);
+    if(insertAt===-1){
+      taiMsg("⚠️ Ön delik eklendi ama diş açma işlemi artık bulunamadı -- geçmiş panelinden elle sıralayabilirsiniz.","bot");
+      return;
+    }
+    ids.splice(insertAt,0,result.operation.id);
+    const r=await fetch(`${MAG_API_BASE}/stock-cam/reorder`,{method:"POST",headers:magHeaders(),
+      body:JSON.stringify({planKey:stockCamPlanKey,order:ids})});
+    const start=await r.json();
+    if(!r.ok)throw new Error(start?.error||"Sunucu hatası.");
+    const reorderResult=await stockCamPollJob(start.jobId);
+    if(!reorderResult.reordered){
+      taiMsg("⚠️ Ön delik eklendi ama diş açmadan önceye taşınamadı: "+(reorderResult.error||"bilinmeyen hata")+" -- geçmiş panelinden elle sıralayabilirsiniz.","bot");
+      return;
+    }
+    const byId=new Map(stockCamOps.map(o=>[o.id,o]));
+    stockCamOps=ids.map(id=>byId.get(id)).filter(Boolean);
+    taiMsg(`<span class="tai-msg-action">✓ Ön delik eklendi:</span> Ø${sug.tapDrillDia}mm, ${sug.depth}mm derin, X${sug.x} Y${sug.y} (diş açmadan hemen önce).`,"bot");
+  }catch(e){
+    taiMsg("⛔ Hata: "+e.message,"bot");
+  }
+}
+
 let stockCamMachines=null;      // "Makineler" envanterinden çekilen liste — sayfa oturumu boyunca önbelleklenir
 let stockCamPostProcessor=null; // bu oturum için seçilen kontrolcü ("" = kayıtlı makine yok, sunucu varsayılanı grbl kullanır)
 let stockCamMaterial=null; // bu oturum için seçilen malzeme anahtarı (MAT_DB'nin kendi anahtarları) -- Feeds&Speeds'i besler
@@ -2607,6 +2738,8 @@ function stockCamContextChips(){
     ];
   }
   if(stockCamArraySourceIdx!==null)return[{l:"❌ İptal",c:"iptal"}]; // sayilar serbest metinle giriliyor
+  if(stockCamOrderPendingOrder)return[{l:"✅ Uygula",c:"onayla"},{l:"❌ İptal",c:"iptal"}];
+  if(stockCamTapDrillSuggestion)return[{l:"✅ Ön Deliği Ekle",c:"ondelik ekle"},{l:"❌ Hayır",c:"ondelik hayir"}];
   if(stockCamMenuOpen)return STOCK_CAM_MENU.map(m=>({l:m.label,c:m.label}));
   if(stockCamHistoryOpen){
     const chips=[];
@@ -2623,6 +2756,7 @@ function stockCamContextChips(){
   const chips=[{l:"🔧 İşlem Menüsü",c:"işlem menüsü"}];
   if(stockCamOps.length){
     chips.push({l:"📋 Geçmiş ("+stockCamOps.length+")",c:"geçmiş"});
+    if(stockCamOps.length>1)chips.push({l:"🔀 Takım Sırala",c:"takim sirala"});
     chips.push({l:"⬇️ G-code Oluştur",c:"g-code oluştur"});
     chips.push({l:"🖨️ İş Emri Yazdır",c:"iş emri yazdır"});
   }
@@ -2911,6 +3045,11 @@ async function stockCamDoConfirm(){
     }
     taiMsg(`<span class="tai-msg-action">✓ ${opLabel} onaylandı:</span> ${stockCamOpSummary(opType,answers)}`+
       (result.estimatedMinutes!=null?` (tahmini süre: ${result.estimatedMinutes} dk)`:""),"bot");
+    // Sadece YENİ bir Kılavuz Çekme eklenirken -- bir düzenleme her onaydan
+    // sonra tekrar sorulmasın diye editingId burada kasıtlı olarak dışlanıyor.
+    if(!editingId&&opType==="tapping"){
+      stockCamMaybeSuggestTapDrill(result.operation.id,answers);
+    }
   }catch(e){
     taiMsg("⛔ Hata: "+e.message,"bot");
   }finally{
@@ -3007,10 +3146,12 @@ async function stockCamHandleInput(text){
     return await stockCamHandleSetupInput(text);
   }
 
-  if((stockCam||stockCamPending||stockCamMirrorPickIdx!==null||stockCamArraySourceIdx!==null)&&/^(iptal|cancel|vazgec)/i.test(t)){
+  if((stockCam||stockCamPending||stockCamMirrorPickIdx!==null||stockCamArraySourceIdx!==null||stockCamOrderPendingOrder||stockCamTapDrillSuggestion)&&/^(iptal|cancel|vazgec)/i.test(t)){
     clearOpPreview();
     stockCam=null; stockCamPending=null; stockCamEditingId=null; stockCamMirrorPickIdx=null;
     stockCamArraySourceIdx=null; stockCamArrayKind=null; stockCamArrayPendingList=null;
+    stockCamOrderPendingOrder=null; stockCamOrderPendingLabels=null;
+    stockCamTapDrillSuggestion=null;
     taiMsg("✓ İşlem iptal edildi.","bot");
     return true;
   }
@@ -3020,6 +3161,19 @@ async function stockCamHandleInput(text){
   }
   if(stockCamArrayPendingList&&/^(onayla|evet|tamam|confirm|ok)/i.test(t)){
     await stockCamConfirmArrayList();
+    return true;
+  }
+  if(stockCamOrderPendingOrder&&/^(onayla|evet|tamam|confirm|ok|uygula)/i.test(t)){
+    await stockCamApplyOrder();
+    return true;
+  }
+  if(stockCamTapDrillSuggestion&&/^ondelik ekle/i.test(t)){
+    await stockCamAddTapDrill();
+    return true;
+  }
+  if(stockCamTapDrillSuggestion&&/^ondelik hayir/i.test(t)){
+    stockCamTapDrillSuggestion=null;
+    taiMsg("✓ Tamam, ön delik eklenmedi.","bot");
     return true;
   }
   if(stockCam){
@@ -3060,6 +3214,10 @@ async function stockCamHandleInput(text){
   const arrayMatch=t.match(/^islem dizi\s+(\d+)/i);
   if(arrayMatch){
     await stockCamStartArrayPick(parseInt(arrayMatch[1],10));
+    return true;
+  }
+  if(/^takim sirala/i.test(t)){
+    await stockCamSuggestOrder();
     return true;
   }
   if(/(islem\s*menu(su)?)$/i.test(t)){

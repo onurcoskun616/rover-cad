@@ -394,6 +394,34 @@ export function listOperations(planKey) {
   return plan ? plan.operations.map((o) => ({ ...o })) : null;
 }
 
+// Otomatik Takım Sıralama: persists a NEW ordering of the plan's existing
+// operations (by id) — never adds, removes, or edits any operation's own
+// type/params. Rejects anything that isn't an exact permutation of the
+// plan's current operation ids (missing, duplicated, or foreign ids) rather
+// than guessing what the caller meant; the route layer (Faz X) still
+// re-verifies the reordered plan via a real FreeCAD rebuild before ever
+// calling this, same discipline as replaceOperation.
+export function reorderOperations(planKey, orderedIds) {
+  const plan = plans.get(planKey);
+  if (!plan) return { ok: false, problems: ["Plan bulunamadı."] };
+  if (!Array.isArray(orderedIds) || orderedIds.length !== plan.operations.length) {
+    return { ok: false, problems: ["Sıralama listesi geçersiz."] };
+  }
+  if (new Set(orderedIds).size !== plan.operations.length) {
+    return { ok: false, problems: ["Sıralama listesinde yinelenen işlem var."] };
+  }
+  const byId = new Map(plan.operations.map((o) => [o.id, o]));
+  const reordered = [];
+  for (const id of orderedIds) {
+    const op = byId.get(id);
+    if (!op) return { ok: false, problems: ["Sıralama listesi mevcut işlemlerle eşleşmiyor."] };
+    reordered.push(op);
+  }
+  plan.operations = reordered;
+  touch(plan);
+  return { ok: true, operations: plan.operations.map((o) => ({ ...o })) };
+}
+
 // Faz X: the setup-sheet route persists the most recent FreeCAD time
 // estimate here (from confirm/edit's own verifyStockPlan call) so the
 // printable job sheet can show a real total without triggering its own,
