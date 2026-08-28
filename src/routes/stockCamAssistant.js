@@ -18,6 +18,7 @@ import {
   exportStockPlanGcode,
 } from "../services/stockCamGenerateService.js";
 import { buildSetupSheetHtml } from "../services/stockCamSetupSheetService.js";
+import { addToolUsageMinutes, toolWearStatus } from "../services/cncMagazineService.js";
 import { createJob, runJob } from "../services/jobStore.js";
 import { config } from "../config.js";
 import path from "node:path";
@@ -130,6 +131,13 @@ router.post("/stock-cam/confirm", apiKeyAuth, (req, res) => {
     return res.status(400).json({ error: "Parametreler gecersiz.", problems });
   }
 
+  // Takım Ömrü Takibi: the plan's cumulative FreeCAD time-estimate BEFORE
+  // this operation, captured now (same timing as the `candidate` construction
+  // below) so the delta after verify is this operation's own real marginal
+  // cutting time -- see cncMagazineService.js's own comment for the full
+  // design (never retroactively touched by an edit/delete).
+  const priorMinutes = Number.isFinite(plan.lastEstimatedMinutes) ? plan.lastEstimatedMinutes : 0;
+
   const jobId = createJob();
   runJob(jobId, async () => {
     // Verify against a candidate plan (current confirmed ops + this new one)
@@ -148,9 +156,24 @@ router.post("/stock-cam/confirm", apiKeyAuth, (req, res) => {
     // Lets the printable setup sheet show a real total without its own
     // separate FreeCAD call -- see stockCamPlanService.js's own comment.
     setLastEstimatedMinutes(planKey, verify.estimatedMinutes);
+    // toolRefId only arrives when the client's own tool magazine matched a
+    // real registered tool (cnc-sim.html's stockCamApplyMagazineTool) --
+    // nothing to attribute wear to otherwise.
+    const toolRefId = typeof params?.toolRefId === "string" && params.toolRefId ? params.toolRefId : null;
+    let toolWear = null;
+    if (toolRefId) {
+      addToolUsageMinutes(toolRefId, Math.max(0, verify.estimatedMinutes - priorMinutes));
+      toolWear = toolWearStatus(toolRefId);
+    }
     return {
       ok: true,
-      body: { confirmed: true, operation: result.operation, operations: result.operations, estimatedMinutes: verify.estimatedMinutes },
+      body: {
+        confirmed: true,
+        operation: result.operation,
+        operations: result.operations,
+        estimatedMinutes: verify.estimatedMinutes,
+        toolWear,
+      },
     };
   }, { exclusive: true });
 

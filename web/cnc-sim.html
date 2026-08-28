@@ -924,6 +924,7 @@ function resizeMillStock(newW, newD, newTop){
     stockCamPlanKey=null; stockCamOps=[]; stockCam=null; stockCamPending=null;
     stockCamEditingId=null; stockCamMenuOpen=false; stockCamHistoryOpen=false;
     stockCamMirrorPickIdx=null;
+    stockCamArraySourceIdx=null; stockCamArrayKind=null; stockCamArrayPendingList=null;
     if(typeof clearOpPreview==="function") clearOpPreview();
     if(typeof taiMsg==="function") taiMsg("ℹ️ Stok boyutu değişti — önceki CAM planı sıfırlandı, yeni işlemler bu boyuta göre planlanacak.","bot");
   }
@@ -2328,6 +2329,9 @@ let stockCamEditingId=null; // düzenlenen işlemin id'si (varsa) — onaylamak 
 let stockCamMenuOpen=false;
 let stockCamHistoryOpen=false;
 let stockCamMirrorPickIdx=null; // ayna kopyası alınacak islemin index'i (0-based) -- eksen secimi bekleniyor
+let stockCamArraySourceIdx=null;   // dizi kopyalanacak islemin index'i (0-based) -- akis suruyor
+let stockCamArrayKind=null;        // 'x'|'y'|'grid' secildi mi -- secildiyse sayi girisi bekleniyor
+let stockCamArrayPendingList=null; // sayilar dogrulandi -- [{opType,opLabel,params}] "onayla" bekliyor
 
 // Ayna/Simetri Kopyalama: sadece bir XY konumu olan (x,y parametreli)
 // islem turleri kopyalanabilir -- face/contour/chamfer butun parca/kenar
@@ -2379,18 +2383,27 @@ async function stockCamStartMirrorPick(indexOneBased){
   taiMsg(`<b>${op.label}</b> (${stockCamOpSummary(op.type,op.params)}) seçildi. Hangi eksende ayna alınsın?`,"bot");
 }
 
+// Faz 3'ün /stock-cam/validate rotasını (sunucudaki validateOperationParams'ı
+// çağırıyor) hem Ayna hem Dizi Kopyalama akışlarının paylaştığı tek nokta --
+// stoğa sığmayan bir kopya, gerçek FreeCAD üretimine hiç gitmeden burada
+// yakalanır.
+async function stockCamValidateParams(opType,params){
+  const r=await fetch(`${MAG_API_BASE}/stock-cam/validate`,{method:"POST",headers:magHeaders(),
+    body:JSON.stringify({planKey:stockCamPlanKey,opType,params})});
+  const data=await r.json();
+  if(!r.ok)throw new Error(data?.error||"Sunucu hatası.");
+  return data.problems||[];
+}
+
 async function stockCamApplyMirror(axis){
   const op=stockCamOps[stockCamMirrorPickIdx];
   stockCamMirrorPickIdx=null;
   if(!op){ taiMsg("⛔ Böyle bir işlem yok.","bot"); return; }
   const mirroredParams=stockCamMirrorParams(op.type,op.params,axis);
   try{
-    const r=await fetch(`${MAG_API_BASE}/stock-cam/validate`,{method:"POST",headers:magHeaders(),
-      body:JSON.stringify({planKey:stockCamPlanKey,opType:op.type,params:mirroredParams})});
-    const data=await r.json();
-    if(!r.ok)throw new Error(data?.error||"Sunucu hatası.");
-    if(data.problems&&data.problems.length){
-      taiMsg("⛔ Ayna kopyası stoğa sığmıyor: "+data.problems.join("<br>"),"bot");
+    const problems=await stockCamValidateParams(op.type,mirroredParams);
+    if(problems.length){
+      taiMsg("⛔ Ayna kopyası stoğa sığmıyor: "+problems.join("<br>"),"bot");
       return;
     }
   }catch(e){ taiMsg("⛔ Hata: "+e.message,"bot"); return; }
@@ -2398,6 +2411,131 @@ async function stockCamApplyMirror(axis){
   stockCamPending={opType:op.type,opLabel:op.label,answers:mirroredParams};
   stockCamEditingId=null; // ayna kopyası her zaman YENİ bir işlem — kaynağın yerini almaz
   taiMsg(`✓ Ayna kopyası önizlendi (${op.label}: ${stockCamOpSummary(op.type,mirroredParams)}). Stok üzerindeki turuncu alanı kontrol edin. Doğruysa "onayla", değilse "iptal" yazın.`,"bot");
+}
+
+// Dizi/Izgara Kopyalama: Ayna Kopyalama ile aynı mantık -- stok merkezi
+// (0,0) olduğundan, bir işlemi X/Y yönünde N kez tekrarlamak sadece x/y'ye
+// sabit bir adım (spacing) eklemek demek. 'x' ve 'y' türleri, cols=1 veya
+// rows=1 olan bir ızgaranın özel hali olarak ele alınıyor -- tek bir üretim
+// yolu (stockCamComputeArrayList), üç ayrı dal değil.
+function stockCamComputeArrayList(sourceOp,cols,rows,spacingX,spacingY){
+  const list=[];
+  for(let r=0;r<rows;r++){
+    for(let c=0;c<cols;c++){
+      if(r===0&&c===0)continue; // orijinalin kendisi -- zaten planda, tekrar eklenmez
+      const p={...sourceOp.params};
+      p.x=Number(sourceOp.params.x)+c*spacingX;
+      p.y=Number(sourceOp.params.y)+r*spacingY;
+      list.push({opType:sourceOp.type,opLabel:sourceOp.label,params:p});
+    }
+  }
+  return list;
+}
+
+async function stockCamStartArrayPick(indexOneBased){
+  const idx=indexOneBased-1;
+  const op=stockCamOps[idx];
+  if(!op){ taiMsg("⛔ Böyle bir işlem yok.","bot"); return; }
+  if(!STOCK_CAM_MIRRORABLE_TYPES.has(op.type)){
+    taiMsg(`⛔ <b>${op.label}</b> dizi kopyalama için uygun değil (tüm parça/kenar üzerinde çalışıyor, ayrı bir XY konumu yok).`,"bot");
+    return;
+  }
+  stockCamHistoryOpen=false;
+  stockCamArraySourceIdx=idx;
+  stockCamArrayKind=null;
+  stockCamArrayPendingList=null;
+  taiMsg(`<b>${op.label}</b> (${stockCamOpSummary(op.type,op.params)}) seçildi. Nasıl bir dizi oluşturulsun?`,"bot");
+}
+
+function stockCamPickArrayKind(kind){
+  stockCamArrayKind=kind;
+  if(kind==="x"){
+    taiMsg("Toplam kaç adet olsun (orijinal dahil) ve X aralığı kaç mm? Örn: <b>4 adet 50mm aralık</b>.","bot");
+  }else if(kind==="y"){
+    taiMsg("Toplam kaç adet olsun (orijinal dahil) ve Y aralığı kaç mm? Örn: <b>3 adet 30mm aralık</b>.","bot");
+  }else{
+    taiMsg("Kaç sütun x kaç satır olsun (orijinal dahil) ve X/Y aralığı kaç mm? Sayıları bu sırayla yazın: sütun, satır, X aralığı, Y aralığı. Örn: <b>3 sütun 2 satır, X aralığı 40mm Y aralığı 30mm</b>.","bot");
+  }
+}
+
+async function stockCamAdvanceArrayNumbers(text){
+  const nums=taiAllNums(text);
+  const kind=stockCamArrayKind;
+  let cols,rows,spacingX,spacingY;
+  if(kind==="x"){
+    if(nums.length<2){ taiMsg("Lütfen toplam adet ve X aralığını birlikte yazın. Örn: '4 adet 50mm aralık'.","bot"); return; }
+    cols=Math.round(nums[0]); rows=1; spacingX=nums[1]; spacingY=0;
+  }else if(kind==="y"){
+    if(nums.length<2){ taiMsg("Lütfen toplam adet ve Y aralığını birlikte yazın. Örn: '3 adet 30mm aralık'.","bot"); return; }
+    rows=Math.round(nums[0]); cols=1; spacingY=nums[1]; spacingX=0;
+  }else{
+    if(nums.length<4){ taiMsg("Lütfen sütun, satır, X aralığı ve Y aralığını bu sırayla yazın. Örn: '3 sütun 2 satır, X aralığı 40mm Y aralığı 30mm'.","bot"); return; }
+    cols=Math.round(nums[0]); rows=Math.round(nums[1]); spacingX=nums[2]; spacingY=nums[3];
+  }
+  if(!Number.isFinite(cols)||!Number.isFinite(rows)||cols<1||rows<1){
+    taiMsg("⛔ Sütun/satır sayısı geçersiz.","bot"); return;
+  }
+  if(cols*rows<2){ taiMsg("⛔ Toplam en az 2 kopya olmalı (orijinal dahil).","bot"); return; }
+  if(cols*rows>101){ taiMsg("⛔ Çok fazla kopya istendi (en fazla 100 yeni kopya). Daha küçük bir sayı deneyin.","bot"); return; }
+  if(cols>1&&!(spacingX>0)){ taiMsg("⛔ X aralığı 0'dan büyük olmalı.","bot"); return; }
+  if(rows>1&&!(spacingY>0)){ taiMsg("⛔ Y aralığı 0'dan büyük olmalı.","bot"); return; }
+
+  const sourceOp=stockCamOps[stockCamArraySourceIdx];
+  if(!sourceOp){
+    taiMsg("⛔ Kaynak işlem artık mevcut değil.","bot");
+    stockCamArraySourceIdx=null; stockCamArrayKind=null;
+    return;
+  }
+  const list=stockCamComputeArrayList(sourceOp,cols,rows,spacingX,spacingY);
+
+  taiMsg(`⏳ ${list.length} kopya konumu kontrol ediliyor…`,"bot");
+  for(const item of list){
+    let problems;
+    try{ problems=await stockCamValidateParams(item.opType,item.params); }
+    catch(e){ taiMsg("⛔ Hata: "+e.message,"bot"); return; }
+    if(problems.length){
+      taiMsg(`⛔ X${item.params.x} Y${item.params.y} konumundaki kopya stoğa sığmıyor: `+problems.join("<br>")+"<br>Sayıları değiştirip tekrar deneyin.","bot");
+      return; // stockCamArrayKind kalır -- operatör aynı türle farklı sayılar girebilir
+    }
+  }
+
+  stockCamArrayPendingList=list;
+  showOpPreview(sourceOp.type,list[list.length-1].params);
+  const positions=list.map(o=>`X${o.params.x} Y${o.params.y}`).join(", ");
+  taiMsg(`✓ ${list.length} yeni kopya planlandı (${sourceOp.label}): ${positions}. Son kopyanın konumu stok üzerinde turuncu ile gösteriliyor. Onaylarsanız hepsi TEK SEFERDE eklenecek.`,"bot");
+}
+
+async function stockCamConfirmArrayList(){
+  if(stockCamConfirming){ taiMsg("⏳ Zaten işleniyor, lütfen sonucu bekleyin.","bot"); return; }
+  const list=stockCamArrayPendingList;
+  if(!list)return;
+  stockCamConfirming=true;
+  stockCamArrayPendingList=null;
+  stockCamArraySourceIdx=null; stockCamArrayKind=null;
+  clearOpPreview();
+  try{
+    taiMsg(`⏳ ${list.length} kopya Topkapı AI güvenlik kontrolünden tek tek geçiriliyor…`,"bot");
+    let okCount=0;
+    for(const item of list){
+      let result;
+      try{ result=await stockCamConfirmNewOp(item.opType,item.params); }
+      catch(e){
+        taiMsg("⛔ Hata: "+e.message+" — kalan kopyalar durduruldu, zaten eklenenler planda kalır.","bot");
+        break;
+      }
+      if(!result.confirmed){
+        taiMsg(`⛔ X${item.params.x} Y${item.params.y} konumundaki kopya onaylanamadı: `+(result.error||"bilinmeyen hata")+" — kalan kopyalar durduruldu, zaten eklenenler planda kalır.","bot");
+        break;
+      }
+      stockCamOps.push({id:result.operation.id,type:item.opType,label:item.opLabel,params:item.params});
+      okCount++;
+    }
+    if(okCount>0){
+      taiMsg(`<span class="tai-msg-action">✓ ${okCount} yeni kopya eklendi.</span>`,"bot");
+    }
+  }finally{
+    stockCamConfirming=false;
+  }
 }
 let stockCamMachines=null;      // "Makineler" envanterinden çekilen liste — sayfa oturumu boyunca önbelleklenir
 let stockCamPostProcessor=null; // bu oturum için seçilen kontrolcü ("" = kayıtlı makine yok, sunucu varsayılanı grbl kullanır)
@@ -2459,12 +2597,25 @@ function stockCamContextChips(){
       {l:"❌ İptal",c:"iptal"},
     ];
   }
+  if(stockCamArrayPendingList)return[{l:"✅ Tümünü Onayla",c:"onayla"},{l:"❌ İptal",c:"iptal"}];
+  if(stockCamArraySourceIdx!==null&&stockCamArrayKind===null){
+    return[
+      {l:"↔ Yatay Dizi (X)",c:"dizi x"},
+      {l:"↕ Dikey Dizi (Y)",c:"dizi y"},
+      {l:"▦ Izgara (X+Y)",c:"dizi grid"},
+      {l:"❌ İptal",c:"iptal"},
+    ];
+  }
+  if(stockCamArraySourceIdx!==null)return[{l:"❌ İptal",c:"iptal"}]; // sayilar serbest metinle giriliyor
   if(stockCamMenuOpen)return STOCK_CAM_MENU.map(m=>({l:m.label,c:m.label}));
   if(stockCamHistoryOpen){
     const chips=[];
     stockCamOps.forEach((o,i)=>{
       chips.push({l:`✎ ${i+1}. ${o.label}`,c:`islem duzenle ${i+1}`});
-      if(STOCK_CAM_MIRRORABLE_TYPES.has(o.type))chips.push({l:`🪞 ${i+1}. Ayna Kopyala`,c:`islem ayna ${i+1}`});
+      if(STOCK_CAM_MIRRORABLE_TYPES.has(o.type)){
+        chips.push({l:`🪞 ${i+1}. Ayna Kopyala`,c:`islem ayna ${i+1}`});
+        chips.push({l:`🔁 ${i+1}. Dizi Kopyala`,c:`islem dizi ${i+1}`});
+      }
     });
     chips.push({l:"⬅ Kapat",c:"gecmisi kapat"});
     return chips;
@@ -2684,35 +2835,68 @@ async function stockCamAdvanceStep(text){
 
 let stockCamConfirming=false;
 
+// Ask the REAL tool magazine for a fitting registered tool before generating
+// anything — replaces the server's own geometry-based diameter guess
+// (toolDiameterFor) with an actual tool's real diameter whenever one fits,
+// same findSlotForOp() this simulator already uses for its own manual tool
+// changes. Mutates `params` in place (toolDia/toolNum). Shared by the normal
+// add/edit confirm flow and the Dizi Kopyalama batch-confirm flow below.
+function stockCamApplyMagazineTool(opType,params){
+  const magQuery=stockCamMagazineQueryFor(opType,params);
+  if(magQuery){
+    const slot=magazine.findSlotForOp(magQuery.magOpType,magQuery.reqDia,magQuery.reqDepth);
+    if(slot>=0){
+      const tl=magazine.getToolInSlot(slot);
+      params.toolDia=tl.dia;
+      params.toolNum=slot+1;
+      // magRefId maps a TOOL_LIBRARY index back to the SAME persisted ref-id
+      // ("builtin:N" or a backend tool uuid) cncMagazineService.js's Takım
+      // Ömrü Takibi is keyed by -- lets the backend attribute this
+      // operation's real estimated cutting time to the actual physical tool.
+      const refId=magRefId(magazine.slots[slot]);
+      if(refId)params.toolRefId=refId;
+      taiMsg(`🔧 Magazinden seçilen takım: <b>${tl.name}</b> (Ø${tl.dia}mm, T${String(slot+1).padStart(2,"0")})`,"bot");
+    }
+  }
+}
+
+// Confirms a brand-new operation (never an edit — see stockCamDoConfirm's
+// own /stock-cam/edit branch for that) through the real FreeCAD verify
+// chain. Shared by the single-operation confirm flow and Dizi Kopyalama's
+// batch confirm (stockCamConfirmArrayList), which calls this once per
+// planned copy.
+async function stockCamConfirmNewOp(opType,params){
+  stockCamApplyMagazineTool(opType,params);
+  const r=await fetch(`${MAG_API_BASE}/stock-cam/confirm`,{method:"POST",headers:magHeaders(),
+    body:JSON.stringify({planKey:stockCamPlanKey,opType,params})});
+  const start=await r.json();
+  if(!r.ok)throw new Error(start?.error||"Sunucu hatası.");
+  const result=await stockCamPollJob(start.jobId);
+  if(result?.toolWear?.overLimit){
+    taiMsg(`⚠️ Kullanılan takım aşınma sınırını geçti (${result.toolWear.minutes} dk / sınır ${result.toolWear.limit} dk) — takımı kontrol edin veya değiştirin.`,"bot");
+  }
+  return result;
+}
+
 async function stockCamDoConfirm(){
   if(!stockCamPending)return;
   if(stockCamConfirming){ taiMsg("⏳ Zaten işleniyor, lütfen sonucu bekleyin.","bot"); return; }
   stockCamConfirming=true;
   const{opType,opLabel,answers}=stockCamPending;
   const editingId=stockCamEditingId;
-  // Ask the REAL tool magazine for a fitting registered tool before
-  // generating anything — replaces the server's own geometry-based
-  // diameter guess (toolDiameterFor) with an actual tool's real diameter
-  // whenever one fits, same findSlotForOp() this simulator already uses
-  // for its own manual tool changes.
-  const magQuery=stockCamMagazineQueryFor(opType,answers);
-  if(magQuery){
-    const slot=magazine.findSlotForOp(magQuery.magOpType,magQuery.reqDia,magQuery.reqDepth);
-    if(slot>=0){
-      const tl=magazine.getToolInSlot(slot);
-      answers.toolDia=tl.dia;
-      answers.toolNum=slot+1;
-      taiMsg(`🔧 Magazinden seçilen takım: <b>${tl.name}</b> (Ø${tl.dia}mm, T${String(slot+1).padStart(2,"0")})`,"bot");
-    }
-  }
+  stockCamApplyMagazineTool(opType,answers);
   taiMsg("⏳ Topkapı AI gerçek G-code üretiyor ve güvenlik kontrolünden geçiriyor…","bot");
   try{
-    const url=editingId?`${MAG_API_BASE}/stock-cam/edit`:`${MAG_API_BASE}/stock-cam/confirm`;
-    const body=editingId?{planKey:stockCamPlanKey,opId:editingId,opType,params:answers}:{planKey:stockCamPlanKey,opType,params:answers};
-    const r=await fetch(url,{method:"POST",headers:magHeaders(),body:JSON.stringify(body)});
-    const start=await r.json();
-    if(!r.ok)throw new Error(start?.error||"Sunucu hatası.");
-    const result=await stockCamPollJob(start.jobId);
+    let result;
+    if(editingId){
+      const r=await fetch(`${MAG_API_BASE}/stock-cam/edit`,{method:"POST",headers:magHeaders(),
+        body:JSON.stringify({planKey:stockCamPlanKey,opId:editingId,opType,params:answers})});
+      const start=await r.json();
+      if(!r.ok)throw new Error(start?.error||"Sunucu hatası.");
+      result=await stockCamPollJob(start.jobId);
+    }else{
+      result=await stockCamConfirmNewOp(opType,answers);
+    }
     if(!result.confirmed){
       taiMsg("⛔ Onaylanamadı: "+(result.error||"bilinmeyen hata")+"<br>Parametreleri düzeltip tekrar deneyebilirsiniz.","bot");
       return; // sticker kalır, operatör düzeltip tekrar "onayla" diyebilir
@@ -2823,14 +3007,19 @@ async function stockCamHandleInput(text){
     return await stockCamHandleSetupInput(text);
   }
 
-  if((stockCam||stockCamPending||stockCamMirrorPickIdx!==null)&&/^(iptal|cancel|vazgec)/i.test(t)){
+  if((stockCam||stockCamPending||stockCamMirrorPickIdx!==null||stockCamArraySourceIdx!==null)&&/^(iptal|cancel|vazgec)/i.test(t)){
     clearOpPreview();
     stockCam=null; stockCamPending=null; stockCamEditingId=null; stockCamMirrorPickIdx=null;
+    stockCamArraySourceIdx=null; stockCamArrayKind=null; stockCamArrayPendingList=null;
     taiMsg("✓ İşlem iptal edildi.","bot");
     return true;
   }
   if(stockCamPending&&/^(onayla|evet|tamam|confirm|ok)/i.test(t)){
     await stockCamDoConfirm();
+    return true;
+  }
+  if(stockCamArrayPendingList&&/^(onayla|evet|tamam|confirm|ok)/i.test(t)){
+    await stockCamConfirmArrayList();
     return true;
   }
   if(stockCam){
@@ -2841,6 +3030,16 @@ async function stockCamHandleInput(text){
     const axisMatch=t.match(/^ayna\s+(x|y|xy)/i);
     if(axisMatch){ await stockCamApplyMirror(axisMatch[1].toLowerCase()); return true; }
     taiMsg("Lütfen aşağıdan bir ayna ekseni seçin.","bot");
+    return true;
+  }
+  if(stockCamArraySourceIdx!==null&&stockCamArrayKind===null){
+    const kindMatch=t.match(/^dizi\s+(x|y|grid)/i);
+    if(kindMatch){ stockCamPickArrayKind(kindMatch[1].toLowerCase()); return true; }
+    taiMsg("Lütfen aşağıdan bir dizi türü seçin.","bot");
+    return true;
+  }
+  if(stockCamArraySourceIdx!==null&&stockCamArrayKind!==null&&!stockCamArrayPendingList){
+    await stockCamAdvanceArrayNumbers(text);
     return true;
   }
   if(stockCamHistoryOpen&&/^gecmisi kapat/i.test(t)){
@@ -2856,6 +3055,11 @@ async function stockCamHandleInput(text){
   const mirrorMatch=t.match(/^islem ayna\s+(\d+)/i);
   if(mirrorMatch){
     await stockCamStartMirrorPick(parseInt(mirrorMatch[1],10));
+    return true;
+  }
+  const arrayMatch=t.match(/^islem dizi\s+(\d+)/i);
+  if(arrayMatch){
+    await stockCamStartArrayPick(parseInt(arrayMatch[1],10));
     return true;
   }
   if(/(islem\s*menu(su)?)$/i.test(t)){
@@ -3274,6 +3478,17 @@ function magRefId(idx){ return idx<MAG_BUILTIN_COUNT ? "builtin:"+(idx+1) : magC
 
 let magCustomTools=[]; // backend'den gelen kullanıcı tanımlı takımlar
 let magRefIdToIndex={}; // "builtin:N" | backend uuid -> TOOL_LIBRARY dizin
+let magToolUsage={};    // Takım Ömrü Takibi: ref-id -> kümülatif dakika (sadece özel takımlar için gösteriliyor)
+
+async function magFetchUsage(){
+  if(!magToken()) return {};
+  try{
+    const r=await fetch(`${MAG_API_BASE}/cnc-magazine/usage`,{headers:magHeaders()});
+    if(!r.ok) return {};
+    const d=await r.json();
+    return d.usage&&typeof d.usage==="object"?d.usage:{};
+  }catch{ return {}; }
+}
 
 function magRebuildIndex(){
   TOOL_LIBRARY.length=MAG_BUILTIN_COUNT; // önceki eklenen özel takımları temizle
@@ -3329,11 +3544,25 @@ magLoadFromServer();
 function magRenderToolsList(){
   const el=$("mag-tools-list");
   if(!magCustomTools.length){ el.innerHTML='<p class="text-zinc-500">Henüz özel takım tanımlamadın.</p>'; return; }
-  el.innerHTML=magCustomTools.map((t)=>`
+  el.innerHTML=magCustomTools.map((t)=>{
+    const used=Number(magToolUsage[t.id])||0;
+    const limit=Number(t.wearLimitMinutes)||480;
+    const overLimit=used>=limit;
+    const usageLine=used>0
+      ? `<div class="mt-0.5 text-xs ${overLimit?"text-red-400":"text-zinc-500"}">Kullanım: ${Math.round(used*10)/10} dk / sınır ${limit} dk${overLimit?" ⚠️ sınır aşıldı":""}</div>`
+      : "";
+    return `
     <div class="flex items-center justify-between rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5">
-      <span>${t.name} — Ø${t.dia}mm, boy ${t.fluteLen}mm, ${t.maxRpm} RPM, ${t.flutes||2} ağız, ${t.material||"Karbur"}</span>
-      <button data-mag-del="${t.id}" class="rounded px-2 py-0.5 text-red-400 hover:bg-red-950">Sil</button>
-    </div>`).join("");
+      <div>
+        <span>${t.name} — Ø${t.dia}mm, boy ${t.fluteLen}mm, ${t.maxRpm} RPM, ${t.flutes||2} ağız, ${t.material||"Karbur"}</span>
+        ${usageLine}
+      </div>
+      <div class="flex shrink-0 items-center gap-1">
+        ${used>0?`<button data-mag-usage-reset="${t.id}" class="rounded px-2 py-0.5 text-cyan-400 hover:bg-cyan-950">Ömrü Sıfırla</button>`:""}
+        <button data-mag-del="${t.id}" class="rounded px-2 py-0.5 text-red-400 hover:bg-red-950">Sil</button>
+      </div>
+    </div>`;
+  }).join("");
 }
 function magAllToolOptions(){
   const opts=[{ref:"",label:"— Boş —"}];
@@ -3367,13 +3596,19 @@ function magRenderSlotsGrid(){
     sel.onchange=()=>{ magSlotRefs[s]=sel.value; };
   });
 }
-function magOpenEditor(){
+async function magOpenEditor(){
   $("mag-edit-overlay").classList.remove("hidden");
   const loggedIn=Boolean(magToken());
   $("mag-edit-login-notice").classList.toggle("hidden",loggedIn);
   $("mag-edit-body").classList.toggle("hidden",!loggedIn);
   $("mag-edit-save").disabled=!loggedIn;
-  if(loggedIn){ magSlotRefs=magSlotsToRefs(); magRenderToolsList(); magRenderSlotsGrid(); $("mag-edit-status").textContent=""; }
+  if(loggedIn){
+    magSlotRefs=magSlotsToRefs();
+    magToolUsage=await magFetchUsage();
+    magRenderToolsList();
+    magRenderSlotsGrid();
+    $("mag-edit-status").textContent="";
+  }
 }
 function magCloseEditor(){ $("mag-edit-overlay").classList.add("hidden"); }
 $("mag-edit-open").onclick=magOpenEditor;
@@ -3406,6 +3641,15 @@ $("mag-t-add").onclick=async()=>{
 };
 
 $("mag-tools-list").addEventListener("click",async(e)=>{
+  const resetId=e.target.dataset.magUsageReset;
+  if(resetId){
+    try{
+      await fetch(`${MAG_API_BASE}/cnc-magazine/usage/${encodeURIComponent(resetId)}/reset`,{method:"POST",headers:magHeaders()});
+      magToolUsage=await magFetchUsage();
+      magRenderToolsList();
+    }catch{}
+    return;
+  }
   const id=e.target.dataset.magDel;
   if(!id) return;
   try{

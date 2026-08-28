@@ -1,4 +1,5 @@
 import { OPERATION_TYPES } from "./stockCamPlanService.js";
+import { toolWearStatus } from "./cncMagazineService.js";
 
 // Printable job/routing sheet: a shop-floor document summarizing a
 // stock-cam plan's stock, controller, and confirmed operations (in order)
@@ -36,6 +37,15 @@ function opToolSummary(op) {
   const parts = [];
   if (dia !== undefined) parts.push(`Ø${dia}mm`);
   if (num !== undefined) parts.push(`T${String(num).padStart(2, "0")}`);
+  // Takım Ömrü Takibi: only present when the client's own tool magazine
+  // matched a real registered tool (toolRefId) -- see cncMagazineService.js.
+  const refId = op.params?.toolRefId;
+  if (typeof refId === "string" && refId) {
+    const wear = toolWearStatus(refId);
+    if (wear.minutes > 0) {
+      parts.push(`(${wear.minutes} dk / sınır ${wear.limit} dk${wear.overLimit ? " ⚠ sınır aşıldı" : ""})`);
+    }
+  }
   return parts.join(" ");
 }
 

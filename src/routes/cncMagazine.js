@@ -7,6 +7,8 @@ import {
   removeMagazineTool,
   listMagazineLayout,
   setMagazineLayout,
+  listToolUsage,
+  resetToolUsage,
 } from "../services/cncMagazineService.js";
 
 const router = Router();
@@ -44,6 +46,17 @@ router.get("/layout", (_req, res, next) => {
 router.put("/layout", (req, res) => {
   try { res.json({ slots: setMagazineLayout(req.body?.slots ?? []) }); }
   catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+// Takım Ömrü Takibi: cumulative estimated-cutting-minutes per tool ref-id
+// ("builtin:N" or a custom tool's uuid), recorded by /stock-cam/confirm —
+// see cncMagazineService.js's own comment for the full design.
+router.get("/usage", (_req, res, next) => {
+  try { res.json({ usage: listToolUsage() }); } catch (err) { next(err); }
+});
+
+router.post("/usage/:refId/reset", (req, res, next) => {
+  try { res.json({ ok: resetToolUsage(req.params.refId) }); } catch (err) { next(err); }
 });
 
 export default router;
