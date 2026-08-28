@@ -20,16 +20,24 @@
 // instead -- acrylic in particular needs a much gentler feed than its RPM
 // might suggest, since pushing too hard re-melts/welds the chip back onto
 // the cut edge.
+// `density` (g/cm3) is a real, published physical constant for each
+// material (used by stockCamCostService.js for Maliyet Hesaplama's material
+// weight/cost) -- unlike Vc/fz above, density isn't a "reasonable default
+// standing in for a precise chart", it's the actual physical property.
+// Where a material also exists in quoteService.js's own DENSITY_G_CM3 map
+// (Celik/Aluminyum/Pirinc-Bronz/Plastik/Ahsap), the value here matches it
+// exactly, so the app never shows two different densities for "the same"
+// material across its two separate cost tools.
 export const MATERIAL_CUTTING_DATA = {
-  steel: { label: "Çelik", vc: 100, fz: 0.05 },
-  aluminum: { label: "Alüminyum", vc: 300, fz: 0.08 },
-  brass: { label: "Pirinç", vc: 175, fz: 0.06 },
-  copper: { label: "Bakır", vc: 120, fz: 0.06 },
-  "cast-iron": { label: "Dökme Demir", vc: 80, fz: 0.06 },
-  titanium: { label: "Titanyum", vc: 45, fz: 0.03 },
-  wood: { label: "Ahşap", fixedRpm: 18000, fixedFeed: 3000 },
-  plastic: { label: "Plastik", fixedRpm: 10000, fixedFeed: 1500 },
-  acrylic: { label: "Akrilik", fixedRpm: 12000, fixedFeed: 1000 },
+  steel: { label: "Çelik", vc: 100, fz: 0.05, density: 7.85 },
+  aluminum: { label: "Alüminyum", vc: 300, fz: 0.08, density: 2.70 },
+  brass: { label: "Pirinç", vc: 175, fz: 0.06, density: 8.50 },
+  copper: { label: "Bakır", vc: 120, fz: 0.06, density: 8.96 },
+  "cast-iron": { label: "Dökme Demir", vc: 80, fz: 0.06, density: 7.20 },
+  titanium: { label: "Titanyum", vc: 45, fz: 0.03, density: 4.50 },
+  wood: { label: "Ahşap", fixedRpm: 18000, fixedFeed: 3000, density: 0.70 },
+  plastic: { label: "Plastik", fixedRpm: 10000, fixedFeed: 1500, density: 1.20 },
+  acrylic: { label: "Akrilik", fixedRpm: 12000, fixedFeed: 1000, density: 1.18 },
 };
 
 const FLUTES_ASSUMED = 2; // generic small-diameter carbide endmill default

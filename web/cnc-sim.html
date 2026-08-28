@@ -927,6 +927,7 @@ function resizeMillStock(newW, newD, newTop){
     stockCamArraySourceIdx=null; stockCamArrayKind=null; stockCamArrayPendingList=null;
     stockCamOrderPendingOrder=null; stockCamOrderPendingLabels=null;
     stockCamTapDrillSuggestion=null;
+    stockCamAwaitingCostInputs=false;
     if(typeof clearOpPreview==="function") clearOpPreview();
     if(typeof taiMsg==="function") taiMsg("ℹ️ Stok boyutu değişti — önceki CAM planı sıfırlandı, yeni işlemler bu boyuta göre planlanacak.","bot");
   }
@@ -2336,6 +2337,8 @@ let stockCamArrayKind=null;        // 'x'|'y'|'grid' secildi mi -- secildiyse sa
 let stockCamArrayPendingList=null; // sayilar dogrulandi -- [{opType,opLabel,params}] "onayla" bekliyor
 let stockCamOrderPendingOrder=null;  // Otomatik Takım Sıralama: onerilen yeni sira (id dizisi) -- "onayla" bekliyor
 let stockCamOrderPendingLabels=null; // ayni sirada, gosterim icin islem etiketleri
+let stockCamAwaitingCostInputs=false; // "maliyet hesapla" tetiklendi -- fiyat/ucret bekleniyor
+let stockCamLastCostInputs=null;      // {materialPricePerKg,hourlyRate,profitPct} -- son hesaplanan maliyet, İş Emri Yazdır'a otomatik eklenir
 
 // Ayna/Simetri Kopyalama: sadece bir XY konumu olan (x,y parametreli)
 // islem turleri kopyalanabilir -- face/contour/chamfer butun parca/kenar
@@ -2740,6 +2743,7 @@ function stockCamContextChips(){
   if(stockCamArraySourceIdx!==null)return[{l:"❌ İptal",c:"iptal"}]; // sayilar serbest metinle giriliyor
   if(stockCamOrderPendingOrder)return[{l:"✅ Uygula",c:"onayla"},{l:"❌ İptal",c:"iptal"}];
   if(stockCamTapDrillSuggestion)return[{l:"✅ Ön Deliği Ekle",c:"ondelik ekle"},{l:"❌ Hayır",c:"ondelik hayir"}];
+  if(stockCamAwaitingCostInputs)return[{l:"❌ İptal",c:"iptal"}]; // sayilar serbest metinle giriliyor
   if(stockCamMenuOpen)return STOCK_CAM_MENU.map(m=>({l:m.label,c:m.label}));
   if(stockCamHistoryOpen){
     const chips=[];
@@ -2758,6 +2762,7 @@ function stockCamContextChips(){
     chips.push({l:"📋 Geçmiş ("+stockCamOps.length+")",c:"geçmiş"});
     if(stockCamOps.length>1)chips.push({l:"🔀 Takım Sırala",c:"takim sirala"});
     chips.push({l:"⬇️ G-code Oluştur",c:"g-code oluştur"});
+    chips.push({l:"💰 Maliyet Hesapla",c:"maliyet hesapla"});
     chips.push({l:"🖨️ İş Emri Yazdır",c:"iş emri yazdır"});
   }
   return chips;
@@ -3128,13 +3133,53 @@ async function stockCamDoGenerateGcode(){
 async function stockCamDoSetupSheet(){
   if(!stockCamPlanKey||!stockCamOps.length){ taiMsg("Henüz onaylanmış işlem yok.","bot"); return; }
   const postProcessor=await stockCamResolvePostProcessor();
-  const url=`${MAG_API_BASE}/stock-cam/plan/${stockCamPlanKey}/setup-sheet?postProcessor=${encodeURIComponent(postProcessor||"")}`;
+  const params=new URLSearchParams({postProcessor:postProcessor||""});
+  // Maliyet Hesaplama: en son "maliyet hesapla" ile girilen rakamlar varsa
+  // iş emrine otomatik ekleniyor -- operatör her yazdırmada tekrar girmek
+  // zorunda kalmıyor.
+  if(stockCamLastCostInputs){
+    params.set("materialPricePerKg",stockCamLastCostInputs.materialPricePerKg);
+    params.set("hourlyRate",stockCamLastCostInputs.hourlyRate);
+    params.set("profitPct",stockCamLastCostInputs.profitPct);
+  }
+  const url=`${MAG_API_BASE}/stock-cam/plan/${stockCamPlanKey}/setup-sheet?${params.toString()}`;
   const win=window.open(url,"_blank");
   if(!win){
     taiMsg(`⚠ Açılır pencere engellendi olabilir — <a href="${url}" target="_blank" rel="noopener">iş emrini buradan açın</a>.`,"bot");
   }else{
     taiMsg("🖨️ İş emri yeni sekmede açıldı — yazdırmak için Ctrl+P kullanabilirsiniz.","bot");
   }
+}
+
+// Maliyet Hesaplama (Malzeme + İşçilik): stok hacmi x malzeme yoğunluğundan
+// malzeme maliyeti, tahmini süre x saatlik ücretten işçilik maliyeti --
+// fiyat/ücret asla varsayılan bir sayıya sabitlenmiyor (bkz.
+// stockCamCostService.js'in kod içi gerekçesi), operatör her seferinde
+// kendi güncel rakamlarını giriyor.
+async function stockCamStartCostQuote(){
+  if(!stockCamPlanKey||!stockCamOps.length){ taiMsg("Henüz onaylanmış işlem yok.","bot"); return; }
+  stockCamAwaitingCostInputs=true;
+  taiMsg("Malzeme fiyatı (TL/kg) ve saatlik makine ücreti (TL/saat) nedir? İsterseniz kâr marjı (%) da ekleyin. Örn: <b>45 800 20</b> (fiyat, ücret, kâr%).","bot");
+}
+
+async function stockCamAdvanceCostQuote(text){
+  const nums=taiAllNums(text);
+  if(nums.length<2){
+    taiMsg("Lütfen en az iki sayı yazın: malzeme fiyatı (TL/kg) ve saatlik ücret (TL/saat). Örn: '45 800'.","bot");
+    return;
+  }
+  const materialPricePerKg=nums[0], hourlyRate=nums[1], profitPct=nums[2]||0;
+  stockCamAwaitingCostInputs=false;
+  try{
+    const r=await fetch(`${MAG_API_BASE}/stock-cam/quote`,{method:"POST",headers:magHeaders(),
+      body:JSON.stringify({planKey:stockCamPlanKey,materialPricePerKg,hourlyRate,profitPct})});
+    const data=await r.json();
+    if(!r.ok)throw new Error(data?.error||"Sunucu hatası.");
+    stockCamLastCostInputs={materialPricePerKg,hourlyRate,profitPct};
+    const q=data.quote;
+    const lines=q.items.map(it=>`${it.label}: ${it.amount} TL`).join("<br>");
+    taiMsg(`💰 <b>Maliyet Dökümü</b> (${q.weightKg}kg malzeme):<br>${lines}<br><b>TOPLAM: ${q.total} TL</b><br><br>Bu rakamlar "İş Emri Yazdır"a otomatik eklenecek.`,"bot");
+  }catch(e){ taiMsg("⛔ Hata: "+e.message,"bot"); }
 }
 
 // taiUserInput'a bağlanan giriş noktası — true dönerse normal taiExec akışı
@@ -3146,12 +3191,13 @@ async function stockCamHandleInput(text){
     return await stockCamHandleSetupInput(text);
   }
 
-  if((stockCam||stockCamPending||stockCamMirrorPickIdx!==null||stockCamArraySourceIdx!==null||stockCamOrderPendingOrder||stockCamTapDrillSuggestion)&&/^(iptal|cancel|vazgec)/i.test(t)){
+  if((stockCam||stockCamPending||stockCamMirrorPickIdx!==null||stockCamArraySourceIdx!==null||stockCamOrderPendingOrder||stockCamTapDrillSuggestion||stockCamAwaitingCostInputs)&&/^(iptal|cancel|vazgec)/i.test(t)){
     clearOpPreview();
     stockCam=null; stockCamPending=null; stockCamEditingId=null; stockCamMirrorPickIdx=null;
     stockCamArraySourceIdx=null; stockCamArrayKind=null; stockCamArrayPendingList=null;
     stockCamOrderPendingOrder=null; stockCamOrderPendingLabels=null;
     stockCamTapDrillSuggestion=null;
+    stockCamAwaitingCostInputs=false;
     taiMsg("✓ İşlem iptal edildi.","bot");
     return true;
   }
@@ -3196,6 +3242,10 @@ async function stockCamHandleInput(text){
     await stockCamAdvanceArrayNumbers(text);
     return true;
   }
+  if(stockCamAwaitingCostInputs){
+    await stockCamAdvanceCostQuote(text);
+    return true;
+  }
   if(stockCamHistoryOpen&&/^gecmisi kapat/i.test(t)){
     stockCamHistoryOpen=false;
     taiMsg("✓ Geçmiş kapatıldı.","bot");
@@ -3218,6 +3268,10 @@ async function stockCamHandleInput(text){
   }
   if(/^takim sirala/i.test(t)){
     await stockCamSuggestOrder();
+    return true;
+  }
+  if(/^maliyet hesapla/i.test(t)){
+    await stockCamStartCostQuote();
     return true;
   }
   if(/(islem\s*menu(su)?)$/i.test(t)){
