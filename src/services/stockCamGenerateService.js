@@ -832,6 +832,41 @@ export function countToolChanges(operations) {
   return changes;
 }
 
+// Takım Ön-Kontrol Listesi: the unique set of physical tools a plan's
+// operations actually need, grouped by the SAME signature buildStockJobPy
+// already shares ToolControllers by (toolSignatureFor) -- so the checklist
+// can never disagree with what the real job will actually use. Lets the
+// operator prepare every tool in the magazine before starting, instead of
+// discovering a missing one mid-job. `toolNum` is only ever a REAL
+// magazine-matched slot (from the first operation in the group that had
+// one) -- null means no magazine match was ever made for that tool, so the
+// operator must set one up manually before running.
+export function buildToolChecklist(operations) {
+  const order = [];
+  const groups = new Map();
+  for (const op of operations) {
+    const dia = toolDiameterFor(op.type, op.params);
+    const sig = toolSignatureFor(op, dia);
+    if (!groups.has(sig)) {
+      const kind =
+        op.type === "tapping" ? "Kılavuz" : op.type === "threadMilling" ? "Diş Frezesi" : "Parmak Freze/Matkap";
+      groups.set(sig, {
+        kind,
+        dia: Math.round(dia * 100) / 100,
+        pitch: op.type === "tapping" || op.type === "threadMilling" ? Number(op.params.pitch) : null,
+        toolNum: null,
+        opCount: 0,
+      });
+      order.push(sig);
+    }
+    const g = groups.get(sig);
+    g.opCount++;
+    const toolNum = Number(op.params?.toolNum);
+    if (g.toolNum === null && Number.isFinite(toolNum)) g.toolNum = toolNum;
+  }
+  return order.map((sig) => groups.get(sig));
+}
+
 // Builds the full, deterministic Python for a plan: stock + every confirmed
 // operation IN ORDER. The first operation to need a given physical tool
 // (see toolSignatureFor) creates its ToolController exactly as before
