@@ -23,6 +23,7 @@ import {
 import { buildSetupSheetHtml } from "../services/stockCamSetupSheetService.js";
 import { addToolUsageMinutes, toolWearStatus } from "../services/cncMagazineService.js";
 import { computeStockCamCost } from "../services/stockCamCostService.js";
+import { listTemplates, getTemplate, saveTemplate, deleteTemplate } from "../services/stockCamTemplateService.js";
 import { createJob, runJob } from "../services/jobStore.js";
 import { config } from "../config.js";
 import path from "node:path";
@@ -366,6 +367,42 @@ router.post("/stock-cam/gcode", apiKeyAuth, (req, res) => {
   }, { exclusive: true });
 
   res.status(202).json({ jobId });
+});
+
+// Plan Şablonları (Kaydet/Yükle): all synchronous (plain JSON-file CRUD, no
+// FreeCAD/LLM call) -- LOADING a template is deliberately NOT one of these
+// routes: the client replays a template's saved operations one at a time
+// through the normal /stock-cam/confirm above, so every operation still
+// gets a real, fresh FreeCAD safety-verify against whatever stock/tool
+// magazine is current now, exactly like adding it by hand would.
+router.get("/stock-cam/templates", apiKeyAuth, (req, res, next) => {
+  try { res.json({ templates: listTemplates() }); } catch (err) { next(err); }
+});
+
+router.post("/stock-cam/templates", apiKeyAuth, (req, res) => {
+  const { planKey, name } = req.body ?? {};
+  const plan = getPlan(planKey);
+  if (!plan) return res.status(404).json({ error: "Plan bulunamadi." });
+  try {
+    const template = saveTemplate(name, plan);
+    res.status(201).json({ template });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.get("/stock-cam/templates/:id", apiKeyAuth, (req, res) => {
+  const template = getTemplate(req.params.id);
+  if (!template) return res.status(404).json({ error: "Sablon bulunamadi." });
+  res.json({ template });
+});
+
+router.delete("/stock-cam/templates/:id", apiKeyAuth, (req, res, next) => {
+  try {
+    const ok = deleteTemplate(req.params.id);
+    if (!ok) return res.status(404).json({ error: "Sablon bulunamadi." });
+    res.json({ ok: true });
+  } catch (err) { next(err); }
 });
 
 export default router;

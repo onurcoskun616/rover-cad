@@ -928,6 +928,7 @@ function resizeMillStock(newW, newD, newTop){
     stockCamOrderPendingOrder=null; stockCamOrderPendingLabels=null;
     stockCamTapDrillSuggestion=null;
     stockCamAwaitingCostInputs=false;
+    stockCamAwaitingTemplateName=false; stockCamTemplatePicking=false; stockCamTemplateList=null;
     if(typeof clearOpPreview==="function") clearOpPreview();
     if(typeof taiMsg==="function") taiMsg("ℹ️ Stok boyutu değişti — önceki CAM planı sıfırlandı, yeni işlemler bu boyuta göre planlanacak.","bot");
   }
@@ -2339,6 +2340,9 @@ let stockCamOrderPendingOrder=null;  // Otomatik Takım Sıralama: onerilen yeni
 let stockCamOrderPendingLabels=null; // ayni sirada, gosterim icin islem etiketleri
 let stockCamAwaitingCostInputs=false; // "maliyet hesapla" tetiklendi -- fiyat/ucret bekleniyor
 let stockCamLastCostInputs=null;      // {materialPricePerKg,hourlyRate,profitPct} -- son hesaplanan maliyet, İş Emri Yazdır'a otomatik eklenir
+let stockCamAwaitingTemplateName=false; // "sablon kaydet" tetiklendi -- ad bekleniyor
+let stockCamTemplatePicking=false;      // "sablon yukle" tetiklendi -- listeden secim bekleniyor
+let stockCamTemplateList=null;          // son cekilen sablon ozetleri (secim icin, [{id,name,stock,material,operationCount}])
 
 // Ayna/Simetri Kopyalama: sadece bir XY konumu olan (x,y parametreli)
 // islem turleri kopyalanabilir -- face/contour/chamfer butun parca/kenar
@@ -2699,6 +2703,23 @@ const STOCK_CAM_KNOWN_CONTROLLERS=[
 // kapsaminda kalan bir fonksiyon (ayni mantigi paylasilan bir yardimciya
 // tasimak yerine kucuk bir tekrar -- bu kod tabaninin genel tercihi).
 const STOCK_CAM_MATERIAL_MAP={"celik":"steel","steel":"steel","aluminyum":"aluminum","aluminum":"aluminum","pirinc":"brass","brass":"brass","bakir":"copper","copper":"copper","dokme demir":"cast-iron","dokmedemir":"cast-iron","cast iron":"cast-iron","dokum":"cast-iron","titanyum":"titanium","titanium":"titanium","ahsap":"wood","wood":"wood","tahta":"wood","plastik":"plastic","plastic":"plastic","akrilik":"acrylic","acrylic":"acrylic"};
+
+// Soğutma Sıvısı Önerisi: standart, yayınlanmış talaşlı imalat pratiği
+// (bkz. materialCuttingData.js'in aynı verisinin kod içi gerekçesi -- bu,
+// sunucu tarafındaki KAYNAK veriyle birebir aynı, sadece kurulum
+// mesajının anında (round-trip olmadan) gösterilebilmesi için burada
+// da tutuluyor, STOCK_CAM_MENU'nun OPERATION_TYPES'ı yansıtması gibi).
+const STOCK_CAM_COOLANT={
+  steel:{type:"Sulu/Kesme Yağı",note:"Isı ve takım aşınmasını azaltmak için önerilir (zorunlu değil)."},
+  aluminum:{type:"Sulu/Sisleme Soğutma",note:"Talaşın takıma yapışmasını (BUE) önlemek için soğutma/yağlama önerilir."},
+  brass:{type:"Kuru Kesim",note:"Genellikle kuru kesilir; ağır kesimde hafif soğutma yeterli."},
+  copper:{type:"Sulu/Sisleme Soğutma",note:"Yumuşak/yapışkan talaşın atılması ve yüzey kalitesi için soğutma önerilir."},
+  "cast-iron":{type:"KURU KESİM",note:"Soğutma sıvısı KULLANMAYIN — ısıl şok/çatlama riski taşır ve grafit tozuyla karışıp aşındırıcı bir çamur oluşturur."},
+  titanium:{type:"Bol Sıvı Soğutma (ZORUNLU)",note:"Düşük ısı iletkenliği nedeniyle kesme kenarında ısı birikir — yetersiz soğutma hızlı takım aşınmasına ve yangın riskine yol açabilir."},
+  wood:{type:"Kuru (Toz Emişi)",note:"Sıvı soğutma kullanılmaz — toz emişi/vakum sistemi önerilir."},
+  plastic:{type:"Kuru / Hava Üflemeli",note:"Bazı plastikler sıvı soğutucudan olumsuz etkilenebilir (gerilme çatlaması)."},
+  acrylic:{type:"Hava Üflemeli",note:"Sıvı soğutucudan kaçının (çatlama riski) — ısınıp erimeyi önlemek için hava üflemesi yeterlidir."},
+};
 function stockCamMatchMaterialKey(text){
   const t=taiNorm(text).replace(/-/g," ").replace(/^malzeme\s+/,"");
   for(const[k,v] of Object.entries(STOCK_CAM_MATERIAL_MAP)){ if(t.includes(k)) return v; }
@@ -2744,6 +2765,12 @@ function stockCamContextChips(){
   if(stockCamOrderPendingOrder)return[{l:"✅ Uygula",c:"onayla"},{l:"❌ İptal",c:"iptal"}];
   if(stockCamTapDrillSuggestion)return[{l:"✅ Ön Deliği Ekle",c:"ondelik ekle"},{l:"❌ Hayır",c:"ondelik hayir"}];
   if(stockCamAwaitingCostInputs)return[{l:"❌ İptal",c:"iptal"}]; // sayilar serbest metinle giriliyor
+  if(stockCamAwaitingTemplateName)return[{l:"❌ İptal",c:"iptal"}]; // ad serbest metinle giriliyor
+  if(stockCamTemplatePicking){
+    const chips=stockCamTemplateList.map((t,i)=>({l:`▶ ${i+1}. ${t.name}`,c:`sablon sec ${i+1}`}));
+    chips.push({l:"❌ İptal",c:"iptal"});
+    return chips;
+  }
   if(stockCamMenuOpen)return STOCK_CAM_MENU.map(m=>({l:m.label,c:m.label}));
   if(stockCamHistoryOpen){
     const chips=[];
@@ -2764,7 +2791,9 @@ function stockCamContextChips(){
     chips.push({l:"⬇️ G-code Oluştur",c:"g-code oluştur"});
     chips.push({l:"💰 Maliyet Hesapla",c:"maliyet hesapla"});
     chips.push({l:"🖨️ İş Emri Yazdır",c:"iş emri yazdır"});
+    chips.push({l:"💾 Şablon Kaydet",c:"sablon kaydet"});
   }
+  chips.push({l:"📂 Şablon Yükle",c:"sablon yukle"});
   return chips;
 }
 
@@ -2838,7 +2867,9 @@ async function stockCamHandleSetupInput(text){
     stockCamMaterial=key;
     setMaterial(key); // simülatörün 3B stoğunu da aynı malzemeyle senkronla
     stockCamSetupStage="stockSize";
-    taiMsg(`✓ Malzeme: <b>${MAT_DB[key].label}</b> seçildi. Şimdi stok boyutunu belirtin (mm, örn: <b>200x140x60</b>).`,"bot");
+    const coolant=STOCK_CAM_COOLANT[key];
+    const coolantLine=coolant?` 🧊 Soğutma önerisi: <b>${coolant.type}</b> — ${coolant.note}`:"";
+    taiMsg(`✓ Malzeme: <b>${MAT_DB[key].label}</b> seçildi.${coolantLine} Şimdi stok boyutunu belirtin (mm, örn: <b>200x140x60</b>).`,"bot");
     return true;
   }
   if(stockCamSetupStage==="stockSize"){
@@ -3182,6 +3213,83 @@ async function stockCamAdvanceCostQuote(text){
   }catch(e){ taiMsg("⛔ Hata: "+e.message,"bot"); }
 }
 
+// Plan Şablonları (Kaydet/Yükle): mevcut planı (stok+malzeme+tüm işlemler)
+// tekrar kullanılabilir bir şablon olarak sunucuya kaydetme/oradan yükleme.
+async function stockCamStartSaveTemplate(){
+  if(!stockCamPlanKey||!stockCamOps.length){ taiMsg("Kaydedilecek onaylanmış işlem yok.","bot"); return; }
+  stockCamAwaitingTemplateName=true;
+  taiMsg("Bu plan için bir şablon adı yazın (örn: 'Flanş 60mm').","bot");
+}
+
+async function stockCamFinishSaveTemplate(text){
+  stockCamAwaitingTemplateName=false;
+  const name=text.trim();
+  if(!name){ taiMsg("⛔ Şablon adı boş olamaz.","bot"); return; }
+  try{
+    const r=await fetch(`${MAG_API_BASE}/stock-cam/templates`,{method:"POST",headers:magHeaders(),
+      body:JSON.stringify({planKey:stockCamPlanKey,name})});
+    const data=await r.json();
+    if(!r.ok)throw new Error(data?.error||"Sunucu hatası.");
+    taiMsg(`<span class="tai-msg-action">✓ Şablon kaydedildi:</span> "${data.template.name}" (${data.template.operations.length} işlem).`,"bot");
+  }catch(e){ taiMsg("⛔ Hata: "+e.message,"bot"); }
+}
+
+async function stockCamShowTemplateList(){
+  try{
+    const r=await fetch(`${MAG_API_BASE}/stock-cam/templates`,{headers:magHeaders()});
+    const data=await r.json();
+    if(!r.ok)throw new Error(data?.error||"Sunucu hatası.");
+    const templates=Array.isArray(data.templates)?data.templates:[];
+    if(!templates.length){ taiMsg("Henüz kaydedilmiş şablon yok.","bot"); return; }
+    stockCamTemplateList=templates;
+    stockCamTemplatePicking=true;
+    const list=templates.map((t,i)=>`${i+1}. ${t.name} (${t.operationCount} işlem, ${t.stock.w}x${t.stock.d}x${t.stock.h}mm)`).join("<br>");
+    taiMsg(`<b>Kayıtlı Şablonlar:</b><br>${list}<br><br>Yüklemek için aşağıdan seçin.`,"bot");
+  }catch(e){ taiMsg("⛔ Hata: "+e.message,"bot"); }
+}
+
+async function stockCamLoadTemplate(indexOneBased){
+  const idx=indexOneBased-1;
+  const summary=stockCamTemplateList?.[idx];
+  stockCamTemplatePicking=false; stockCamTemplateList=null;
+  if(!summary){ taiMsg("⛔ Böyle bir şablon yok.","bot"); return; }
+  taiMsg(`⏳ "${summary.name}" şablonu yükleniyor…`,"bot");
+  try{
+    const r=await fetch(`${MAG_API_BASE}/stock-cam/templates/${summary.id}`,{headers:magHeaders()});
+    const data=await r.json();
+    if(!r.ok)throw new Error(data?.error||"Sunucu hatası.");
+    const tpl=data.template;
+    // Her zaman TAMAMEN yeni bir plan ile başla -- mevcut plan/işlemler
+    // (varsa) asla birleştirilmez, şablonun kendi stok/malzemesiyle
+    // baştan kurulur.
+    clearOpPreview();
+    stockCamPlanKey=null; stockCamOps=[]; stockCam=null; stockCamPending=null;
+    stockCamEditingId=null; stockCamMenuOpen=false; stockCamHistoryOpen=false;
+    resizeMillStock(tpl.stock.w,tpl.stock.d,tpl.stock.h);
+    stockCamMaterial=tpl.material;
+    setMaterial(tpl.material);
+    await stockCamEnsurePlan();
+    let okCount=0;
+    for(const op of tpl.operations){
+      const opLabel=STOCK_CAM_MENU.find(m=>m.type===op.type)?.label||op.type;
+      const params={...op.params};
+      let result;
+      try{ result=await stockCamConfirmNewOp(op.type,params); }
+      catch(e){
+        taiMsg(`⛔ Hata: ${e.message} — kalan işlemler durduruldu (${okCount}/${tpl.operations.length} eklendi).`,"bot");
+        return;
+      }
+      if(!result.confirmed){
+        taiMsg(`⛔ "${opLabel}" işlemi eklenemedi: ${result.error||"bilinmeyen hata"} — kalan işlemler durduruldu (${okCount}/${tpl.operations.length} eklendi).`,"bot");
+        return;
+      }
+      stockCamOps.push({id:result.operation.id,type:op.type,label:opLabel,params});
+      okCount++;
+    }
+    taiMsg(`<span class="tai-msg-action">✓ Şablon "${tpl.name}" yüklendi:</span> ${okCount} işlem eklendi.`,"bot");
+  }catch(e){ taiMsg("⛔ Hata: "+e.message,"bot"); }
+}
+
 // taiUserInput'a bağlanan giriş noktası — true dönerse normal taiExec akışı
 // atlanır (bu metin sihirbaz tarafından ele alındı demektir).
 async function stockCamHandleInput(text){
@@ -3191,13 +3299,14 @@ async function stockCamHandleInput(text){
     return await stockCamHandleSetupInput(text);
   }
 
-  if((stockCam||stockCamPending||stockCamMirrorPickIdx!==null||stockCamArraySourceIdx!==null||stockCamOrderPendingOrder||stockCamTapDrillSuggestion||stockCamAwaitingCostInputs)&&/^(iptal|cancel|vazgec)/i.test(t)){
+  if((stockCam||stockCamPending||stockCamMirrorPickIdx!==null||stockCamArraySourceIdx!==null||stockCamOrderPendingOrder||stockCamTapDrillSuggestion||stockCamAwaitingCostInputs||stockCamAwaitingTemplateName||stockCamTemplatePicking)&&/^(iptal|cancel|vazgec)/i.test(t)){
     clearOpPreview();
     stockCam=null; stockCamPending=null; stockCamEditingId=null; stockCamMirrorPickIdx=null;
     stockCamArraySourceIdx=null; stockCamArrayKind=null; stockCamArrayPendingList=null;
     stockCamOrderPendingOrder=null; stockCamOrderPendingLabels=null;
     stockCamTapDrillSuggestion=null;
     stockCamAwaitingCostInputs=false;
+    stockCamAwaitingTemplateName=false; stockCamTemplatePicking=false; stockCamTemplateList=null;
     taiMsg("✓ İşlem iptal edildi.","bot");
     return true;
   }
@@ -3246,6 +3355,16 @@ async function stockCamHandleInput(text){
     await stockCamAdvanceCostQuote(text);
     return true;
   }
+  if(stockCamAwaitingTemplateName){
+    await stockCamFinishSaveTemplate(text);
+    return true;
+  }
+  if(stockCamTemplatePicking){
+    const pickMatch=t.match(/^sablon sec\s+(\d+)/i);
+    if(pickMatch){ await stockCamLoadTemplate(parseInt(pickMatch[1],10)); return true; }
+    taiMsg("Lütfen aşağıdan bir şablon seçin.","bot");
+    return true;
+  }
   if(stockCamHistoryOpen&&/^gecmisi kapat/i.test(t)){
     stockCamHistoryOpen=false;
     taiMsg("✓ Geçmiş kapatıldı.","bot");
@@ -3272,6 +3391,16 @@ async function stockCamHandleInput(text){
   }
   if(/^maliyet hesapla/i.test(t)){
     await stockCamStartCostQuote();
+    return true;
+  }
+  if(/^sablon kaydet/i.test(t)){
+    if(!isMill()){ taiMsg("Bu özellik şu an sadece Freze modunda kullanılabilir.","bot"); return true; }
+    await stockCamStartSaveTemplate();
+    return true;
+  }
+  if(/^sablon yukle/i.test(t)){
+    if(!isMill()){ taiMsg("Bu özellik şu an sadece Freze modunda kullanılabilir.","bot"); return true; }
+    await stockCamShowTemplateList();
     return true;
   }
   if(/(islem\s*menu(su)?)$/i.test(t)){
