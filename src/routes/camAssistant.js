@@ -8,7 +8,7 @@ import {
 } from "../services/camAssistantService.js";
 import { getNextCamStep } from "../services/camWizardService.js";
 import { effectiveAnswers } from "../services/inventoryService.js";
-import { computeQuote, generateQuotePdf } from "../services/quoteService.js";
+import { computeQuote, generateQuotePdf, resolveQuoteInputs } from "../services/quoteService.js";
 import { createJob, runJob } from "../services/jobStore.js";
 
 function makeFileUrl(proto, host, filePath) {
@@ -164,19 +164,16 @@ router.post("/cam-confirm", apiKeyAuth, (req, res) => {
 // Synchronous (no FreeCAD/LLM): arithmetic + a quick PDF write.
 router.post("/cam-quote", apiKeyAuth, async (req, res, next) => {
   try {
-    const { mode, minutes, answers, bbox, inputs, partName, material } = req.body ?? {};
+    const { mode, minutes, answers, bbox, inputs, partName, material, useCatalogDefaults } = req.body ?? {};
     const quoteMode = mode === "detayli" ? "detayli" : "basit";
     const eff = effectiveAnswers(answers && typeof answers === "object" ? answers : {});
-    const quoteInputs = inputs && typeof inputs === "object" ? { ...inputs } : {};
-    // If a machine profile is selected and no hourly rate was entered, use the
-    // profile's rate (integrates the inventory with the quote engine).
-    if (
-      quoteMode === "basit" &&
-      (quoteInputs.hourlyRate === undefined || quoteInputs.hourlyRate === null || quoteInputs.hourlyRate === "") &&
-      eff._machineHourlyRate
-    ) {
-      quoteInputs.hourlyRate = eff._machineHourlyRate;
-    }
+    const quoteInputs = resolveQuoteInputs({
+      mode: quoteMode,
+      inputs: inputs && typeof inputs === "object" ? inputs : {},
+      material: material ?? eff?.material,
+      machineHourlyRate: eff._machineHourlyRate,
+      useCatalogDefaults: useCatalogDefaults === true,
+    });
     const quote = computeQuote({
       mode: quoteMode,
       minutes: Number(minutes) || 0,
