@@ -153,7 +153,7 @@ function stockPy(stock, material) {
 // the op's own params. When present, that real diameter wins outright;
 // the geometry-based guesses below only run as a fallback (magazine has no
 // fitting tool, or an older client that doesn't send one yet).
-function toolDiameterFor(type, p) {
+export function toolDiameterFor(type, p) {
   // Tapping's `dia` is the tap's own exact nominal thread diameter, not a
   // geometry guess a bigger/smaller tool can stand in for -- skip the
   // magazine's explicit-toolDia override entirely (a substituted tool here
@@ -760,11 +760,76 @@ function operationPy(index, op, stock) {
 // already serves many different thread sizes). Diameter is rounded to 6
 // decimals so floating-point noise from a geometry guess never splits two
 // operations that are asking for the functionally identical tool.
-function toolSignatureFor(op, toolDia) {
+export function toolSignatureFor(op, toolDia) {
   const dia = Math.round(Number(toolDia) * 1e6) / 1e6;
   if (op.type === "tapping") return `tap:${dia}:${Number(op.params.pitch)}`;
   if (op.type === "threadMilling") return `threadmill:${dia}`;
   return `endmill:${dia}`;
+}
+
+// Whole-part/edge operations have no separate XY footprint of their own
+// (see stockCamPlanService.js's OPERATION_TYPES entries — bounds() returns
+// null for these three) and are commonly the LAST thing run in a real job
+// (e.g. a contour that fully severs the part from the stock, or a chamfer
+// along its final edges) — Otomatik Takım Sıralama must never move one of
+// these earlier or later relative to its neighbors, only cluster the
+// OTHER ("point-position") operations around it by shared tool signature.
+const UNMOVABLE_TYPES = new Set(["face", "contour", "chamfer"]);
+
+// Suggests a reordering that clusters operations sharing the same resolved
+// tool signature together (stable: each group keeps the relative order its
+// members already had, and appears at the position of its FIRST occurrence)
+// — this is what actually lets buildStockJobPy's own tool-sharing (above)
+// avoid a PHYSICAL tool change, not just a redundant ToolController: sharing
+// a ToolController object does nothing for the exported G-code's tool-change
+// count if a different tool's operation still sits between two same-tool
+// operations in execution order. Whole-part ops (see UNMOVABLE_TYPES) are
+// pinned at their own original absolute index and never participate in the
+// grouping — never a guess of "this is probably fine to move", an explicit,
+// permanent exclusion.
+export function suggestToolOrder(operations) {
+  const pinnedAt = new Set();
+  const movable = [];
+  operations.forEach((op, i) => {
+    if (UNMOVABLE_TYPES.has(op.type)) pinnedAt.add(i);
+    else movable.push(op);
+  });
+
+  const groupOrder = [];
+  const groups = new Map();
+  for (const op of movable) {
+    const dia = toolDiameterFor(op.type, op.params);
+    const sig = toolSignatureFor(op, dia);
+    if (!groups.has(sig)) {
+      groups.set(sig, []);
+      groupOrder.push(sig);
+    }
+    groups.get(sig).push(op);
+  }
+  const sortedMovable = groupOrder.flatMap((sig) => groups.get(sig));
+
+  const result = new Array(operations.length);
+  let mi = 0;
+  for (let i = 0; i < operations.length; i++) {
+    result[i] = pinnedAt.has(i) ? operations[i] : sortedMovable[mi++];
+  }
+  return result;
+}
+
+// How many physical tool changes a given operation sequence needs (a
+// transition between two consecutive ops whose resolved tool signatures
+// differ) — used to show the operator a concrete before/after comparison
+// rather than an abstract "optimized" claim.
+export function countToolChanges(operations) {
+  let changes = 0;
+  let lastSig = null;
+  for (const op of operations) {
+    const dia = toolDiameterFor(op.type, op.params);
+    const sig = toolSignatureFor(op, dia);
+    if (lastSig !== null && sig !== lastSig) changes++;
+    lastSig = sig;
+  }
+  return changes;
 }
 
 // Builds the full, deterministic Python for a plan: stock + every confirmed

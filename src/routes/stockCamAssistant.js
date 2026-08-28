@@ -6,6 +6,7 @@ import {
   confirmOperation,
   replaceOperation,
   removeOperation,
+  reorderOperations,
   listOperationTypes,
   validateOperationParams,
   setLastEstimatedMinutes,
@@ -16,6 +17,8 @@ import {
   isStockGenerationSupported,
   verifyStockPlan,
   exportStockPlanGcode,
+  suggestToolOrder,
+  countToolChanges,
 } from "../services/stockCamGenerateService.js";
 import { buildSetupSheetHtml } from "../services/stockCamSetupSheetService.js";
 import { addToolUsageMinutes, toolWearStatus } from "../services/cncMagazineService.js";
@@ -224,6 +227,70 @@ router.delete("/stock-cam/plan/:planKey/op/:opId", apiKeyAuth, (req, res) => {
   const result = removeOperation(req.params.planKey, req.params.opId);
   if (!result.ok) return res.status(404).json(result);
   res.json(result);
+});
+
+// Otomatik Takım Sıralama: a dry-run preview only -- synchronous, plan-data
+// only (no FreeCAD call), same reason /stock-cam/validate is sync. Never
+// touches the plan itself; the operator still has to explicitly confirm via
+// /stock-cam/reorder below before anything is actually persisted.
+router.post("/stock-cam/suggest-order", apiKeyAuth, (req, res) => {
+  const planKey = requirePlanKey(req, res);
+  if (!planKey) return;
+  const plan = getPlan(planKey);
+  if (!plan) return res.status(404).json({ error: "Plan bulunamadi." });
+  const suggested = suggestToolOrder(plan.operations);
+  const changed = suggested.some((op, i) => op.id !== plan.operations[i].id);
+  res.json({
+    order: suggested.map((op) => op.id),
+    labels: suggested.map((op) => OPERATION_TYPES[op.type]?.label || op.type),
+    changed,
+    beforeToolChanges: countToolChanges(plan.operations),
+    afterToolChanges: countToolChanges(suggested),
+  });
+});
+
+// Applies a reordering (by operation id) -- async (polled via /jobs/:id)
+// because, exactly like /stock-cam/edit, it re-verifies the WHOLE reordered
+// plan through a real FreeCAD rebuild before persisting anything: cutting
+// ORDER can change what each operation actually removes (e.g. a later
+// operation assuming material an earlier one already cleared), so a
+// reorder gets the identical safety-checked-rebuild discipline as any
+// other plan mutation -- never skipped just because no operation's own
+// params changed.
+router.post("/stock-cam/reorder", apiKeyAuth, (req, res) => {
+  const planKey = requirePlanKey(req, res);
+  if (!planKey) return;
+  const plan = getPlan(planKey);
+  if (!plan) return res.status(404).json({ error: "Plan bulunamadi." });
+  const { order } = req.body ?? {};
+  if (!Array.isArray(order)) {
+    return res.status(400).json({ error: "order bir dizi olmalidir." });
+  }
+
+  const jobId = createJob();
+  runJob(jobId, async () => {
+    const byId = new Map(plan.operations.map((op) => [op.id, op]));
+    const validOrder =
+      order.length === plan.operations.length &&
+      new Set(order).size === order.length &&
+      order.every((id) => byId.has(id));
+    if (!validOrder) {
+      return { ok: true, body: { reordered: false, error: "Sıralama listesi mevcut işlemlerle eşleşmiyor." } };
+    }
+    const candidate = { ...plan, operations: order.map((id) => byId.get(id)) };
+    const verify = await verifyStockPlan(candidate);
+    if (!verify.ok) {
+      return { ok: true, body: { reordered: false, error: verify.error } };
+    }
+    const result = reorderOperations(planKey, order);
+    if (!result.ok) {
+      return { ok: true, body: { reordered: false, error: "Plan dogrulamasi basarisiz.", problems: result.problems } };
+    }
+    setLastEstimatedMinutes(planKey, verify.estimatedMinutes);
+    return { ok: true, body: { reordered: true, operations: result.operations, estimatedMinutes: verify.estimatedMinutes } };
+  }, { exclusive: true });
+
+  res.status(202).json({ jobId });
 });
 
 // Printable job/routing sheet: synchronous, plan-data-only (no FreeCAD/LLM
