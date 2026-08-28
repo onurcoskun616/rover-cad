@@ -320,11 +320,17 @@ export function validateOperationParams(type, params, stock) {
 // Plan lifecycle
 // ---------------------------------------------------------------------------
 
-export function createPlan(stock) {
+// `material` drives feed/speed selection (stockCamGenerateService.js's
+// feedSpeedFor) for every operation in this plan -- the client is expected
+// to always ask before stock size (see cnc-sim.html's setup-stage
+// sequencing), but a missing/unrecognized value here falls back to
+// "steel" (a moderate, safe default) rather than rejecting the plan.
+export function createPlan(stock, material) {
   const planKey = randomUUID();
   plans.set(planKey, {
     planKey,
     stock: { w: Number(stock?.w) || 100, d: Number(stock?.d) || 100, h: Number(stock?.h) || 20 },
+    material: typeof material === "string" && material ? material : "steel",
     operations: [], // confirmed only — see module doc comment
     createdAt: Date.now(),
     updatedAt: Date.now(),

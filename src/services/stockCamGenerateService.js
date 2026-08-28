@@ -14,6 +14,7 @@ import {
   unsupportedControllerWarning,
 } from "./camAssistantService.js";
 import { OPERATION_TYPES } from "./stockCamPlanService.js";
+import { feedSpeedFor } from "./materialCuttingData.js";
 
 // Faz 4/5/7: turns a stock-based plan's CONFIRMED operations (Faz 1's
 // validated, structured data — never free text, never LLM output) into
@@ -47,8 +48,13 @@ function pyStr(s) {
   return JSON.stringify(String(s));
 }
 
-function stockPy(stock) {
+function stockPy(stock, material) {
   const w = pyFloat(stock.w), d = pyFloat(stock.d), h = pyFloat(stock.h);
+  // Same 6mm placeholder diameter this job-default tc has always used
+  // (see toolDiameterFor's own comment on operation 0) -- feedSpeedFor
+  // computes a real, material-aware starting point instead of the
+  // previously-hardcoded 4000rpm/600/150 constants.
+  const { rpm, feed } = feedSpeedFor(material, 6.0);
   return [
     "import FreeCAD as App",
     "import Part, Path",
@@ -131,9 +137,9 @@ function stockPy(stock) {
     "job = PathJob.Create('RoverStockJob', [base], None)",
     "doc.recompute()",
     "tc = job.Tools.Group[0]",
-    "tc.HorizFeed = '600 mm/min'",
-    "tc.VertFeed = '150 mm/min'",
-    "tc.SpindleSpeed = 4000.0",
+    `tc.HorizFeed = '${feed} mm/min'`,
+    `tc.VertFeed = '${Math.round(feed * 0.25)} mm/min'`,
+    `tc.SpindleSpeed = ${pyFloat(rpm)}`,
     "tc.Tool.Diameter = 6.0",
   ].join("\n");
 }
@@ -773,7 +779,8 @@ function toolSignatureFor(op, toolDia) {
 // inheritance still holds: every operation still gets an EXPLICIT
 // ToolController assignment, it's just shared rather than always fresh.
 export function buildStockJobPy(plan) {
-  const lines = [stockPy(plan.stock)];
+  const material = plan.material || "steel";
+  const lines = [stockPy(plan.stock, material)];
   const toolGroups = new Map(); // signature -> already-created tc variable name
   plan.operations.forEach((op, i) => {
     const dia = toolDiameterFor(op.type, op.params);
@@ -786,7 +793,7 @@ export function buildStockJobPy(plan) {
       lines.push(rewired);
       return;
     }
-    lines.push(operationPyWithOwnTool(i, op, plan.stock, dia));
+    lines.push(operationPyWithOwnTool(i, op, plan.stock, dia, material));
     // Mirrors operationPyWithOwnTool's own naming exactly: the very first
     // operation overall (any type) reuses/reassigns the job's default
     // `tc`; every operation after that creates its own `tc_<i>`.
@@ -870,9 +877,9 @@ function tapToolSetupPy(index, op, toolDia) {
 // hasattr(tool, "Crest")`) -- a plain endmill has no Crest, so (like
 // tapping) op 0's job-default tool must be swapped, not just resized.
 // Unlike tapping, feed here comes from the ToolController's own regular
-// HorizFeed/VertFeed (not a pitch*rpm synchronized cycle), so the normal
-// 600/150/4000rpm milling defaults are fine -- no special override needed.
-function threadMillToolSetupPy(index, toolDia) {
+// HorizFeed/VertFeed (not a pitch*rpm synchronized cycle), so this DOES
+// use the normal material-aware feedSpeedFor -- no special override needed.
+function threadMillToolSetupPy(index, toolDia, material) {
   const setup = [
     `def _rover_make_threadmill_tool(_diameter, _crest, _label):`,
     "    try:",
@@ -909,23 +916,24 @@ function threadMillToolSetupPy(index, toolDia) {
   const create = [
     `_tool_${index} = _rover_make_threadmill_tool(${pyFloat(toolDia)}, 0.1, ${pyStr(`Tool_${index}`)})`,
   ];
+  const { rpm, feed } = feedSpeedFor(material, toolDia);
   if (index === 0) {
-    create.push(`tc.Tool = _tool_${index}`);
+    create.push(`tc.Tool = _tool_${index}`, `tc.HorizFeed = '${feed} mm/min'`, `tc.VertFeed = '${Math.round(feed * 0.25)} mm/min'`, `tc.SpindleSpeed = ${pyFloat(rpm)}`);
   } else {
     const tcVar = `tc_${index}`;
     create.push(
       `${tcVar} = PathToolController.Create(${pyStr(`TC_${index}`)}, tool=_tool_${index}, toolNumber=${index + 1})`,
       "job.Proxy.addToolController(" + tcVar + ")",
-      `${tcVar}.HorizFeed = '600 mm/min'`,
-      `${tcVar}.VertFeed = '150 mm/min'`,
-      `${tcVar}.SpindleSpeed = 4000.0`,
+      `${tcVar}.HorizFeed = '${feed} mm/min'`,
+      `${tcVar}.VertFeed = '${Math.round(feed * 0.25)} mm/min'`,
+      `${tcVar}.SpindleSpeed = ${pyFloat(rpm)}`,
       "doc.recompute()",
     );
   }
   return [...setup, ...create];
 }
 
-function operationPyWithOwnTool(index, op, stock, toolDia) {
+function operationPyWithOwnTool(index, op, stock, toolDia, material) {
   if (index === 0 && op.type !== "tapping" && op.type !== "threadMilling") {
     // stockPy() gives the job's default `tc` a fixed placeholder diameter
     // (6mm) since it's built before any operation exists to size it from.
@@ -937,8 +945,17 @@ function operationPyWithOwnTool(index, op, stock, toolDia) {
     // properly-sized ~15mm tool's would). Set the real diameter on `tc`
     // BEFORE building the operation, so whatever FreeCAD derives from the
     // tool (OpToolDiameter, offset spacing, etc.) sees the right size from
-    // the start rather than the placeholder.
-    return [`tc.Tool.Diameter = ${pyFloat(toolDia)}`, operationPy(index, op, stock)].join("\n");
+    // the start rather than the placeholder -- same reasoning now applies
+    // to feed/speed: stockPy() computed them from the 6mm placeholder, so
+    // a much bigger/smaller op 0 gets them recomputed for its OWN diameter.
+    const { rpm, feed } = feedSpeedFor(material, toolDia);
+    return [
+      `tc.Tool.Diameter = ${pyFloat(toolDia)}`,
+      `tc.HorizFeed = '${feed} mm/min'`,
+      `tc.VertFeed = '${Math.round(feed * 0.25)} mm/min'`,
+      `tc.SpindleSpeed = ${pyFloat(rpm)}`,
+      operationPy(index, op, stock),
+    ].join("\n");
   }
   const body = operationPy(index, op, stock);
   if (op.type === "tapping") {
@@ -950,7 +967,7 @@ function operationPyWithOwnTool(index, op, stock, toolDia) {
     return [...tapSetup, rewired].join("\n");
   }
   if (op.type === "threadMilling") {
-    const tmSetup = threadMillToolSetupPy(index, toolDia);
+    const tmSetup = threadMillToolSetupPy(index, toolDia, material);
     const rewired = index === 0 ? body : body.replace(/\.ToolController = tc$/m, `.ToolController = tc_${index}`);
     return [...tmSetup, rewired].join("\n");
   }
@@ -976,13 +993,14 @@ function operationPyWithOwnTool(index, op, stock, toolDia) {
     "            pass",
     "        return _t",
   ];
+  const { rpm: endmillRpm, feed: endmillFeed } = feedSpeedFor(material, toolDia);
   const create = [
     `_endmill_${index} = _rover_make_endmill_tool(${pyFloat(toolDia)}, ${pyStr(`Tool_${index}`)})`,
     `${tcVar} = PathToolController.Create(${pyStr(`TC_${index}`)}, tool=_endmill_${index}, toolNumber=${index + 1})`,
     "job.Proxy.addToolController(" + tcVar + ")",
-    `${tcVar}.HorizFeed = '600 mm/min'`,
-    `${tcVar}.VertFeed = '150 mm/min'`,
-    `${tcVar}.SpindleSpeed = 4000.0`,
+    `${tcVar}.HorizFeed = '${endmillFeed} mm/min'`,
+    `${tcVar}.VertFeed = '${Math.round(endmillFeed * 0.25)} mm/min'`,
+    `${tcVar}.SpindleSpeed = ${pyFloat(endmillRpm)}`,
     "doc.recompute()",
   ];
   // Rewrite the body's own ".ToolController = tc" to point at this op's own controller.

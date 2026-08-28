@@ -2328,11 +2328,14 @@ let stockCamMenuOpen=false;
 let stockCamHistoryOpen=false;
 let stockCamMachines=null;      // "Makineler" envanterinden çekilen liste — sayfa oturumu boyunca önbelleklenir
 let stockCamPostProcessor=null; // bu oturum için seçilen kontrolcü ("" = kayıtlı makine yok, sunucu varsayılanı grbl kullanır)
+let stockCamMaterial=null; // bu oturum için seçilen malzeme anahtarı (MAT_DB'nin kendi anahtarları) -- Feeds&Speeds'i besler
 // Kurulum akışı: her sayfa oturumunda (freze sekmesi ilk açıldığında) ZORUNLU
-// olarak önce kontrolcü, sonra stok boyutu sorulur — operatörün kendi isteği
-// ("her defasında ilk konuşmada sorsun... adım adım ilerlesin"). null=henüz
-// başlamadı, 'controller'/'newController'/'stockSize' = o adımda bekliyor,
-// 'done' = tamamlandı, normal İşlem Menüsü akışı açık.
+// olarak önce kontrolcü, SONRA malzeme, SONRA stok boyutu sorulur (malzeme
+// olmadan besleme/devir hesaplanamaz -- feedSpeedFor materyale göre RPM/
+// besleme belirliyor, bu yüzden stok boyutundan önce mutlaka sorulması
+// gerekiyor). null=henüz başlamadı, 'controller'/'newController'/
+// 'material'/'stockSize' = o adımda bekliyor, 'done' = tamamlandı, normal
+// İşlem Menüsü akışı açık.
 let stockCamSetupStage=null;
 // Hobi/DIY (GRBL, Mach3/4, LinuxCNC) ile birlikte endüstriyel/sanayi
 // kontrolcüleri de listelenir — eski CAM Asistanı akışının POST_OPTIONS
@@ -2345,6 +2348,18 @@ const STOCK_CAM_KNOWN_CONTROLLERS=[
   "Haas","Mitsubishi (Meldas)","Mazak","Okuma (OSP)","Doosan",
 ];
 
+// Kurulum akışının kendi malzeme adımı için ayrı, kucuk bir eslestirici --
+// oturum icindeki serbest-metin "malzeme X" komutuyla ayni MAT_DB
+// anahtarlarini hedefliyor ama kurulum akisindan bagimsiz, kendi
+// kapsaminda kalan bir fonksiyon (ayni mantigi paylasilan bir yardimciya
+// tasimak yerine kucuk bir tekrar -- bu kod tabaninin genel tercihi).
+const STOCK_CAM_MATERIAL_MAP={"celik":"steel","steel":"steel","aluminyum":"aluminum","aluminum":"aluminum","pirinc":"brass","brass":"brass","bakir":"copper","copper":"copper","dokme demir":"cast-iron","dokmedemir":"cast-iron","cast iron":"cast-iron","dokum":"cast-iron","titanyum":"titanium","titanium":"titanium","ahsap":"wood","wood":"wood","tahta":"wood","plastik":"plastic","plastic":"plastic","akrilik":"acrylic","acrylic":"acrylic"};
+function stockCamMatchMaterialKey(text){
+  const t=taiNorm(text).replace(/-/g," ").replace(/^malzeme\s+/,"");
+  for(const[k,v] of Object.entries(STOCK_CAM_MATERIAL_MAP)){ if(t.includes(k)) return v; }
+  return null;
+}
+
 function stockCamContextChips(){
   if(!isMill())return null;
   if(stockCamSetupStage&&stockCamSetupStage!=="done"){
@@ -2355,6 +2370,9 @@ function stockCamContextChips(){
     }
     if(stockCamSetupStage==="newController"){
       return STOCK_CAM_KNOWN_CONTROLLERS.map(c=>({l:c,c}));
+    }
+    if(stockCamSetupStage==="material"){
+      return Object.entries(MAT_DB).map(([key,md])=>({l:md.label,c:`malzeme ${key}`}));
     }
     return null; // 'stockSize' — serbest metin girişi bekleniyor, chip yok
   }
@@ -2408,8 +2426,8 @@ async function stockCamRegisterController(controllerName){
     stockCamPostProcessor=controllerName; // kayıt başarısız olsa bile bu oturum için kullan
     taiMsg("⚠ Makine kaydedilemedi ama bu oturum için "+controllerName+" kullanılacak: "+e.message,"bot");
   }
-  stockCamSetupStage="stockSize";
-  taiMsg("Şimdi stok boyutunu belirtin (mm, örn: <b>200x140x60</b>).","bot");
+  stockCamSetupStage="material";
+  taiMsg("Şimdi malzemeyi seçin (kesme hızı/devir bunu belirliyor) — örn: "+Object.values(MAT_DB).map(m=>m.label).join(", ")+".","bot");
 }
 
 async function stockCamHandleSetupInput(text){
@@ -2425,8 +2443,8 @@ async function stockCamHandleSetupInput(text){
     const found=(stockCamMachines||[]).find(mm=>taiNorm(mm.name)===wanted||taiNorm(mm.name).includes(wanted));
     if(found){
       stockCamPostProcessor=found.postProcessor||"GRBL";
-      stockCamSetupStage="stockSize";
-      taiMsg(`✓ Makine: <b>${found.name}</b> (${stockCamPostProcessor}) seçildi. Şimdi stok boyutunu belirtin (mm, örn: <b>200x140x60</b>).`,"bot");
+      stockCamSetupStage="material";
+      taiMsg(`✓ Makine: <b>${found.name}</b> (${stockCamPostProcessor}) seçildi. Şimdi malzemeyi seçin (kesme hızı/devir bunu belirliyor) — örn: `+Object.values(MAT_DB).map(m=>m.label).join(", ")+".","bot");
       return true;
     }
     taiMsg("Kayıtlı makinelerden birini seçin ya da \"Yeni Kontrolcü\" ile ekleyin.","bot");
@@ -2434,6 +2452,18 @@ async function stockCamHandleSetupInput(text){
   }
   if(stockCamSetupStage==="newController"){
     await stockCamRegisterController(text.trim()||"GRBL");
+    return true;
+  }
+  if(stockCamSetupStage==="material"){
+    const key=stockCamMatchMaterialKey(text);
+    if(!key){
+      taiMsg("Lütfen listeden bir malzeme seçin: "+Object.values(MAT_DB).map(m=>m.label).join(", ")+".","bot");
+      return true;
+    }
+    stockCamMaterial=key;
+    setMaterial(key); // simülatörün 3B stoğunu da aynı malzemeyle senkronla
+    stockCamSetupStage="stockSize";
+    taiMsg(`✓ Malzeme: <b>${MAT_DB[key].label}</b> seçildi. Şimdi stok boyutunu belirtin (mm, örn: <b>200x140x60</b>).`,"bot");
     return true;
   }
   if(stockCamSetupStage==="stockSize"){
@@ -2454,7 +2484,7 @@ async function stockCamHandleSetupInput(text){
 
 async function stockCamEnsurePlan(){
   if(stockCamPlanKey)return stockCamPlanKey;
-  const r=await fetch(`${MAG_API_BASE}/stock-cam/plan`,{method:"POST",headers:magHeaders(),body:JSON.stringify({stock:{w:W,d:D,h:TOP}})});
+  const r=await fetch(`${MAG_API_BASE}/stock-cam/plan`,{method:"POST",headers:magHeaders(),body:JSON.stringify({stock:{w:W,d:D,h:TOP},material:stockCamMaterial})});
   const data=await r.json();
   if(!r.ok)throw new Error(data?.error||"Plan olusturulamadi.");
   stockCamPlanKey=data.plan.planKey;
