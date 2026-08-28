@@ -2307,6 +2307,31 @@ const STOCK_CAM_MENU=[
   {type:"counterbore",label:"Havşa Açma (Düz Dip)"},
 ];
 
+// Sihirbaz her işlem türü seçildiğinde GENERİK "10mm çapında 10mm
+// derinlikte merkeze" örneğini gösteriyordu -- bu örnek sadece delik gibi
+// tek-çaplı işlemler için doğru; Kanal (genişlik+uzunluk+yön), Pah/Kontur/
+// Yüzey (konumsuz), Kılavuz/Diş Açma (M-diş+adım) gibi türlerde operatörü
+// yanlış parametre söylemeye yönlendirip kafa karıştırıyordu (canlı testte
+// görüldü: "Kanal" için "çapında" denince LLM haklı olarak "çap değil,
+// genişlik/uzunluk gerekli" diye düzeltme sormak zorunda kaldı). Her işlem
+// türü kendi gerçek parametre şemasına uygun bir örnekle gösteriliyor.
+const STOCK_CAM_EXAMPLE_BY_TYPE={
+  drill:"10mm çapında 10mm derinlikte merkeze",
+  rectPocket:"60x40mm 10mm derinlikte merkeze",
+  circPocket:"30mm çapında 10mm derinlikte merkeze",
+  contour:"10mm derinlikte",
+  slot:"8mm genişliğinde 50mm uzunluğunda 10mm derinlikte merkeze, 0 derece yönünde",
+  chamfer:"2mm pah",
+  drillGrid:"3 satır 4 sütun delik ızgarası, 6mm çapında, 20mm aralıklarla, 10mm derinlikte merkeze",
+  drillCircle:"6 delik, 8mm çapında, 30mm yarıçaplı çember üzerinde, 10mm derinlikte merkeze",
+  hexPocket:"30mm çapında (köşeden köşeye) altıgen cep, 10mm derinlikte merkeze",
+  face:"2mm talaş derinliğinde yüzey düzelt",
+  tapping:"M8 diş, 1.25mm adımlı, 15mm derinlikte merkeze",
+  threadMilling:"M10 diş, 1.5mm adımlı, 15mm derinlikte merkeze",
+  countersink:"12mm çapında havşa, 5mm derinlikte merkeze",
+  counterbore:"16mm çapında düz-dip havşa, 5mm derinlikte merkeze",
+};
+
 // Maps a stock-cam operation type + its own params to the (opType, reqDia,
 // reqDepth) triple ToolMagazine.findSlotForOp() already knows how to score
 // (see its own opType branches: drill/pocket/slot/face-contour/chamfer) —
@@ -3037,7 +3062,8 @@ async function stockCamStartWizard(opType,opLabel,prefill){
   catch(e){ taiMsg("⛔ "+e.message,"bot"); return; }
   stockCamMenuOpen=false;
   stockCam={opType,opLabel,answers:prefill||{}};
-  taiMsg(`<b>${opLabel}</b> seçildi. Parametreleri anlatın (örn: "10mm çapında 10mm derinlikte merkeze").`,"bot");
+  const example=STOCK_CAM_EXAMPLE_BY_TYPE[opType]||STOCK_CAM_EXAMPLE_BY_TYPE.drill;
+  taiMsg(`<b>${opLabel}</b> seçildi. Parametreleri anlatın (örn: "${example}").`,"bot");
 }
 
 async function stockCamAdvanceStep(text){
