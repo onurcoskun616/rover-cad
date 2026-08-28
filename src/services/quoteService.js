@@ -15,11 +15,66 @@ const DENSITY_G_CM3 = {
   Ahsap: 0.7,
 };
 
+// Fixed placeholder catalog for the "Anında Teklif Al" page (web/teklif.html):
+// a flat TRY/kg for every material and a flat machine-hourly rate, so a
+// visitor gets a price with NO manual cost entry (the whole point of an
+// "instant" quote page). These are explicit business numbers the operator
+// gave directly (500 TRY/saat, 100 TRY/kg across every material, as a
+// deliberate one-time flat placeholder) -- never guessed the way every other
+// "reasonable default" in this codebase is justified; the operator's own
+// words were "bunları tek seferlik 100 TL hepsine gir, ileride API ile
+// fiyatlamayı dinamik yapabiliriz" (put 100 TL on all of them for now, we
+// can make pricing dynamic via an API later). /cam-quote falls back to these
+// only when the caller doesn't supply its own materialPrice/hourlyRate --
+// an operator using the existing cam.html quote form untouched by this.
+export const MACHINE_HOURLY_RATE_TRY = 500;
+export const DEFAULT_PROFIT_PCT = 20; // matches cam.html's pre-existing "Basit" mode default
+export const MATERIAL_PRICE_TRY_PER_KG = {
+  Aluminyum: 100,
+  Celik: 100,
+  "Paslanmaz Celik": 100,
+  "Pirinc/Bronz": 100,
+  Plastik: 100,
+  Ahsap: 100,
+};
+
 const num = (v) => {
   const n = Number(v);
   return Number.isFinite(n) ? n : 0;
 };
 const round2 = (n) => Math.round(n * 100) / 100;
+const isBlank = (v) => v === undefined || v === null || v === "";
+
+// Fills in "basit"-mode cost inputs the caller left blank, in priority order:
+// the caller's own explicit value > (hourlyRate only) a selected machine
+// profile's rate > the fixed catalog placeholder -- but ONLY when
+// useCatalogDefaults is true. cam.html's own quote form never sets that flag,
+// so leaving materialPrice blank there keeps meaning exactly what it always
+// has ("0 TL", via its own placeholder hint) -- this function changes
+// nothing for it. Only web/teklif.html ("Anında Teklif Al") sets the flag,
+// since its whole premise is a price with zero manual pricing entry.
+export function resolveQuoteInputs({ mode, inputs, material, machineHourlyRate, useCatalogDefaults }) {
+  const resolved = inputs && typeof inputs === "object" ? { ...inputs } : {};
+  if (mode !== "basit") return resolved;
+  if (isBlank(resolved.hourlyRate) && machineHourlyRate) {
+    resolved.hourlyRate = machineHourlyRate;
+  }
+  if (!useCatalogDefaults) return resolved;
+  if (isBlank(resolved.hourlyRate)) {
+    resolved.hourlyRate = MACHINE_HOURLY_RATE_TRY;
+  }
+  if (isBlank(resolved.materialPrice)) {
+    const catalogPrice = MATERIAL_PRICE_TRY_PER_KG[material];
+    if (catalogPrice) {
+      resolved.materialPrice = catalogPrice;
+      resolved.materialPriceUnit = "kg";
+    }
+  }
+  if (isBlank(resolved.profitPct)) {
+    resolved.profitPct = DEFAULT_PROFIT_PCT;
+  }
+  return resolved;
+}
 
 // Stock volume in cm3 from the wizard's stock dimensions (mm), falling back to
 // the bounding box when stock is not set.

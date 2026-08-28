@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="tr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Anında Teklif Al · Topkapı Okulları</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="account-strip">
+        <a href="index.html" class="cam-back-link">← Ana Sayfa</a>
+        <a href="dashboard.html">Hesabım</a>
+        <a id="admin-link" href="admin.html" hidden>Yönetim</a>
+        <button id="logout-btn" class="link-button" type="button">Çıkış</button>
+      </div>
+      <img src="logo.png" alt="Topkapı Okulları logosu" class="logo" />
+      <h1 class="brand-title">Anında Teklif Al</h1>
+      <p class="brand-subtitle">Topkapı Okulları · Yapay Zeka Destekli CNC Teklif Motoru</p>
+      <p class="subtitle">
+        STEP/IGES dosyanızı yükleyin, birkaç soruyu yanıtlayın — gerçek
+        FreeCAD doğrulamalı işleme süresi ve fiyat teklifinizi alın.
+      </p>
+    </header>
+
+    <main>
+      <section id="error-section" class="error-section" hidden>
+        <p id="error-text"></p>
+      </section>
+
+      <section id="tq-upload-section" class="result-section">
+        <p class="panel-hint">CAD dosyanızı yükleyin (.step, .stp, .iges, .igs).</p>
+        <label for="tq-file-input" class="file-drop">
+          <span id="tq-file-label">Bir dosya seçin veya buraya sürükleyin</span>
+          <input id="tq-file-input" type="file" accept=".step,.stp,.iges,.igs" hidden />
+        </label>
+        <button id="tq-upload-btn" type="button" disabled>Yükle ve Devam Et</button>
+      </section>
+
+      <div id="tq-status" class="status-section" hidden>
+        <div id="tq-spinner" class="spinner" hidden></div>
+        <p id="tq-status-text"></p>
+      </div>
+
+      <section id="tq-wizard" class="cam-wizard" hidden>
+        <p id="tq-step-progress" class="cam-step-progress"></p>
+        <h4 id="tq-step-title" class="cam-step-title"></h4>
+        <p id="tq-step-intro" class="cam-step-intro" hidden></p>
+        <form id="tq-step-fields" class="cam-step-fields"></form>
+        <div class="cam-wizard-nav">
+          <button id="tq-back-btn" type="button" class="secondary" hidden>Geri</button>
+          <button id="tq-next-btn" type="button">İleri</button>
+        </div>
+      </section>
+
+      <section id="tq-plan-view" class="cam-plan" hidden>
+        <h4>Planınız Hazır</h4>
+        <p id="tq-plan-summary" class="cam-plan-summary"></p>
+        <p id="tq-plan-notes" class="cam-plan-notes"></p>
+        <button id="tq-quote-btn" type="button">Fiyat Teklifi Al</button>
+      </section>
+
+      <section id="tq-quote-result" class="cam-quote-result" hidden>
+        <h4>Teklifiniz</h4>
+        <pre id="tq-quote-breakdown"></pre>
+        <a id="tq-quote-pdf" class="file-link" href="#" target="_blank" rel="noopener" hidden>Teklif Formu (PDF) indir</a>
+        <button id="tq-restart-btn" type="button" class="secondary">Yeni Teklif Al</button>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <p>Topkapı Okulları Yapay Zeka</p>
+    </footer>
+
+    <script type="module" src="teklif.js"></script>
+    <script type="module" src="session-nav.js"></script>
+  </body>
+</html>
