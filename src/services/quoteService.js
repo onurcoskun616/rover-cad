@@ -3,6 +3,7 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import PDFDocument from "pdfkit";
 import { config } from "../config.js";
+import { quantityDiscountFor } from "./quotePricingSettings.js";
 
 // Material densities (g/cm3) for converting a stock volume to weight when the
 // material price is given per kg.
@@ -15,29 +16,6 @@ const DENSITY_G_CM3 = {
   Ahsap: 0.7,
 };
 
-// Fixed placeholder catalog for the "Anında Teklif Al" page (web/teklif.html):
-// a flat TRY/kg for every material and a flat machine-hourly rate, so a
-// visitor gets a price with NO manual cost entry (the whole point of an
-// "instant" quote page). These are explicit business numbers the operator
-// gave directly (500 TRY/saat, 100 TRY/kg across every material, as a
-// deliberate one-time flat placeholder) -- never guessed the way every other
-// "reasonable default" in this codebase is justified; the operator's own
-// words were "bunları tek seferlik 100 TL hepsine gir, ileride API ile
-// fiyatlamayı dinamik yapabiliriz" (put 100 TL on all of them for now, we
-// can make pricing dynamic via an API later). /cam-quote falls back to these
-// only when the caller doesn't supply its own materialPrice/hourlyRate --
-// an operator using the existing cam.html quote form untouched by this.
-export const MACHINE_HOURLY_RATE_TRY = 500;
-export const DEFAULT_PROFIT_PCT = 20; // matches cam.html's pre-existing "Basit" mode default
-export const MATERIAL_PRICE_TRY_PER_KG = {
-  Aluminyum: 100,
-  Celik: 100,
-  "Paslanmaz Celik": 100,
-  "Pirinc/Bronz": 100,
-  Plastik: 100,
-  Ahsap: 100,
-};
-
 const num = (v) => {
   const n = Number(v);
   return Number.isFinite(n) ? n : 0;
@@ -47,31 +25,35 @@ const isBlank = (v) => v === undefined || v === null || v === "";
 
 // Fills in "basit"-mode cost inputs the caller left blank, in priority order:
 // the caller's own explicit value > (hourlyRate only) a selected machine
-// profile's rate > the fixed catalog placeholder -- but ONLY when
-// useCatalogDefaults is true. cam.html's own quote form never sets that flag,
-// so leaving materialPrice blank there keeps meaning exactly what it always
-// has ("0 TL", via its own placeholder hint) -- this function changes
-// nothing for it. Only web/teklif.html ("Anında Teklif Al") sets the flag,
-// since its whole premise is a price with zero manual pricing entry.
-export function resolveQuoteInputs({ mode, inputs, material, machineHourlyRate, useCatalogDefaults }) {
+// profile's rate > the admin-configured catalog (quotePricingSettings.js,
+// edited from web/admin.html's "Teklif Fiyatlandırma" panel) -- but ONLY
+// when useCatalogDefaults is true. cam.html's own quote form never sets
+// that flag, so leaving materialPrice blank there keeps meaning exactly
+// what it always has ("0 TL", via its own placeholder hint) -- this
+// function changes nothing for it. Only web/teklif.html ("Anında Teklif
+// Al") sets the flag, since its whole premise is a price with zero manual
+// pricing entry. `catalog` is whatever the caller already fetched via
+// getQuotePricingSettings() -- this function itself does no file I/O, so
+// it stays a plain, easily-testable pure function.
+export function resolveQuoteInputs({ mode, inputs, material, machineHourlyRate, useCatalogDefaults, catalog }) {
   const resolved = inputs && typeof inputs === "object" ? { ...inputs } : {};
   if (mode !== "basit") return resolved;
   if (isBlank(resolved.hourlyRate) && machineHourlyRate) {
     resolved.hourlyRate = machineHourlyRate;
   }
-  if (!useCatalogDefaults) return resolved;
+  if (!useCatalogDefaults || !catalog) return resolved;
   if (isBlank(resolved.hourlyRate)) {
-    resolved.hourlyRate = MACHINE_HOURLY_RATE_TRY;
+    resolved.hourlyRate = catalog.machineHourlyRateTRY;
   }
   if (isBlank(resolved.materialPrice)) {
-    const catalogPrice = MATERIAL_PRICE_TRY_PER_KG[material];
+    const catalogPrice = catalog.materialPriceTRYPerKg?.[material];
     if (catalogPrice) {
       resolved.materialPrice = catalogPrice;
       resolved.materialPriceUnit = "kg";
     }
   }
   if (isBlank(resolved.profitPct)) {
-    resolved.profitPct = DEFAULT_PROFIT_PCT;
+    resolved.profitPct = catalog.defaultProfitPct;
   }
   return resolved;
 }
@@ -102,6 +84,21 @@ function materialCost(inputs, answers, bbox) {
   return price * volumeCm3;
 }
 
+// Adet Bazlı İskonto: applies the admin-configured tier (if the quantity
+// reaches one) to a pre-profit subtotal, pushing its own line item so the
+// discount is always visible in the breakdown/PDF, never silently folded
+// into another number. Returns the (possibly reduced) subtotal. A caller
+// that never passes discountTiers (every EXISTING caller before this
+// feature) gets tier=null every time -- quantityDiscountFor(qty, undefined)
+// -- so this is a no-op unless a caller opts in.
+function applyQuantityDiscount(items, subtotal, quantity, discountTiers) {
+  const tier = quantityDiscountFor(quantity, discountTiers);
+  if (!tier) return subtotal;
+  const discountAmount = round2((subtotal * tier.discountPct) / 100);
+  items.push({ label: `Adet Iskontosu (${quantity} adet, %${tier.discountPct})`, amount: -discountAmount });
+  return round2(subtotal - discountAmount);
+}
+
 /**
  * Compute a cost breakdown for a machined part.
  * @param {object} p
@@ -110,11 +107,14 @@ function materialCost(inputs, answers, bbox) {
  * @param {object} p.answers wizard answers (material, stock dims)
  * @param {object} p.bbox part bounding box
  * @param {object} p.inputs cost inputs (blank fields count as 0)
- * @returns {{mode:string, minutes:number, items:Array<{label:string, amount:number}>, subtotal:number, total:number}}
+ * @param {number} [p.quantity] adet -- defaults to 1 (no discount, no multiplier)
+ * @param {Array<{minQty:number,discountPct:number}>} [p.discountTiers] admin-configured quantity discount tiers
+ * @returns {{mode:string, minutes:number, items:Array<{label:string, amount:number}>, subtotal:number, quantity:number, unitPrice:number, total:number}}
  */
-export function computeQuote({ mode, minutes, answers, bbox, inputs }) {
+export function computeQuote({ mode, minutes, answers, bbox, inputs, quantity, discountTiers }) {
   const min = num(minutes);
   const hours = min / 60;
+  const qty = Math.max(1, Math.round(num(quantity) || 1));
   const items = [];
   const matCost = round2(materialCost(inputs, answers, bbox));
 
@@ -133,19 +133,20 @@ export function computeQuote({ mode, minutes, answers, bbox, inputs }) {
     items.push({ label: "Takim asinma payi", amount: toolWear });
     items.push({ label: "Sarf malzemesi", amount: consumables });
 
-    const directSum = matCost + amortization + energy + toolWear + consumables;
+    let directSum = matCost + amortization + energy + toolWear + consumables;
+    directSum = applyQuantityDiscount(items, directSum, qty, discountTiers);
     const overhead = round2((directSum * num(inputs?.overheadPct)) / 100);
     const afterOverhead = directSum + overhead;
     const scrap = round2((afterOverhead * num(inputs?.scrapPct)) / 100);
     const afterScrap = afterOverhead + scrap;
     const profit = round2((afterScrap * num(inputs?.profitPct)) / 100);
-    const total = round2(afterScrap + profit);
+    const unitPrice = round2(afterScrap + profit);
 
     items.push({ label: `Genel gider (%${num(inputs?.overheadPct)})`, amount: overhead });
     items.push({ label: `Fire/hata payi (%${num(inputs?.scrapPct)})`, amount: scrap });
     items.push({ label: `Kar marji (%${num(inputs?.profitPct)})`, amount: profit });
 
-    return { mode, minutes: round2(min), items, subtotal: round2(afterScrap), total };
+    return { mode, minutes: round2(min), items, subtotal: round2(afterScrap), quantity: qty, unitPrice, total: round2(unitPrice * qty) };
   }
 
   // basit mode
@@ -153,11 +154,11 @@ export function computeQuote({ mode, minutes, answers, bbox, inputs }) {
   const machineCost = round2(hours * hourlyRate);
   items.push({ label: "Malzeme", amount: matCost });
   items.push({ label: `Islem (${round2(min)} dk x ${hourlyRate} TL/saat)`, amount: machineCost });
-  const subtotal = matCost + machineCost;
+  const subtotal = applyQuantityDiscount(items, matCost + machineCost, qty, discountTiers);
   const profit = round2((subtotal * num(inputs?.profitPct)) / 100);
   items.push({ label: `Kar marji (%${num(inputs?.profitPct)})`, amount: profit });
-  const total = round2(subtotal + profit);
-  return { mode, minutes: round2(min), items, subtotal: round2(subtotal), total };
+  const unitPrice = round2(subtotal + profit);
+  return { mode, minutes: round2(min), items, subtotal: round2(subtotal), quantity: qty, unitPrice, total: round2(unitPrice * qty) };
 }
 
 // FreeCAD-free ASCII fallback: pdfkit's Helvetica lacks some Turkish glyphs, so
@@ -199,7 +200,8 @@ export function generateQuotePdf({ partName, bbox, material, quote }) {
       doc.text(`Parca: ${toAscii(partName) || "-"}`);
       doc.text(`Olculer (mm): ${bx} x ${by} x ${bz}`);
       doc.text(`Malzeme: ${toAscii(material) || "-"}`);
-      doc.text(`Tahmini isleme suresi: ${quote.minutes} dk`);
+      doc.text(`Tahmini isleme suresi (birim): ${quote.minutes} dk`);
+      doc.text(`Adet: ${quote.quantity ?? 1}`);
       doc.text(`Hesaplama modu: ${quote.mode === "detayli" ? "Detayli" : "Basit"}`);
       doc.moveDown(0.8);
 
@@ -218,8 +220,15 @@ export function generateQuotePdf({ partName, bbox, material, quote }) {
       doc.moveTo(leftX, doc.y).lineTo(490, doc.y).stroke("#999");
       doc.moveDown(0.4);
 
+      const qty = quote.quantity ?? 1;
+      if (qty > 1) {
+        const uy = doc.y;
+        doc.fontSize(11).text("Birim Fiyat", leftX, uy);
+        doc.text(fmtTL(quote.unitPrice), rightX, uy, { align: "right", width: 90 });
+        doc.moveDown(0.4);
+      }
       const ty = doc.y;
-      doc.fontSize(14).text("TOPLAM", leftX, ty);
+      doc.fontSize(14).text(qty > 1 ? `TOPLAM (${qty} adet)` : "TOPLAM", leftX, ty);
       doc.fontSize(14).text(fmtTL(quote.total), rightX, ty, { align: "right", width: 90 });
 
       doc.moveDown(2);
