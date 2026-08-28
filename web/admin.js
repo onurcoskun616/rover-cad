@@ -239,6 +239,7 @@ let quotePricingPreview = false;
 function renderQuotePricingForm(settings) {
   byId("qp-hourly-rate").value = settings.machineHourlyRateTRY;
   byId("qp-profit-pct").value = settings.defaultProfitPct;
+  byId("qp-validity-days").value = settings.quoteValidityDays;
   byId("qp-material-prices").innerHTML = Object.entries(QUOTE_MATERIAL_LABELS).map(([key, label]) => `
     <div class="cam-field">
       <label for="qp-mat-${safeText(key)}">${safeText(label)} (TL/kg)</label>
@@ -280,6 +281,7 @@ async function loadQuotePricing() {
       materialPriceTRYPerKg: {},
       defaultProfitPct: 20,
       quantityDiscountTiers: [],
+      quoteValidityDays: 7,
     });
   }
 }
@@ -302,6 +304,7 @@ byId("qp-save-btn").addEventListener("click", async () => {
   const body = {
     machineHourlyRateTRY: Number(byId("qp-hourly-rate").value),
     defaultProfitPct: Number(byId("qp-profit-pct").value),
+    quoteValidityDays: Number(byId("qp-validity-days").value),
     materialPriceTRYPerKg: Object.fromEntries(
       Array.from(byId("qp-material-prices").querySelectorAll("[data-material]")).map((input) => [input.dataset.material, Number(input.value)]),
     ),

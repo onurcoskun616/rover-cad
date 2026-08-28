@@ -27,6 +27,9 @@ const DEFAULTS = {
   },
   defaultProfitPct: 20,
   quantityDiscountTiers: [],
+  // Teklif Özeti's "Geçerlilik Tarihi" -- operator confirmed 7 gün directly
+  // (matching partgo.co's own reference example), not invented.
+  quoteValidityDays: 7,
 };
 
 function filePath() {
@@ -57,6 +60,7 @@ export function getQuotePricingSettings() {
           : DEFAULTS.materialPriceTRYPerKg,
       defaultProfitPct: num(parsed?.defaultProfitPct, DEFAULTS.defaultProfitPct),
       quantityDiscountTiers: sanitizeTiers(parsed?.quantityDiscountTiers),
+      quoteValidityDays: Math.max(1, Math.round(num(parsed?.quoteValidityDays, DEFAULTS.quoteValidityDays))),
     };
   } catch {
     return { ...DEFAULTS };
@@ -74,6 +78,10 @@ export function updateQuotePricingSettings(partial) {
         : current.materialPriceTRYPerKg,
     defaultProfitPct: partial?.defaultProfitPct !== undefined ? num(partial.defaultProfitPct, current.defaultProfitPct) : current.defaultProfitPct,
     quantityDiscountTiers: partial?.quantityDiscountTiers !== undefined ? sanitizeTiers(partial.quantityDiscountTiers) : current.quantityDiscountTiers,
+    quoteValidityDays:
+      partial?.quoteValidityDays !== undefined
+        ? Math.max(1, Math.round(num(partial.quoteValidityDays, current.quoteValidityDays)))
+        : current.quoteValidityDays,
   };
   fs.mkdirSync(config.dataDir, { recursive: true });
   fs.writeFileSync(filePath(), JSON.stringify(next, null, 2));

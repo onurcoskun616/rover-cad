@@ -103,8 +103,16 @@
       </section>
 
       <section id="tq-quote-result" class="cam-quote-result" hidden>
-        <h4>Teklifiniz</h4>
+        <div class="panel-heading">
+          <h4>Teklif Özeti</h4>
+          <span class="soft-badge">Teklif Hazır</span>
+        </div>
+        <p id="tq-quote-validity" class="panel-hint"></p>
         <pre id="tq-quote-breakdown"></pre>
+        <div class="cam-quote-total-row">
+          <span id="tq-quote-total-label">Sipariş Tutarı (KDV Hariç)</span>
+          <strong id="tq-quote-total"></strong>
+        </div>
         <a id="tq-quote-pdf" class="file-link" href="#" target="_blank" rel="noopener" hidden>Teklif Formu (PDF) indir</a>
         <button id="tq-restart-btn" type="button" class="secondary">Yeni Teklif Al</button>
       </section>

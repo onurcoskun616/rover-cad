@@ -212,11 +212,13 @@ router.post("/cam-quote", apiKeyAuth, async (req, res, next) => {
       material: typeof material === "string" ? material : answers?.material,
       tolerance: typeof tolerance === "string" ? tolerance : "",
       surfaceFinish: typeof surfaceFinish === "string" ? surfaceFinish : "",
+      validityDays: pricingSettings.quoteValidityDays,
       quote,
     });
     res.json({
       quote,
       pdfUrl: makeFileUrl(req.protocol, req.get("host"), pdfPath),
+      quoteValidityDays: pricingSettings.quoteValidityDays,
     });
   } catch (err) {
     next(err);
