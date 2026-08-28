@@ -93,3 +93,47 @@ export function deleteTemplate(id) {
   writeTemplates(next);
   return true;
 }
+
+// Şablon Dışa/İçe Aktarma (yedekleme): the FULL stored records (including
+// operations), unlike listTemplates()'s summary shape -- this is what gets
+// downloaded as a single backup JSON file.
+export function listFullTemplates() {
+  return readTemplates();
+}
+
+// Imports a previously-exported backup. Always ADDITIVE (fresh ids,
+// fresh createdAt) -- never overwrites or replaces an existing template,
+// even one with the same name, so importing a backup can never silently
+// destroy templates already on this machine. Malformed entries (missing
+// name/stock/operations) are silently skipped rather than rejecting the
+// whole file, so one corrupted entry in an old backup doesn't block
+// restoring the rest of it.
+export function importTemplates(rawList) {
+  if (!Array.isArray(rawList)) throw new Error("İçe aktarılacak veri bir dizi olmalıdır.");
+  const list = readTemplates();
+  const imported = [];
+  for (const raw of rawList) {
+    const name = String(raw?.name || "").trim();
+    if (!name) continue;
+    const w = Number(raw?.stock?.w), d = Number(raw?.stock?.d), h = Number(raw?.stock?.h);
+    if (!Number.isFinite(w) || !Number.isFinite(d) || !Number.isFinite(h)) continue;
+    const operations = Array.isArray(raw.operations)
+      ? raw.operations
+          .filter((op) => typeof op?.type === "string" && op.type && op.params && typeof op.params === "object")
+          .map((op) => (op.note ? { type: op.type, params: op.params, note: String(op.note) } : { type: op.type, params: op.params }))
+      : [];
+    if (!operations.length) continue;
+    const template = {
+      id: randomUUID(),
+      name,
+      stock: { w, d, h },
+      material: typeof raw.material === "string" && raw.material ? raw.material : "steel",
+      operations,
+      createdAt: Date.now(),
+    };
+    list.push(template);
+    imported.push(template);
+  }
+  writeTemplates(list);
+  return imported;
+}
