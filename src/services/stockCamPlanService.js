@@ -422,6 +422,25 @@ export function reorderOperations(planKey, orderedIds) {
   return { ok: true, operations: plan.operations.map((o) => ({ ...o })) };
 }
 
+// İşlem Notları: pure shop-floor metadata on an already-confirmed operation
+// (e.g. "ince cidar, yavaş ilerle") -- never touches `params`, so it can
+// never affect what actually gets machined. Deliberately synchronous, no
+// FreeCAD re-verify (unlike replaceOperation/reorderOperations, which DO
+// change geometry or cutting order): a note can never make a previously
+// safe plan unsafe. An empty/blank note clears it rather than storing an
+// empty string.
+export function setOperationNote(planKey, opId, note) {
+  const plan = plans.get(planKey);
+  if (!plan) return { ok: false, problems: ["Plan bulunamadı."] };
+  const op = plan.operations.find((o) => o.id === opId);
+  if (!op) return { ok: false, problems: ["İşlem bulunamadı."] };
+  const trimmed = String(note ?? "").trim();
+  if (trimmed) op.note = trimmed;
+  else delete op.note;
+  touch(plan);
+  return { ok: true, operation: { ...op } };
+}
+
 // Faz X: the setup-sheet route persists the most recent FreeCAD time
 // estimate here (from confirm/edit's own verifyStockPlan call) so the
 // printable job sheet can show a real total without triggering its own,

@@ -2,6 +2,7 @@ import { OPERATION_TYPES } from "./stockCamPlanService.js";
 import { toolWearStatus } from "./cncMagazineService.js";
 import { computeStockCamCost } from "./stockCamCostService.js";
 import { MATERIAL_CUTTING_DATA } from "./materialCuttingData.js";
+import { buildToolChecklist } from "./stockCamGenerateService.js";
 
 // Printable job/routing sheet: a shop-floor document summarizing a
 // stock-cam plan's stock, controller, and confirmed operations (in order)
@@ -61,10 +62,28 @@ export function buildSetupSheetHtml(plan, postName, costInputs) {
         `<td>${escapeHtml(label)}</td>`,
         `<td>${escapeHtml(opParamSummary(op))}</td>`,
         `<td>${escapeHtml(opToolSummary(op))}</td>`,
+        `<td>${escapeHtml(op.note || "-")}</td>`,
         "</tr>",
       ].join("");
     })
     .join("\n");
+
+  // Takım Ön-Kontrol Listesi: shown BEFORE the operations table so the
+  // operator can prepare every tool before reading the job step-by-step.
+  const checklist = buildToolChecklist(plan.operations);
+  const checklistRows = checklist
+    .map((t, i) => {
+      const pitchStr = t.pitch ? ` (adım ${t.pitch}mm)` : "";
+      const toolNumStr = t.toolNum != null ? `T${String(t.toolNum).padStart(2, "0")}` : "⚠ magazin eşleşmesi yok — elle hazırlayın";
+      return `<tr><td>${i + 1}</td><td>${escapeHtml(t.kind)} Ø${escapeHtml(t.dia)}mm${escapeHtml(pitchStr)}</td><td>${escapeHtml(toolNumStr)}</td><td>${t.opCount}</td></tr>`;
+    })
+    .join("\n");
+  const checklistSection = `
+  <h2 style="font-size:15px;margin-top:20px;">Takim On-Kontrol Listesi</h2>
+  <table>
+    <thead><tr><th>#</th><th>Takim</th><th>Slot</th><th>Kullanildigi islem sayisi</th></tr></thead>
+    <tbody>${checklistRows}</tbody>
+  </table>`;
 
   const totalTime = Number.isFinite(plan.lastEstimatedMinutes) ? `${plan.lastEstimatedMinutes} dk` : "-";
   const matInfo = MATERIAL_CUTTING_DATA[plan.material];
@@ -126,8 +145,9 @@ export function buildSetupSheetHtml(plan, postName, costInputs) {
     <div><b>Tahmini toplam sure:</b> ${escapeHtml(totalTime)}</div>
     <div><b>Olusturulma:</b> ${escapeHtml(new Date().toLocaleString("tr-TR"))}</div>
   </div>
+  ${checklistSection}
   <table>
-    <thead><tr><th>#</th><th>Islem</th><th>Parametreler</th><th>Takim</th></tr></thead>
+    <thead><tr><th>#</th><th>Islem</th><th>Parametreler</th><th>Takim</th><th>Not</th></tr></thead>
     <tbody>${rows}</tbody>
   </table>
   ${costSection}

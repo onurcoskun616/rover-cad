@@ -929,6 +929,7 @@ function resizeMillStock(newW, newD, newTop){
     stockCamTapDrillSuggestion=null;
     stockCamAwaitingCostInputs=false;
     stockCamAwaitingTemplateName=false; stockCamTemplatePicking=false; stockCamTemplateList=null;
+    stockCamNoteEditIdx=null;
     if(typeof clearOpPreview==="function") clearOpPreview();
     if(typeof taiMsg==="function") taiMsg("ℹ️ Stok boyutu değişti — önceki CAM planı sıfırlandı, yeni işlemler bu boyuta göre planlanacak.","bot");
   }
@@ -2343,6 +2344,7 @@ let stockCamLastCostInputs=null;      // {materialPricePerKg,hourlyRate,profitPc
 let stockCamAwaitingTemplateName=false; // "sablon kaydet" tetiklendi -- ad bekleniyor
 let stockCamTemplatePicking=false;      // "sablon yukle" tetiklendi -- listeden secim bekleniyor
 let stockCamTemplateList=null;          // son cekilen sablon ozetleri (secim icin, [{id,name,stock,material,operationCount}])
+let stockCamNoteEditIdx=null;           // İşlem Notları: not girilecek islemin index'i (0-based) -- serbest metin bekleniyor
 
 // Ayna/Simetri Kopyalama: sadece bir XY konumu olan (x,y parametreli)
 // islem turleri kopyalanabilir -- face/contour/chamfer butun parca/kenar
@@ -2771,6 +2773,7 @@ function stockCamContextChips(){
     chips.push({l:"❌ İptal",c:"iptal"});
     return chips;
   }
+  if(stockCamNoteEditIdx!==null)return[{l:"❌ İptal",c:"iptal"}]; // not serbest metinle giriliyor
   if(stockCamMenuOpen)return STOCK_CAM_MENU.map(m=>({l:m.label,c:m.label}));
   if(stockCamHistoryOpen){
     const chips=[];
@@ -2780,6 +2783,7 @@ function stockCamContextChips(){
         chips.push({l:`🪞 ${i+1}. Ayna Kopyala`,c:`islem ayna ${i+1}`});
         chips.push({l:`🔁 ${i+1}. Dizi Kopyala`,c:`islem dizi ${i+1}`});
       }
+      chips.push({l:`📝 ${i+1}. Not`,c:`islem not ${i+1}`});
     });
     chips.push({l:"⬅ Kapat",c:"gecmisi kapat"});
     return chips;
@@ -2788,6 +2792,7 @@ function stockCamContextChips(){
   if(stockCamOps.length){
     chips.push({l:"📋 Geçmiş ("+stockCamOps.length+")",c:"geçmiş"});
     if(stockCamOps.length>1)chips.push({l:"🔀 Takım Sırala",c:"takim sirala"});
+    chips.push({l:"🧰 Takım Listesi",c:"takim listesi"});
     chips.push({l:"⬇️ G-code Oluştur",c:"g-code oluştur"});
     chips.push({l:"💰 Maliyet Hesapla",c:"maliyet hesapla"});
     chips.push({l:"🖨️ İş Emri Yazdır",c:"iş emri yazdır"});
@@ -3097,7 +3102,7 @@ function stockCamShowHistory(){
   if(!stockCamOps.length){ taiMsg("Henüz onaylanmış işlem yok.","bot"); return; }
   stockCamHistoryOpen=true;
   taiMsg("<b>Onaylanan İşlemler:</b><br>"+stockCamOps.map((o,i)=>
-    `${i+1}. ${o.label} — ${stockCamOpSummary(o.type,o.params)}`).join("<br>")+
+    `${i+1}. ${o.label} — ${stockCamOpSummary(o.type,o.params)}${o.note?` <i>(Not: ${o.note})</i>`:""}`).join("<br>")+
     "<br><br>Düzenlemek veya ayna kopyası almak için aşağıdan seçin.","bot");
 }
 
@@ -3283,10 +3288,66 @@ async function stockCamLoadTemplate(indexOneBased){
         taiMsg(`⛔ "${opLabel}" işlemi eklenemedi: ${result.error||"bilinmeyen hata"} — kalan işlemler durduruldu (${okCount}/${tpl.operations.length} eklendi).`,"bot");
         return;
       }
-      stockCamOps.push({id:result.operation.id,type:op.type,label:opLabel,params});
+      stockCamOps.push({id:result.operation.id,type:op.type,label:opLabel,params,note:op.note});
+      // İşlem Notları: şablonda kaydedilmiş bir not varsa taşı -- en iyi
+      // çaba, başarısız olsa bile şablon yüklemesini durdurmaya değmez.
+      if(op.note){
+        try{
+          await fetch(`${MAG_API_BASE}/stock-cam/note`,{method:"POST",headers:magHeaders(),
+            body:JSON.stringify({planKey:stockCamPlanKey,opId:result.operation.id,note:op.note})});
+        }catch(e){}
+      }
       okCount++;
     }
     taiMsg(`<span class="tai-msg-action">✓ Şablon "${tpl.name}" yüklendi:</span> ${okCount} işlem eklendi.`,"bot");
+  }catch(e){ taiMsg("⛔ Hata: "+e.message,"bot"); }
+}
+
+// İşlem Notları: onaylanmış bir işleme serbest metin bir not ekleme --
+// params'a asla dokunmuyor (bkz. stockCamPlanService.js'in
+// setOperationNote'unun kod içi gerekçesi), bu yüzden hiçbir FreeCAD
+// yeniden doğrulaması gerekmiyor.
+async function stockCamStartNote(indexOneBased){
+  const idx=indexOneBased-1;
+  const op=stockCamOps[idx];
+  if(!op){ taiMsg("⛔ Böyle bir işlem yok.","bot"); return; }
+  stockCamHistoryOpen=false;
+  stockCamNoteEditIdx=idx;
+  const current=op.note?` Mevcut not: "${op.note}"`:"";
+  taiMsg(`<b>${op.label}</b> için bir not yazın.${current} (Notu kaldırmak için boş bırakıp gönderin.)`,"bot");
+}
+
+async function stockCamFinishNote(text){
+  const idx=stockCamNoteEditIdx;
+  stockCamNoteEditIdx=null;
+  const op=stockCamOps[idx];
+  if(!op){ taiMsg("⛔ Böyle bir işlem yok.","bot"); return; }
+  try{
+    const r=await fetch(`${MAG_API_BASE}/stock-cam/note`,{method:"POST",headers:magHeaders(),
+      body:JSON.stringify({planKey:stockCamPlanKey,opId:op.id,note:text})});
+    const data=await r.json();
+    if(!r.ok)throw new Error(data?.error||"Sunucu hatası.");
+    op.note=data.operation.note||undefined;
+    taiMsg(op.note?`<span class="tai-msg-action">✓ Not eklendi:</span> "${op.note}"`:"✓ Not temizlendi.","bot");
+  }catch(e){ taiMsg("⛔ Hata: "+e.message,"bot"); }
+}
+
+// Takım Ön-Kontrol Listesi: plandaki tüm benzersiz takımların (çap/tip/
+// T-numarası) bir listesi -- işe başlamadan önce operatörün hangi
+// takımları hazırlaması gerektiğini tek bakışta gösterir.
+async function stockCamShowToolChecklist(){
+  if(!stockCamPlanKey||!stockCamOps.length){ taiMsg("Henüz onaylanmış işlem yok.","bot"); return; }
+  try{
+    const r=await fetch(`${MAG_API_BASE}/stock-cam/tool-checklist`,{method:"POST",headers:magHeaders(),
+      body:JSON.stringify({planKey:stockCamPlanKey})});
+    const data=await r.json();
+    if(!r.ok)throw new Error(data?.error||"Sunucu hatası.");
+    const lines=data.checklist.map((tl,i)=>{
+      const pitchStr=tl.pitch?` (adım ${tl.pitch}mm)`:"";
+      const tnum=tl.toolNum!=null?`T${String(tl.toolNum).padStart(2,"0")}`:"⚠ magazin eşleşmesi yok — elle hazırlayın";
+      return `${i+1}. ${tl.kind} Ø${tl.dia}mm${pitchStr} — ${tnum} (${tl.opCount} işlemde kullanılıyor)`;
+    }).join("<br>");
+    taiMsg(`<b>🧰 Takım Ön-Kontrol Listesi</b> (${data.checklist.length} farklı takım):<br>${lines}`,"bot");
   }catch(e){ taiMsg("⛔ Hata: "+e.message,"bot"); }
 }
 
@@ -3299,7 +3360,7 @@ async function stockCamHandleInput(text){
     return await stockCamHandleSetupInput(text);
   }
 
-  if((stockCam||stockCamPending||stockCamMirrorPickIdx!==null||stockCamArraySourceIdx!==null||stockCamOrderPendingOrder||stockCamTapDrillSuggestion||stockCamAwaitingCostInputs||stockCamAwaitingTemplateName||stockCamTemplatePicking)&&/^(iptal|cancel|vazgec)/i.test(t)){
+  if((stockCam||stockCamPending||stockCamMirrorPickIdx!==null||stockCamArraySourceIdx!==null||stockCamOrderPendingOrder||stockCamTapDrillSuggestion||stockCamAwaitingCostInputs||stockCamAwaitingTemplateName||stockCamTemplatePicking||stockCamNoteEditIdx!==null)&&/^(iptal|cancel|vazgec)/i.test(t)){
     clearOpPreview();
     stockCam=null; stockCamPending=null; stockCamEditingId=null; stockCamMirrorPickIdx=null;
     stockCamArraySourceIdx=null; stockCamArrayKind=null; stockCamArrayPendingList=null;
@@ -3307,6 +3368,7 @@ async function stockCamHandleInput(text){
     stockCamTapDrillSuggestion=null;
     stockCamAwaitingCostInputs=false;
     stockCamAwaitingTemplateName=false; stockCamTemplatePicking=false; stockCamTemplateList=null;
+    stockCamNoteEditIdx=null;
     taiMsg("✓ İşlem iptal edildi.","bot");
     return true;
   }
@@ -3365,6 +3427,10 @@ async function stockCamHandleInput(text){
     taiMsg("Lütfen aşağıdan bir şablon seçin.","bot");
     return true;
   }
+  if(stockCamNoteEditIdx!==null){
+    await stockCamFinishNote(text);
+    return true;
+  }
   if(stockCamHistoryOpen&&/^gecmisi kapat/i.test(t)){
     stockCamHistoryOpen=false;
     taiMsg("✓ Geçmiş kapatıldı.","bot");
@@ -3385,8 +3451,17 @@ async function stockCamHandleInput(text){
     await stockCamStartArrayPick(parseInt(arrayMatch[1],10));
     return true;
   }
+  const noteMatch=t.match(/^islem not\s+(\d+)/i);
+  if(noteMatch){
+    await stockCamStartNote(parseInt(noteMatch[1],10));
+    return true;
+  }
   if(/^takim sirala/i.test(t)){
     await stockCamSuggestOrder();
+    return true;
+  }
+  if(/^takim listesi/i.test(t)){
+    await stockCamShowToolChecklist();
     return true;
   }
   if(/^maliyet hesapla/i.test(t)){

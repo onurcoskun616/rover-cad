@@ -7,6 +7,7 @@ import {
   replaceOperation,
   removeOperation,
   reorderOperations,
+  setOperationNote,
   listOperationTypes,
   validateOperationParams,
   setLastEstimatedMinutes,
@@ -19,6 +20,7 @@ import {
   exportStockPlanGcode,
   suggestToolOrder,
   countToolChanges,
+  buildToolChecklist,
 } from "../services/stockCamGenerateService.js";
 import { buildSetupSheetHtml } from "../services/stockCamSetupSheetService.js";
 import { addToolUsageMinutes, toolWearStatus } from "../services/cncMagazineService.js";
@@ -229,6 +231,31 @@ router.delete("/stock-cam/plan/:planKey/op/:opId", apiKeyAuth, (req, res) => {
   const result = removeOperation(req.params.planKey, req.params.opId);
   if (!result.ok) return res.status(404).json(result);
   res.json(result);
+});
+
+// İşlem Notları: synchronous -- pure shop-floor metadata, never touches an
+// operation's own params, so no FreeCAD re-verify is needed (see
+// stockCamPlanService.js's own comment on setOperationNote).
+router.post("/stock-cam/note", apiKeyAuth, (req, res) => {
+  const planKey = requirePlanKey(req, res);
+  if (!planKey) return;
+  const { opId, note } = req.body ?? {};
+  if (typeof opId !== "string" || !opId) {
+    return res.status(400).json({ error: "opId is required" });
+  }
+  const result = setOperationNote(planKey, opId, note);
+  if (!result.ok) return res.status(404).json(result);
+  res.json(result);
+});
+
+// Takım Ön-Kontrol Listesi: synchronous, plan-data only (no FreeCAD/LLM
+// call) -- pure derived data from the plan's already-confirmed operations.
+router.post("/stock-cam/tool-checklist", apiKeyAuth, (req, res) => {
+  const planKey = requirePlanKey(req, res);
+  if (!planKey) return;
+  const plan = getPlan(planKey);
+  if (!plan) return res.status(404).json({ error: "Plan bulunamadi." });
+  res.json({ checklist: buildToolChecklist(plan.operations) });
 });
 
 // Otomatik Takım Sıralama: a dry-run preview only -- synchronous, plan-data

@@ -34,15 +34,20 @@ function writeTemplates(list) {
   fs.writeFileSync(filePath(), JSON.stringify(list, null, 2));
 }
 
-// Keeps only the reusable shape (type + params) -- deliberately drops
-// toolDia/toolNum/toolRefId: those are per-run tool-magazine matches
-// (cnc-sim.html's stockCamApplyMagazineTool) that should always be
-// re-resolved fresh against whatever tools are registered when the
-// template is LOADED, never replayed from whenever it was first saved
-// (the magazine's contents may have changed entirely by then).
+// Keeps only the reusable shape (type + params, + note if present) --
+// deliberately drops toolDia/toolNum/toolRefId: those are per-run
+// tool-magazine matches (cnc-sim.html's stockCamApplyMagazineTool) that
+// should always be re-resolved fresh against whatever tools are registered
+// when the template is LOADED, never replayed from whenever it was first
+// saved (the magazine's contents may have changed entirely by then). A
+// shop-floor note (İşlem Notları), unlike those, is worth carrying over --
+// it's advice about the cut itself ("ince cidar, yavaş ilerle"), still
+// relevant on every future run of the same template.
 function sanitizeOperation(op) {
   const { toolDia, toolNum, toolRefId, ...rest } = op.params || {};
-  return { type: op.type, params: rest };
+  const sanitized = { type: op.type, params: rest };
+  if (op.note) sanitized.note = op.note;
+  return sanitized;
 }
 
 // Summary shape only (no operations array) -- kept small for a "pick one"
