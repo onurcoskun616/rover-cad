@@ -261,6 +261,8 @@ async function handleQuote() {
         partName: "Anında Teklif",
         useCatalogDefaults: true,
         quantity: Math.max(1, Math.round(Number(byId("tq-quantity").value) || 1)),
+        tolerance: byId("tq-tolerance").value,
+        surfaceFinish: byId("tq-surface-finish").value,
       }),
     });
     const quoteData = await readJson(quoteResponse);
@@ -280,7 +282,13 @@ async function handleQuote() {
 }
 
 function renderQuoteResult(quote, pdfUrl) {
-  const lines = [`Tahmini işleme süresi (birim): ${quote.minutes} dk`, `Adet: ${quote.quantity}`, ""];
+  const lines = [
+    `Tahmini işleme süresi (birim): ${quote.minutes} dk`,
+    `Adet: ${quote.quantity}`,
+    `Tolerans: ${byId("tq-tolerance").value}`,
+    `Yüzey Kalitesi: ${byId("tq-surface-finish").value}`,
+    "",
+  ];
   const pad = (s, n) => String(s).padEnd(n);
   for (const it of quote.items) lines.push(`${pad(it.label, 34)} ${Number(it.amount).toLocaleString("tr-TR")} TL`);
   lines.push("", `${pad("Birim Fiyat", 34)} ${Number(quote.unitPrice).toLocaleString("tr-TR")} TL`);

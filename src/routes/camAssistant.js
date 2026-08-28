@@ -185,7 +185,7 @@ router.post("/cam-confirm", apiKeyAuth, (req, res) => {
 // Synchronous (no FreeCAD/LLM): arithmetic + a quick PDF write.
 router.post("/cam-quote", apiKeyAuth, async (req, res, next) => {
   try {
-    const { mode, minutes, answers, bbox, inputs, partName, material, useCatalogDefaults, quantity } = req.body ?? {};
+    const { mode, minutes, answers, bbox, inputs, partName, material, useCatalogDefaults, quantity, tolerance, surfaceFinish } = req.body ?? {};
     const quoteMode = mode === "detayli" ? "detayli" : "basit";
     const eff = effectiveAnswers(answers && typeof answers === "object" ? answers : {});
     const pricingSettings = getQuotePricingSettings();
@@ -210,6 +210,8 @@ router.post("/cam-quote", apiKeyAuth, async (req, res, next) => {
       partName: typeof partName === "string" ? partName : "",
       bbox: bbox ?? {},
       material: typeof material === "string" ? material : answers?.material,
+      tolerance: typeof tolerance === "string" ? tolerance : "",
+      surfaceFinish: typeof surfaceFinish === "string" ? surfaceFinish : "",
       quote,
     });
     res.json({

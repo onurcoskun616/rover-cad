@@ -175,10 +175,12 @@ const fmtTL = (n) => `${round2(num(n)).toLocaleString("tr-TR")} TL`;
  * @param {string} p.partName
  * @param {object} p.bbox
  * @param {string} p.material
+ * @param {string} [p.tolerance] genel tolerans (ISO 2768 sınıfı) -- bilgi amaçlı, fiyatı etkilemez
+ * @param {string} [p.surfaceFinish] yüzey kalitesi (Ra) -- bilgi amaçlı, fiyatı etkilemez
  * @param {object} p.quote result of computeQuote
  * @returns {Promise<string>} the PDF path
  */
-export function generateQuotePdf({ partName, bbox, material, quote }) {
+export function generateQuotePdf({ partName, bbox, material, tolerance, surfaceFinish, quote }) {
   return new Promise((resolve, reject) => {
     try {
       fs.mkdirSync(config.outputDir, { recursive: true });
@@ -200,6 +202,8 @@ export function generateQuotePdf({ partName, bbox, material, quote }) {
       doc.text(`Parca: ${toAscii(partName) || "-"}`);
       doc.text(`Olculer (mm): ${bx} x ${by} x ${bz}`);
       doc.text(`Malzeme: ${toAscii(material) || "-"}`);
+      if (tolerance) doc.text(`Tolerans: ${toAscii(tolerance)}`);
+      if (surfaceFinish) doc.text(`Yuzey Kalitesi: ${toAscii(surfaceFinish)}`);
       doc.text(`Tahmini isleme suresi (birim): ${quote.minutes} dk`);
       doc.text(`Adet: ${quote.quantity ?? 1}`);
       doc.text(`Hesaplama modu: ${quote.mode === "detayli" ? "Detayli" : "Basit"}`);

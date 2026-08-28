@@ -67,6 +67,25 @@
           <label for="tq-quantity">Adet</label>
           <input id="tq-quantity" type="number" min="1" step="1" value="1">
         </div>
+        <div class="cam-field">
+          <label for="tq-tolerance">Genel Tolerans (ISO 2768)</label>
+          <select id="tq-tolerance">
+            <option value="ISO 2768-m (Orta/Standart)" selected>ISO 2768-m (Orta / Standart)</option>
+            <option value="ISO 2768-f (Ince)">ISO 2768-f (İnce)</option>
+            <option value="ISO 2768-c (Kaba)">ISO 2768-c (Kaba)</option>
+            <option value="ISO 2768-v (Cok Kaba)">ISO 2768-v (Çok Kaba)</option>
+          </select>
+        </div>
+        <div class="cam-field">
+          <label for="tq-surface-finish">Yüzey Kalitesi</label>
+          <select id="tq-surface-finish">
+            <option value="Ra 3.2 (Standart)" selected>Ra 3.2 (Standart)</option>
+            <option value="Ra 1.6 (Ince)">Ra 1.6 (İnce)</option>
+            <option value="Ra 0.8 (Hassas)">Ra 0.8 (Hassas)</option>
+            <option value="Islenmemis (Ham Yuzey)">İşlenmemiş (Ham Yüzey)</option>
+          </select>
+        </div>
+        <p class="panel-hint">Bu seçimler şimdilik sadece teklife/PDF'e bilgi olarak yansır, fiyatı etkilemez.</p>
         <button id="tq-quote-btn" type="button">Fiyat Teklifi Al</button>
       </section>
 
