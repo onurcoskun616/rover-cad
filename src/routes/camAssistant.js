@@ -10,6 +10,7 @@ import { analyzeManufacturability } from "../services/camService.js";
 import { getNextCamStep } from "../services/camWizardService.js";
 import { effectiveAnswers } from "../services/inventoryService.js";
 import { computeQuote, generateQuotePdf, resolveQuoteInputs } from "../services/quoteService.js";
+import { getQuotePricingSettings } from "../services/quotePricingSettings.js";
 import { createJob, runJob } from "../services/jobStore.js";
 
 function makeFileUrl(proto, host, filePath) {
@@ -184,15 +185,17 @@ router.post("/cam-confirm", apiKeyAuth, (req, res) => {
 // Synchronous (no FreeCAD/LLM): arithmetic + a quick PDF write.
 router.post("/cam-quote", apiKeyAuth, async (req, res, next) => {
   try {
-    const { mode, minutes, answers, bbox, inputs, partName, material, useCatalogDefaults } = req.body ?? {};
+    const { mode, minutes, answers, bbox, inputs, partName, material, useCatalogDefaults, quantity } = req.body ?? {};
     const quoteMode = mode === "detayli" ? "detayli" : "basit";
     const eff = effectiveAnswers(answers && typeof answers === "object" ? answers : {});
+    const pricingSettings = getQuotePricingSettings();
     const quoteInputs = resolveQuoteInputs({
       mode: quoteMode,
       inputs: inputs && typeof inputs === "object" ? inputs : {},
       material: material ?? eff?.material,
       machineHourlyRate: eff._machineHourlyRate,
       useCatalogDefaults: useCatalogDefaults === true,
+      catalog: pricingSettings,
     });
     const quote = computeQuote({
       mode: quoteMode,
@@ -200,6 +203,8 @@ router.post("/cam-quote", apiKeyAuth, async (req, res, next) => {
       answers: eff,
       bbox: bbox && typeof bbox === "object" ? bbox : {},
       inputs: quoteInputs,
+      quantity,
+      discountTiers: pricingSettings.quantityDiscountTiers,
     });
     const pdfPath = await generateQuotePdf({
       partName: typeof partName === "string" ? partName : "",

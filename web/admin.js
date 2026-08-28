@@ -222,5 +222,110 @@ byId("copy-maintenance-command")?.addEventListener("click", async () => {
   }
 });
 
+// Teklif Fiyatlandırma: same material keys "Anında Teklif Al" (teklif.html)
+// and its backend (quoteService.js/quotePricingSettings.js) already use --
+// display labels only translate them for this form, the keys sent back to
+// the server are unchanged.
+const QUOTE_MATERIAL_LABELS = {
+  Aluminyum: "Alüminyum",
+  Celik: "Çelik",
+  "Paslanmaz Celik": "Paslanmaz Çelik",
+  "Pirinc/Bronz": "Pirinç/Bronz",
+  Plastik: "Plastik",
+  Ahsap: "Ahşap",
+};
+let quotePricingPreview = false;
+
+function renderQuotePricingForm(settings) {
+  byId("qp-hourly-rate").value = settings.machineHourlyRateTRY;
+  byId("qp-profit-pct").value = settings.defaultProfitPct;
+  byId("qp-material-prices").innerHTML = Object.entries(QUOTE_MATERIAL_LABELS).map(([key, label]) => `
+    <div class="cam-field">
+      <label for="qp-mat-${safeText(key)}">${safeText(label)} (TL/kg)</label>
+      <input id="qp-mat-${safeText(key)}" data-material="${safeText(key)}" type="number" step="any" min="0" value="${Number(settings.materialPriceTRYPerKg?.[key] ?? 0)}">
+    </div>
+  `).join("");
+  renderTierRows(settings.quantityDiscountTiers || []);
+}
+
+function renderTierRows(tiers) {
+  byId("qp-discount-tiers").innerHTML = tiers.map((t, i) => `
+    <div class="admin-tier-row" data-tier-row="${i}">
+      <input type="number" min="1" step="1" data-tier-field="minQty" value="${Number(t.minQty)}" aria-label="En az adet">
+      <span>adet ve üzeri →</span>
+      <input type="number" min="0" step="any" data-tier-field="discountPct" value="${Number(t.discountPct)}" aria-label="İndirim yüzdesi">
+      <span>% indirim</span>
+      <button type="button" class="link-button" data-remove-tier="${i}">Kaldır</button>
+    </div>
+  `).join("") || `<p class="panel-hint">Henüz kademe eklenmedi.</p>`;
+}
+
+function collectTiersFromForm() {
+  return Array.from(byId("qp-discount-tiers").querySelectorAll("[data-tier-row]")).map((row) => ({
+    minQty: Number(row.querySelector('[data-tier-field="minQty"]').value),
+    discountPct: Number(row.querySelector('[data-tier-field="discountPct"]').value),
+  })).filter((t) => t.minQty > 0 && t.discountPct > 0);
+}
+
+async function loadQuotePricing() {
+  try {
+    const response = await fetch(`${API_BASE}/admin/quote-pricing`, { headers: { Authorization: `Bearer ${sessionToken}` } });
+    if (!response.ok) throw new Error("Teklif fiyatlandırma ayarları alınamadı.");
+    quotePricingPreview = false;
+    renderQuotePricingForm(await response.json());
+  } catch {
+    quotePricingPreview = true;
+    renderQuotePricingForm({
+      machineHourlyRateTRY: 500,
+      materialPriceTRYPerKg: {},
+      defaultProfitPct: 20,
+      quantityDiscountTiers: [],
+    });
+  }
+}
+
+byId("qp-add-tier-btn").addEventListener("click", () => {
+  const tiers = collectTiersFromForm();
+  tiers.push({ minQty: "", discountPct: "" });
+  renderTierRows(tiers);
+});
+
+byId("qp-discount-tiers").addEventListener("click", (event) => {
+  const idx = event.target.dataset.removeTier;
+  if (idx === undefined) return;
+  const tiers = collectTiersFromForm();
+  tiers.splice(Number(idx), 1);
+  renderTierRows(tiers);
+});
+
+byId("qp-save-btn").addEventListener("click", async () => {
+  const body = {
+    machineHourlyRateTRY: Number(byId("qp-hourly-rate").value),
+    defaultProfitPct: Number(byId("qp-profit-pct").value),
+    materialPriceTRYPerKg: Object.fromEntries(
+      Array.from(byId("qp-material-prices").querySelectorAll("[data-material]")).map((input) => [input.dataset.material, Number(input.value)]),
+    ),
+    quantityDiscountTiers: collectTiersFromForm(),
+  };
+  if (quotePricingPreview) {
+    byId("admin-notice").textContent = "Önizlemede kayıt yapılmadı (yönetim verilerine ulaşılamadı).";
+    return;
+  }
+  try {
+    const response = await fetch(`${API_BASE}/admin/quote-pricing`, {
+      method: "PUT",
+      headers: { Authorization: `Bearer ${sessionToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!response.ok) throw new Error();
+    renderQuotePricingForm(await response.json());
+    byId("admin-notice").textContent = "Teklif fiyatlandırma ayarları kaydedildi.";
+  } catch {
+    byId("admin-notice").textContent = "Teklif fiyatlandırma ayarları kaydedilemedi.";
+  }
+});
+
+loadQuotePricing();
+
 byId("logout-btn").addEventListener("click", () => { localStorage.removeItem("rover_session"); location.replace("login.html"); });
 loadAdmin();

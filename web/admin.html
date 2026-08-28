@@ -18,6 +18,7 @@
         <a href="#users"><span>◎</span> Kullanıcılar</a>
         <a href="#llm-usage"><span>◈</span> LLM tüketimi</a>
         <a href="#activity"><span>↗</span> Hareketler</a>
+        <a href="#quote-pricing"><span>₺</span> Teklif Fiyatlandırma</a>
         <a href="#system"><span>⚙</span> Sistem ayarları</a>
       </nav>
       <div class="account-sidebar-foot">
@@ -69,6 +70,27 @@
           </table>
         </div>
         <div class="admin-pagination"><span id="result-summary"></span><div><button type="button" disabled>←</button><button class="is-current" type="button">1</button><button type="button" disabled>→</button></div></div>
+      </section>
+
+      <section class="account-panel" id="quote-pricing">
+        <div class="panel-heading"><div><p class="account-kicker">ANINDA TEKLİF AL</p><h2>Teklif Fiyatlandırma</h2></div></div>
+        <div class="cam-quote-form">
+          <div class="cam-field">
+            <label for="qp-hourly-rate">Saatlik makine ücreti (TL/saat)</label>
+            <input id="qp-hourly-rate" type="number" step="any" min="0">
+          </div>
+          <div class="cam-field">
+            <label for="qp-profit-pct">Varsayılan kâr marjı (%)</label>
+            <input id="qp-profit-pct" type="number" step="any" min="0">
+          </div>
+          <h3>Malzeme Fiyatları (TL/kg)</h3>
+          <div id="qp-material-prices" class="quote-fields"></div>
+          <h3>Adet Bazlı İskonto</h3>
+          <p class="panel-hint">Belirtilen adete ULAŞILDIĞINDA (ör. 5 adet ve üzeri), kâr marjından önceki ara toplama uygulanan indirim. Boş bırakılırsa (kademe yoksa) hiç indirim uygulanmaz.</p>
+          <div id="qp-discount-tiers" class="admin-tier-list"></div>
+          <button id="qp-add-tier-btn" type="button" class="secondary">+ Kademe Ekle</button>
+          <button id="qp-save-btn" type="button">Kaydet</button>
+        </div>
       </section>
 
       <section class="admin-lower-grid">

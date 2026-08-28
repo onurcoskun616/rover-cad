@@ -260,6 +260,7 @@ async function handleQuote() {
         material: tqAnswers.material,
         partName: "Anında Teklif",
         useCatalogDefaults: true,
+        quantity: Math.max(1, Math.round(Number(byId("tq-quantity").value) || 1)),
       }),
     });
     const quoteData = await readJson(quoteResponse);
@@ -279,10 +280,15 @@ async function handleQuote() {
 }
 
 function renderQuoteResult(quote, pdfUrl) {
-  const lines = [`Tahmini işleme süresi: ${quote.minutes} dk`, ""];
+  const lines = [`Tahmini işleme süresi (birim): ${quote.minutes} dk`, `Adet: ${quote.quantity}`, ""];
   const pad = (s, n) => String(s).padEnd(n);
   for (const it of quote.items) lines.push(`${pad(it.label, 34)} ${Number(it.amount).toLocaleString("tr-TR")} TL`);
-  lines.push("", `${pad("TOPLAM", 34)} ${Number(quote.total).toLocaleString("tr-TR")} TL`);
+  lines.push("", `${pad("Birim Fiyat", 34)} ${Number(quote.unitPrice).toLocaleString("tr-TR")} TL`);
+  if (quote.quantity > 1) {
+    lines.push(`${pad(`TOPLAM (${quote.quantity} adet)`, 34)} ${Number(quote.total).toLocaleString("tr-TR")} TL`);
+  } else {
+    lines.push(`${pad("TOPLAM", 34)} ${Number(quote.total).toLocaleString("tr-TR")} TL`);
+  }
   tqQuoteBreakdown.textContent = lines.join("\n");
   if (pdfUrl) { tqQuotePdf.href = pdfUrl; tqQuotePdf.hidden = false; } else { tqQuotePdf.hidden = true; }
   tqQuoteResult.hidden = false;
