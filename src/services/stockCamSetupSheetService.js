@@ -1,5 +1,6 @@
 import { OPERATION_TYPES } from "./stockCamPlanService.js";
 import { toolWearStatus } from "./cncMagazineService.js";
+import { computeStockCamCost } from "./stockCamCostService.js";
 
 // Printable job/routing sheet: a shop-floor document summarizing a
 // stock-cam plan's stock, controller, and confirmed operations (in order)
@@ -49,7 +50,7 @@ function opToolSummary(op) {
   return parts.join(" ");
 }
 
-export function buildSetupSheetHtml(plan, postName) {
+export function buildSetupSheetHtml(plan, postName, costInputs) {
   const rows = plan.operations
     .map((op, i) => {
       const label = OPERATION_TYPES[op.type]?.label || op.type;
@@ -65,6 +66,33 @@ export function buildSetupSheetHtml(plan, postName) {
     .join("\n");
 
   const totalTime = Number.isFinite(plan.lastEstimatedMinutes) ? `${plan.lastEstimatedMinutes} dk` : "-";
+
+  // Maliyet Hesaplama: optional -- only rendered when the operator actually
+  // supplied at least one real cost input (never shown with silently-zeroed
+  // numbers, which would look like a real "0 TL" quote).
+  const hasCostInputs = costInputs && (Number(costInputs.materialPricePerKg) > 0 || Number(costInputs.hourlyRate) > 0);
+  let costSection = "";
+  if (hasCostInputs) {
+    const quote = computeStockCamCost({
+      stock: plan.stock,
+      material: plan.material,
+      minutes: plan.lastEstimatedMinutes,
+      materialPricePerKg: costInputs.materialPricePerKg,
+      hourlyRate: costInputs.hourlyRate,
+      profitPct: costInputs.profitPct,
+    });
+    const costRows = quote.items
+      .map((it) => `<tr><td>${escapeHtml(it.label)}</td><td>${escapeHtml(it.amount)} TL</td></tr>`)
+      .join("\n");
+    costSection = `
+  <h2 style="font-size:15px;margin-top:20px;">Maliyet Dokumu</h2>
+  <table>
+    <tbody>${costRows}
+      <tr><td><b>TOPLAM</b></td><td><b>${escapeHtml(quote.total)} TL</b></td></tr>
+    </tbody>
+  </table>
+  <div style="font-size:11px;color:#666;margin-top:4px;">Bu tutar operatorun girdigi malzeme/saat ucretine gore hesaplanmistir; baglayici bir teklif degildir.</div>`;
+  }
 
   return `<!doctype html>
 <html lang="tr">
@@ -95,6 +123,7 @@ export function buildSetupSheetHtml(plan, postName) {
     <thead><tr><th>#</th><th>Islem</th><th>Parametreler</th><th>Takim</th></tr></thead>
     <tbody>${rows}</tbody>
   </table>
+  ${costSection}
 </body>
 </html>`;
 }

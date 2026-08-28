@@ -22,6 +22,7 @@ import {
 } from "../services/stockCamGenerateService.js";
 import { buildSetupSheetHtml } from "../services/stockCamSetupSheetService.js";
 import { addToolUsageMinutes, toolWearStatus } from "../services/cncMagazineService.js";
+import { computeStockCamCost } from "../services/stockCamCostService.js";
 import { createJob, runJob } from "../services/jobStore.js";
 import { config } from "../config.js";
 import path from "node:path";
@@ -306,7 +307,40 @@ router.get("/stock-cam/plan/:planKey/setup-sheet", (req, res) => {
   if (!plan) return res.status(404).send("Plan bulunamadi.");
   if (!plan.operations.length) return res.status(400).send("Planda henuz onaylanmis islem yok.");
   const postName = typeof req.query.postProcessor === "string" ? req.query.postProcessor : "";
-  res.type("html").send(buildSetupSheetHtml(plan, postName));
+  // Maliyet Hesaplama: optional, query-string-only (this route can't take a
+  // POST body — window.open opens it directly) -- omitted entirely unless
+  // the operator already ran a /stock-cam/quote and chose to carry those
+  // same numbers into the printed sheet (see cnc-sim.html's stockCamLastCostInputs).
+  const costInputs = {
+    materialPricePerKg: req.query.materialPricePerKg,
+    hourlyRate: req.query.hourlyRate,
+    profitPct: req.query.profitPct,
+  };
+  res.type("html").send(buildSetupSheetHtml(plan, postName, costInputs));
+});
+
+// Maliyet Hesaplama: synchronous (arithmetic only, no FreeCAD/LLM call --
+// reuses plan.lastEstimatedMinutes, the real FreeCAD estimate already
+// captured at the most recent confirm/edit, see stockCamPlanService.js's
+// own comment on that field). materialPricePerKg/hourlyRate/profitPct are
+// the operator's OWN current numbers each time -- never persisted or
+// defaulted to a guessed figure, same discipline as the STEP-file wizard's
+// existing /cam-quote.
+router.post("/stock-cam/quote", apiKeyAuth, (req, res) => {
+  const planKey = requirePlanKey(req, res);
+  if (!planKey) return;
+  const plan = getPlan(planKey);
+  if (!plan) return res.status(404).json({ error: "Plan bulunamadi." });
+  const { materialPricePerKg, hourlyRate, profitPct } = req.body ?? {};
+  const quote = computeStockCamCost({
+    stock: plan.stock,
+    material: plan.material,
+    minutes: plan.lastEstimatedMinutes,
+    materialPricePerKg,
+    hourlyRate,
+    profitPct,
+  });
+  res.json({ quote });
 });
 
 // Faz 7: final G-code export for the whole plan.
