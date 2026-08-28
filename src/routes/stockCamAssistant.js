@@ -25,7 +25,14 @@ import {
 import { buildSetupSheetHtml } from "../services/stockCamSetupSheetService.js";
 import { addToolUsageMinutes, toolWearStatus } from "../services/cncMagazineService.js";
 import { computeStockCamCost } from "../services/stockCamCostService.js";
-import { listTemplates, getTemplate, saveTemplate, deleteTemplate } from "../services/stockCamTemplateService.js";
+import {
+  listTemplates,
+  getTemplate,
+  saveTemplate,
+  deleteTemplate,
+  listFullTemplates,
+  importTemplates,
+} from "../services/stockCamTemplateService.js";
 import { createJob, runJob } from "../services/jobStore.js";
 import { config } from "../config.js";
 import path from "node:path";
@@ -413,6 +420,24 @@ router.post("/stock-cam/templates", apiKeyAuth, (req, res) => {
   try {
     const template = saveTemplate(name, plan);
     res.status(201).json({ template });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Şablon Dışa/İçe Aktarma: MUST be registered before the /:id routes below
+// -- Express matches routes in definition order, so "/templates/:id" would
+// otherwise greedily swallow "/templates/export" and "/templates/import"
+// as if "export"/"import" were themselves a template id.
+router.get("/stock-cam/templates/export", apiKeyAuth, (req, res, next) => {
+  try { res.json({ templates: listFullTemplates() }); } catch (err) { next(err); }
+});
+
+router.post("/stock-cam/templates/import", apiKeyAuth, (req, res) => {
+  const { templates } = req.body ?? {};
+  try {
+    const imported = importTemplates(templates);
+    res.json({ imported: imported.length, total: Array.isArray(templates) ? templates.length : 0 });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }

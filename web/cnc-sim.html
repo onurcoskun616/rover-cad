@@ -2346,6 +2346,7 @@ let stockCamAwaitingTemplateName=false; // "sablon kaydet" tetiklendi -- ad bekl
 let stockCamTemplatePicking=false;      // "sablon yukle" tetiklendi -- listeden secim bekleniyor
 let stockCamTemplateList=null;          // son cekilen sablon ozetleri (secim icin, [{id,name,stock,material,operationCount}])
 let stockCamNoteEditIdx=null;           // İşlem Notları: not girilecek islemin index'i (0-based) -- serbest metin bekleniyor
+let stockCamLastEstimatedMinutes=null;  // Tahmini/Gerçek Süre Karşılaştırması: FreeCAD'in en son verdiği toplam süre tahmini
 
 // Ayna/Simetri Kopyalama: sadece bir XY konumu olan (x,y parametreli)
 // islem turleri kopyalanabilir -- face/contour/chamfer butun parca/kenar
@@ -2592,6 +2593,7 @@ async function stockCamApplyOrder(){
       taiMsg("⛔ Sıralama uygulanamadı: "+(result.error||"bilinmeyen hata"),"bot");
       return;
     }
+    if(result.estimatedMinutes!=null)stockCamLastEstimatedMinutes=result.estimatedMinutes;
     const byId=new Map(stockCamOps.map((o)=>[o.id,o]));
     stockCamOps=order.map((id)=>byId.get(id)).filter(Boolean);
     taiMsg(`<span class="tai-msg-action">✓ İşlemler yeni sırayla kaydedildi.</span>`+
@@ -2820,6 +2822,8 @@ function stockCamContextChips(){
     chips.push({l:"💾 Şablon Kaydet",c:"sablon kaydet"});
   }
   chips.push({l:"📂 Şablon Yükle",c:"sablon yukle"});
+  chips.push({l:"⬇️ Şablonları Dışa Aktar",c:"sablon disa aktar"});
+  chips.push({l:"⬆️ Şablonları İçe Aktar",c:"sablon ice aktar"});
   return chips;
 }
 
@@ -3102,6 +3106,10 @@ async function stockCamConfirmNewOp(opType,params){
   if(result?.toolWear?.overLimit){
     taiMsg(`⚠️ Kullanılan takım aşınma sınırını geçti (${result.toolWear.minutes} dk / sınır ${result.toolWear.limit} dk) — takımı kontrol edin veya değiştirin.`,"bot");
   }
+  // Tahmini/Gerçek Süre Karşılaştırması: FreeCAD'in en son verdiği toplam
+  // süre tahminini burada tutuyoruz -- G-code simülatörde çalıştırıldığında
+  // gerçek (mesafe/besleme bazlı) süreyle karşılaştırmak için.
+  if(result?.estimatedMinutes!=null)stockCamLastEstimatedMinutes=result.estimatedMinutes;
   return result;
 }
 
@@ -3121,6 +3129,7 @@ async function stockCamDoConfirm(){
       const start=await r.json();
       if(!r.ok)throw new Error(start?.error||"Sunucu hatası.");
       result=await stockCamPollJob(start.jobId);
+      if(result?.estimatedMinutes!=null)stockCamLastEstimatedMinutes=result.estimatedMinutes;
     }else{
       result=await stockCamConfirmNewOp(opType,answers);
     }
@@ -3205,12 +3214,34 @@ async function stockCamDoGenerateGcode(){
         millProgramText=gtext;
         runMillGcode(parsed,stockDims);
         taiMsg("▶ G-code simülatörde çalıştırıldı, sonucu kontrol edin.","bot");
+        stockCamCompareEstimatedVsActual();
       }
     }catch(e){
       taiMsg("⚠ G-code indi ama simülatörde otomatik çalıştırılamadı: "+e.message+" — dosyayı elle yükleyebilirsiniz.","bot");
     }
   }catch(e){
     taiMsg("⛔ Hata: "+e.message,"bot");
+  }
+}
+
+// Tahmini/Gerçek Süre Karşılaştırması: FreeCAD'in confirm/edit/reorder
+// sırasında verdiği en son toplam süre tahmini (stockCamLastEstimatedMinutes)
+// ile, az önce simülatörde çalıştırılan G-code'un GERÇEK hareket
+// kuyruğundan hesaplanan süreyi karşılaştırır. estimateCycleMinutes zaten
+// simülatörün kendi "Kurulum Föyü" özelliğinin kullandığı, test edilmiş
+// aynı mesafe/besleme-hızı hesabı -- yeni bir zamanlama mantığı icat
+// edilmedi, sadece iki mevcut sayı yan yana konuldu.
+function stockCamCompareEstimatedVsActual(){
+  if(stockCamLastEstimatedMinutes==null)return; // henüz hiç FreeCAD tahmini yok
+  const actual=estimateCycleMinutes(lastProgramSummary);
+  if(!actual)return;
+  const est=stockCamLastEstimatedMinutes;
+  const actualR=Math.round(actual*10)/10;
+  const diffPct=Math.round(Math.abs(actual-est)/Math.max(est,0.01)*100);
+  if(diffPct>25){
+    taiMsg(`⚠️ <b>Tahmini/Gerçek Süre Karşılaştırması:</b> FreeCAD tahmini ${est} dk idi, simülasyon ${actualR} dk gösteriyor (%${diffPct} fark). Tahminin güvenilirliğini kontrol edin.`,"bot");
+  }else{
+    taiMsg(`✓ <b>Tahmini/Gerçek Süre Karşılaştırması:</b> FreeCAD tahmini ${est} dk, simülasyon ${actualR} dk gösteriyor (%${diffPct} fark) — tutarlı.`,"bot");
   }
 }
 
@@ -3353,6 +3384,55 @@ async function stockCamLoadTemplate(indexOneBased){
     }
     taiMsg(`<span class="tai-msg-action">✓ Şablon "${tpl.name}" yüklendi:</span> ${okCount} işlem eklendi.`,"bot");
   }catch(e){ taiMsg("⛔ Hata: "+e.message,"bot"); }
+}
+
+// Şablon Dışa Aktarma: kayıtlı TÜM şablonları (işlemleriyle birlikte) tek
+// bir JSON dosyası olarak indirir -- yedekleme amaçlı.
+async function stockCamExportTemplates(){
+  try{
+    const r=await fetch(`${MAG_API_BASE}/stock-cam/templates/export`,{headers:magHeaders()});
+    const data=await r.json();
+    if(!r.ok)throw new Error(data?.error||"Sunucu hatası.");
+    const templates=Array.isArray(data.templates)?data.templates:[];
+    if(!templates.length){ taiMsg("Dışa aktarılacak kayıtlı şablon yok.","bot"); return; }
+    const blob=new Blob([JSON.stringify(templates,null,2)],{type:"application/json"});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement("a");
+    a.href=url; a.download="stok-cam-sablonlar.json";
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    taiMsg(`<span class="tai-msg-action">✓ ${templates.length} şablon indirildi:</span> stok-cam-sablonlar.json`,"bot");
+  }catch(e){ taiMsg("⛔ Hata: "+e.message,"bot"); }
+}
+
+// Şablon İçe Aktarma: daha önce dışa aktarılmış bir JSON dosyasını seçtirip
+// yükler -- her zaman EKLEMELİ (mevcut şablonların üzerine yazmaz/silmez),
+// yeni id'lerle kaydedilir.
+async function stockCamImportTemplates(){
+  const input=document.createElement("input");
+  input.type="file";
+  input.accept="application/json,.json";
+  input.style.display="none";
+  document.body.appendChild(input);
+  input.onchange=async()=>{
+    const file=input.files?.[0];
+    document.body.removeChild(input);
+    if(!file)return;
+    try{
+      const text=await file.text();
+      let parsed;
+      try{ parsed=JSON.parse(text); }
+      catch(e){ taiMsg("⛔ Dosya geçerli bir JSON değil.","bot"); return; }
+      const templates=Array.isArray(parsed)?parsed:(Array.isArray(parsed?.templates)?parsed.templates:null);
+      if(!templates){ taiMsg("⛔ Dosya beklenen şablon formatında değil.","bot"); return; }
+      const r=await fetch(`${MAG_API_BASE}/stock-cam/templates/import`,{method:"POST",headers:magHeaders(),
+        body:JSON.stringify({templates})});
+      const data=await r.json();
+      if(!r.ok)throw new Error(data?.error||"Sunucu hatası.");
+      taiMsg(`<span class="tai-msg-action">✓ ${data.imported}/${data.total} şablon içe aktarıldı.</span>`,"bot");
+    }catch(e){ taiMsg("⛔ Hata: "+e.message,"bot"); }
+  };
+  input.click();
 }
 
 // İşlem Notları: onaylanmış bir işleme serbest metin bir not ekleme --
@@ -3528,6 +3608,16 @@ async function stockCamHandleInput(text){
   if(/^sablon yukle/i.test(t)){
     if(!isMill()){ taiMsg("Bu özellik şu an sadece Freze modunda kullanılabilir.","bot"); return true; }
     await stockCamShowTemplateList();
+    return true;
+  }
+  if(/^sablon disa aktar/i.test(t)){
+    if(!isMill()){ taiMsg("Bu özellik şu an sadece Freze modunda kullanılabilir.","bot"); return true; }
+    await stockCamExportTemplates();
+    return true;
+  }
+  if(/^sablon ice aktar/i.test(t)){
+    if(!isMill()){ taiMsg("Bu özellik şu an sadece Freze modunda kullanılabilir.","bot"); return true; }
+    await stockCamImportTemplates();
     return true;
   }
   if(/(islem\s*menu(su)?)$/i.test(t)){
