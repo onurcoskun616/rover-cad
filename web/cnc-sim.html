@@ -923,6 +923,7 @@ function resizeMillStock(newW, newD, newTop){
   if(typeof stockCamPlanKey!=="undefined" && stockCamPlanKey){
     stockCamPlanKey=null; stockCamOps=[]; stockCam=null; stockCamPending=null;
     stockCamEditingId=null; stockCamMenuOpen=false; stockCamHistoryOpen=false;
+    stockCamMirrorPickIdx=null;
     if(typeof clearOpPreview==="function") clearOpPreview();
     if(typeof taiMsg==="function") taiMsg("ℹ️ Stok boyutu değişti — önceki CAM planı sıfırlandı, yeni işlemler bu boyuta göre planlanacak.","bot");
   }
@@ -2326,6 +2327,78 @@ let stockCamPending=null;   // {opType, opLabel, answers} — sticker gösterild
 let stockCamEditingId=null; // düzenlenen işlemin id'si (varsa) — onaylamak yerine düzenle çağrılır
 let stockCamMenuOpen=false;
 let stockCamHistoryOpen=false;
+let stockCamMirrorPickIdx=null; // ayna kopyası alınacak islemin index'i (0-based) -- eksen secimi bekleniyor
+
+// Ayna/Simetri Kopyalama: sadece bir XY konumu olan (x,y parametreli)
+// islem turleri kopyalanabilir -- face/contour/chamfer butun parca/kenar
+// uzerinde calisir, ayrik bir konumu yok (bounds()'u null donen turler,
+// bkz. stockCamPlanService.js'in OPERATION_TYPES kaydı), bu yuzden onlarin
+// "aynasi" anlamsiz.
+const STOCK_CAM_MIRRORABLE_TYPES=new Set(["drill","tapping","threadMilling","countersink","counterbore","rectPocket","circPocket","hexPocket","slot","drillGrid","drillCircle"]);
+
+// Stok her zaman merkezi (0,0) noktasinda olusturuluyor (bkz.
+// stockCamGenerateService.js'teki stockPy: Part.makeBox(...,
+// App.Vector(-w/2, -d/2, 0)) -- yani her islemin x/y'si zaten stok
+// merkezine gore), bu yuzden ayna almak sadece ilgili eksenin isaretini
+// ters cevirmek demek. slot/drillCircle'ın kendi yon acisi (dirAngle/
+// startAngle) de dogru gorunmesi icin AYNI yansima donusumune tabi
+// tutuluyor: X'i ters cevirmek (sag-sol ayna) a -> 180-a, Y'yi ters
+// cevirmek (on-arka ayna) a -> -a, ikisini birden ters cevirmek
+// (180 donme) a -> a+180 verir (geometrik olarak: (cos a, sin a) vektörünün
+// ilgili eksen(ler)de isareti degistirilince yeni acinin cosinus/sinüsü
+// budur).
+function stockCamMirrorAngle(angleDeg,negX,negY){
+  let a=Number(angleDeg)||0;
+  if(negX&&negY)a=a+180;
+  else if(negX)a=180-a;
+  else if(negY)a=-a;
+  return((a%360)+360)%360;
+}
+
+function stockCamMirrorParams(opType,params,axis){
+  const p={...params};
+  const negX=axis==="x"||axis==="xy";
+  const negY=axis==="y"||axis==="xy";
+  if(negX)p.x=-Number(p.x);
+  if(negY)p.y=-Number(p.y);
+  if(opType==="slot")p.dirAngle=stockCamMirrorAngle(p.dirAngle||0,negX,negY);
+  if(opType==="drillCircle")p.startAngle=stockCamMirrorAngle(p.startAngle||0,negX,negY);
+  return p;
+}
+
+async function stockCamStartMirrorPick(indexOneBased){
+  const idx=indexOneBased-1;
+  const op=stockCamOps[idx];
+  if(!op){ taiMsg("⛔ Böyle bir işlem yok.","bot"); return; }
+  if(!STOCK_CAM_MIRRORABLE_TYPES.has(op.type)){
+    taiMsg(`⛔ <b>${op.label}</b> ayna kopyalama için uygun değil (tüm parça/kenar üzerinde çalışıyor, ayrı bir XY konumu yok).`,"bot");
+    return;
+  }
+  stockCamHistoryOpen=false;
+  stockCamMirrorPickIdx=idx;
+  taiMsg(`<b>${op.label}</b> (${stockCamOpSummary(op.type,op.params)}) seçildi. Hangi eksende ayna alınsın?`,"bot");
+}
+
+async function stockCamApplyMirror(axis){
+  const op=stockCamOps[stockCamMirrorPickIdx];
+  stockCamMirrorPickIdx=null;
+  if(!op){ taiMsg("⛔ Böyle bir işlem yok.","bot"); return; }
+  const mirroredParams=stockCamMirrorParams(op.type,op.params,axis);
+  try{
+    const r=await fetch(`${MAG_API_BASE}/stock-cam/validate`,{method:"POST",headers:magHeaders(),
+      body:JSON.stringify({planKey:stockCamPlanKey,opType:op.type,params:mirroredParams})});
+    const data=await r.json();
+    if(!r.ok)throw new Error(data?.error||"Sunucu hatası.");
+    if(data.problems&&data.problems.length){
+      taiMsg("⛔ Ayna kopyası stoğa sığmıyor: "+data.problems.join("<br>"),"bot");
+      return;
+    }
+  }catch(e){ taiMsg("⛔ Hata: "+e.message,"bot"); return; }
+  showOpPreview(op.type,mirroredParams);
+  stockCamPending={opType:op.type,opLabel:op.label,answers:mirroredParams};
+  stockCamEditingId=null; // ayna kopyası her zaman YENİ bir işlem — kaynağın yerini almaz
+  taiMsg(`✓ Ayna kopyası önizlendi (${op.label}: ${stockCamOpSummary(op.type,mirroredParams)}). Stok üzerindeki turuncu alanı kontrol edin. Doğruysa "onayla", değilse "iptal" yazın.`,"bot");
+}
 let stockCamMachines=null;      // "Makineler" envanterinden çekilen liste — sayfa oturumu boyunca önbelleklenir
 let stockCamPostProcessor=null; // bu oturum için seçilen kontrolcü ("" = kayıtlı makine yok, sunucu varsayılanı grbl kullanır)
 let stockCamMaterial=null; // bu oturum için seçilen malzeme anahtarı (MAT_DB'nin kendi anahtarları) -- Feeds&Speeds'i besler
@@ -2378,9 +2451,21 @@ function stockCamContextChips(){
   }
   if(stockCamPending)return[{l:"✅ Onayla",c:"onayla"},{l:"❌ İptal",c:"iptal"}];
   if(stockCam)return[{l:"❌ İptal",c:"iptal"}];
+  if(stockCamMirrorPickIdx!==null){
+    return[
+      {l:"↔️ Sağ-Sol Ayna (X ters)",c:"ayna x"},
+      {l:"↕️ Ön-Arka Ayna (Y ters)",c:"ayna y"},
+      {l:"⤡ Her İkisi (180°)",c:"ayna xy"},
+      {l:"❌ İptal",c:"iptal"},
+    ];
+  }
   if(stockCamMenuOpen)return STOCK_CAM_MENU.map(m=>({l:m.label,c:m.label}));
   if(stockCamHistoryOpen){
-    const chips=stockCamOps.map((o,i)=>({l:`✎ ${i+1}. ${o.label}`,c:`islem duzenle ${i+1}`}));
+    const chips=[];
+    stockCamOps.forEach((o,i)=>{
+      chips.push({l:`✎ ${i+1}. ${o.label}`,c:`islem duzenle ${i+1}`});
+      if(STOCK_CAM_MIRRORABLE_TYPES.has(o.type))chips.push({l:`🪞 ${i+1}. Ayna Kopyala`,c:`islem ayna ${i+1}`});
+    });
     chips.push({l:"⬅ Kapat",c:"gecmisi kapat"});
     return chips;
   }
@@ -2654,7 +2739,7 @@ function stockCamShowHistory(){
   stockCamHistoryOpen=true;
   taiMsg("<b>Onaylanan İşlemler:</b><br>"+stockCamOps.map((o,i)=>
     `${i+1}. ${o.label} — ${stockCamOpSummary(o.type,o.params)}`).join("<br>")+
-    "<br><br>Düzenlemek için aşağıdan seçin.","bot");
+    "<br><br>Düzenlemek veya ayna kopyası almak için aşağıdan seçin.","bot");
 }
 
 async function stockCamEditPick(indexOneBased){
@@ -2738,9 +2823,9 @@ async function stockCamHandleInput(text){
     return await stockCamHandleSetupInput(text);
   }
 
-  if((stockCam||stockCamPending)&&/^(iptal|cancel|vazgec)/i.test(t)){
+  if((stockCam||stockCamPending||stockCamMirrorPickIdx!==null)&&/^(iptal|cancel|vazgec)/i.test(t)){
     clearOpPreview();
-    stockCam=null; stockCamPending=null; stockCamEditingId=null;
+    stockCam=null; stockCamPending=null; stockCamEditingId=null; stockCamMirrorPickIdx=null;
     taiMsg("✓ İşlem iptal edildi.","bot");
     return true;
   }
@@ -2752,6 +2837,12 @@ async function stockCamHandleInput(text){
     await stockCamAdvanceStep(text);
     return true;
   }
+  if(stockCamMirrorPickIdx!==null){
+    const axisMatch=t.match(/^ayna\s+(x|y|xy)/i);
+    if(axisMatch){ await stockCamApplyMirror(axisMatch[1].toLowerCase()); return true; }
+    taiMsg("Lütfen aşağıdan bir ayna ekseni seçin.","bot");
+    return true;
+  }
   if(stockCamHistoryOpen&&/^gecmisi kapat/i.test(t)){
     stockCamHistoryOpen=false;
     taiMsg("✓ Geçmiş kapatıldı.","bot");
@@ -2760,6 +2851,11 @@ async function stockCamHandleInput(text){
   const editMatch=t.match(/^islem duzenle\s+(\d+)/i);
   if(editMatch){
     await stockCamEditPick(parseInt(editMatch[1],10));
+    return true;
+  }
+  const mirrorMatch=t.match(/^islem ayna\s+(\d+)/i);
+  if(mirrorMatch){
+    await stockCamStartMirrorPick(parseInt(mirrorMatch[1],10));
     return true;
   }
   if(/(islem\s*menu(su)?)$/i.test(t)){
