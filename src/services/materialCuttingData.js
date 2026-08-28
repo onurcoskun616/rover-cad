@@ -28,16 +28,33 @@
 // (Celik/Aluminyum/Pirinc-Bronz/Plastik/Ahsap), the value here matches it
 // exactly, so the app never shows two different densities for "the same"
 // material across its two separate cost tools.
+// `coolant` is standard, widely-published shop-floor machining guidance per
+// material (real practice, not an invented number) -- most notably: cast
+// iron is machined DRY almost universally (its own graphite is a natural
+// lubricant; liquid coolant risks thermal-shock cracking and turns the
+// graphite dust into an abrasive paste), while titanium needs the opposite
+// extreme (flood coolant is effectively mandatory -- its poor thermal
+// conductivity concentrates heat at the cutting edge, risking rapid tool
+// wear and, at the extreme, a fire).
 export const MATERIAL_CUTTING_DATA = {
-  steel: { label: "Çelik", vc: 100, fz: 0.05, density: 7.85 },
-  aluminum: { label: "Alüminyum", vc: 300, fz: 0.08, density: 2.70 },
-  brass: { label: "Pirinç", vc: 175, fz: 0.06, density: 8.50 },
-  copper: { label: "Bakır", vc: 120, fz: 0.06, density: 8.96 },
-  "cast-iron": { label: "Dökme Demir", vc: 80, fz: 0.06, density: 7.20 },
-  titanium: { label: "Titanyum", vc: 45, fz: 0.03, density: 4.50 },
-  wood: { label: "Ahşap", fixedRpm: 18000, fixedFeed: 3000, density: 0.70 },
-  plastic: { label: "Plastik", fixedRpm: 10000, fixedFeed: 1500, density: 1.20 },
-  acrylic: { label: "Akrilik", fixedRpm: 12000, fixedFeed: 1000, density: 1.18 },
+  steel: { label: "Çelik", vc: 100, fz: 0.05, density: 7.85,
+    coolant: { type: "Sulu/Kesme Yağı", note: "Isı ve takım aşınmasını azaltmak için önerilir (zorunlu değil)." } },
+  aluminum: { label: "Alüminyum", vc: 300, fz: 0.08, density: 2.70,
+    coolant: { type: "Sulu/Sisleme Soğutma", note: "Talaşın takıma yapışmasını (BUE) önlemek için soğutma/yağlama önerilir." } },
+  brass: { label: "Pirinç", vc: 175, fz: 0.06, density: 8.50,
+    coolant: { type: "Kuru Kesim", note: "Genellikle kuru kesilir; ağır kesimde hafif soğutma yeterli." } },
+  copper: { label: "Bakır", vc: 120, fz: 0.06, density: 8.96,
+    coolant: { type: "Sulu/Sisleme Soğutma", note: "Yumuşak/yapışkan talaşın atılması ve yüzey kalitesi için soğutma önerilir." } },
+  "cast-iron": { label: "Dökme Demir", vc: 80, fz: 0.06, density: 7.20,
+    coolant: { type: "KURU KESİM", note: "Soğutma sıvısı KULLANMAYIN — ısıl şok/çatlama riski taşır ve grafit tozuyla karışıp aşındırıcı bir çamur oluşturur." } },
+  titanium: { label: "Titanyum", vc: 45, fz: 0.03, density: 4.50,
+    coolant: { type: "Bol Sıvı Soğutma (ZORUNLU)", note: "Düşük ısı iletkenliği nedeniyle kesme kenarında ısı birikir — yetersiz soğutma hızlı takım aşınmasına ve yangın riskine yol açabilir." } },
+  wood: { label: "Ahşap", fixedRpm: 18000, fixedFeed: 3000, density: 0.70,
+    coolant: { type: "Kuru (Toz Emişi)", note: "Sıvı soğutma kullanılmaz — toz emişi/vakum sistemi önerilir." } },
+  plastic: { label: "Plastik", fixedRpm: 10000, fixedFeed: 1500, density: 1.20,
+    coolant: { type: "Kuru / Hava Üflemeli", note: "Bazı plastikler sıvı soğutucudan olumsuz etkilenebilir (gerilme çatlaması)." } },
+  acrylic: { label: "Akrilik", fixedRpm: 12000, fixedFeed: 1000, density: 1.18,
+    coolant: { type: "Hava Üflemeli", note: "Sıvı soğutucudan kaçının (çatlama riski) — ısınıp erimeyi önlemek için hava üflemesi yeterlidir." } },
 };
 
 const FLUTES_ASSUMED = 2; // generic small-diameter carbide endmill default

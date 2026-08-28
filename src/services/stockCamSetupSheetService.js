@@ -1,6 +1,7 @@
 import { OPERATION_TYPES } from "./stockCamPlanService.js";
 import { toolWearStatus } from "./cncMagazineService.js";
 import { computeStockCamCost } from "./stockCamCostService.js";
+import { MATERIAL_CUTTING_DATA } from "./materialCuttingData.js";
 
 // Printable job/routing sheet: a shop-floor document summarizing a
 // stock-cam plan's stock, controller, and confirmed operations (in order)
@@ -66,6 +67,10 @@ export function buildSetupSheetHtml(plan, postName, costInputs) {
     .join("\n");
 
   const totalTime = Number.isFinite(plan.lastEstimatedMinutes) ? `${plan.lastEstimatedMinutes} dk` : "-";
+  const matInfo = MATERIAL_CUTTING_DATA[plan.material];
+  const coolantLine = matInfo?.coolant
+    ? `${escapeHtml(matInfo.coolant.type)} — ${escapeHtml(matInfo.coolant.note)}`
+    : "-";
 
   // Maliyet Hesaplama: optional -- only rendered when the operator actually
   // supplied at least one real cost input (never shown with silently-zeroed
@@ -114,6 +119,8 @@ export function buildSetupSheetHtml(plan, postName, costInputs) {
   <h1>CNC Is Emri</h1>
   <div class="meta">
     <div><b>Stok:</b> ${escapeHtml(plan.stock.w)} x ${escapeHtml(plan.stock.d)} x ${escapeHtml(plan.stock.h)} mm</div>
+    <div><b>Malzeme:</b> ${escapeHtml(matInfo?.label || plan.material || "-")}</div>
+    <div><b>Sogutma:</b> ${coolantLine}</div>
     <div><b>Kontrolcu:</b> ${escapeHtml(postName || "belirtilmedi")}</div>
     <div><b>Toplam islem:</b> ${plan.operations.length}</div>
     <div><b>Tahmini toplam sure:</b> ${escapeHtml(totalTime)}</div>
