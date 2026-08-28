@@ -177,10 +177,11 @@ const fmtTL = (n) => `${round2(num(n)).toLocaleString("tr-TR")} TL`;
  * @param {string} p.material
  * @param {string} [p.tolerance] genel tolerans (ISO 2768 sınıfı) -- bilgi amaçlı, fiyatı etkilemez
  * @param {string} [p.surfaceFinish] yüzey kalitesi (Ra) -- bilgi amaçlı, fiyatı etkilemez
+ * @param {number} [p.validityDays] teklifin geçerlilik süresi (gün) -- admin panelden ayarlanır (quotePricingSettings.js)
  * @param {object} p.quote result of computeQuote
  * @returns {Promise<string>} the PDF path
  */
-export function generateQuotePdf({ partName, bbox, material, tolerance, surfaceFinish, quote }) {
+export function generateQuotePdf({ partName, bbox, material, tolerance, surfaceFinish, validityDays, quote }) {
   return new Promise((resolve, reject) => {
     try {
       fs.mkdirSync(config.outputDir, { recursive: true });
@@ -206,6 +207,10 @@ export function generateQuotePdf({ partName, bbox, material, tolerance, surfaceF
       if (surfaceFinish) doc.text(`Yuzey Kalitesi: ${toAscii(surfaceFinish)}`);
       doc.text(`Tahmini isleme suresi (birim): ${quote.minutes} dk`);
       doc.text(`Adet: ${quote.quantity ?? 1}`);
+      if (validityDays > 0) {
+        const expiry = new Date(Date.now() + validityDays * 24 * 60 * 60 * 1000);
+        doc.text(`Gecerlilik Tarihi: ${expiry.toLocaleDateString("tr-TR")} (${validityDays} gun)`);
+      }
       doc.text(`Hesaplama modu: ${quote.mode === "detayli" ? "Detayli" : "Basit"}`);
       doc.moveDown(0.8);
 

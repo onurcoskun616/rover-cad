@@ -1552,6 +1552,22 @@ button.secondary:hover:not(:disabled) {
   gap: 0.6rem;
 }
 
+.cam-quote-total-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) - 4px);
+  background: var(--bg);
+}
+
+.cam-quote-total-row strong {
+  color: #25844e;
+  font-size: 1.15rem;
+}
+
 .admin-tier-list {
   display: flex;
   flex-direction: column;

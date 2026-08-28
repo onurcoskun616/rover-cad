@@ -31,7 +31,10 @@ const tqPlanSummary = byId("tq-plan-summary");
 const tqPlanNotes = byId("tq-plan-notes");
 const tqQuoteBtn = byId("tq-quote-btn");
 const tqQuoteResult = byId("tq-quote-result");
+const tqQuoteValidity = byId("tq-quote-validity");
 const tqQuoteBreakdown = byId("tq-quote-breakdown");
+const tqQuoteTotalLabel = byId("tq-quote-total-label");
+const tqQuoteTotal = byId("tq-quote-total");
 const tqQuotePdf = byId("tq-quote-pdf");
 const tqRestartBtn = byId("tq-restart-btn");
 
@@ -340,7 +343,7 @@ async function handleQuote() {
     tqPlanSummary.textContent = tqPlan.summary || "";
     tqPlanNotes.textContent = tqPlan.notes ? `Notlar: ${tqPlan.notes}` : "";
     tqPlanView.hidden = true;
-    renderQuoteResult(quoteData.quote, quoteData.pdfUrl);
+    renderQuoteResult(quoteData.quote, quoteData.pdfUrl, quoteData.quoteValidityDays);
   } catch (err) {
     setStatus("", false);
     showError(`Sunucuya bağlanılamadı: ${err.message}`);
@@ -349,7 +352,7 @@ async function handleQuote() {
   }
 }
 
-function renderQuoteResult(quote, pdfUrl) {
+function renderQuoteResult(quote, pdfUrl, validityDays) {
   const lines = [
     `Tahmini işleme süresi (birim): ${quote.minutes} dk`,
     `Adet: ${quote.quantity}`,
@@ -360,12 +363,19 @@ function renderQuoteResult(quote, pdfUrl) {
   const pad = (s, n) => String(s).padEnd(n);
   for (const it of quote.items) lines.push(`${pad(it.label, 34)} ${Number(it.amount).toLocaleString("tr-TR")} TL`);
   lines.push("", `${pad("Birim Fiyat", 34)} ${Number(quote.unitPrice).toLocaleString("tr-TR")} TL`);
-  if (quote.quantity > 1) {
-    lines.push(`${pad(`TOPLAM (${quote.quantity} adet)`, 34)} ${Number(quote.total).toLocaleString("tr-TR")} TL`);
-  } else {
-    lines.push(`${pad("TOPLAM", 34)} ${Number(quote.total).toLocaleString("tr-TR")} TL`);
-  }
   tqQuoteBreakdown.textContent = lines.join("\n");
+
+  if (validityDays > 0) {
+    const expiry = new Date(Date.now() + validityDays * 24 * 60 * 60 * 1000);
+    tqQuoteValidity.textContent = `Geçerlilik: ${validityDays} gün (${expiry.toLocaleDateString("tr-TR")}'a kadar)`;
+    tqQuoteValidity.hidden = false;
+  } else {
+    tqQuoteValidity.hidden = true;
+  }
+
+  tqQuoteTotalLabel.textContent = quote.quantity > 1 ? `Sipariş Tutarı (${quote.quantity} adet, KDV Hariç)` : "Sipariş Tutarı (KDV Hariç)";
+  tqQuoteTotal.textContent = `${Number(quote.total).toLocaleString("tr-TR")} TL`;
+
   if (pdfUrl) { tqQuotePdf.href = pdfUrl; tqQuotePdf.hidden = false; } else { tqQuotePdf.hidden = true; }
   tqQuoteResult.hidden = false;
 }
