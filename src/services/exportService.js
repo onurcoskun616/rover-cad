@@ -437,11 +437,19 @@ function pyStr(str) {
   return JSON.stringify(toAscii(str));
 }
 
-// A4 landscape usable drawing area (mm), leaving room for the title block.
+// A4 landscape page (mm). TechDraw page coordinates are bottom-left origin,
+// Y increasing upward. The bottom strip is reserved for the title block (an
+// A4/A3 landscape template's block sits in the bottom-right, ~35mm tall) plus
+// the isometric render placed directly above it.
 const PAGE_W = 297;
 const PAGE_H = 210;
-const USABLE_W = 250;
-const USABLE_H = 165;
+const TITLEBLOCK_H = 35;
+const ISO_GAP = 4;
+const ISO_H = 60;
+const ISO_W = 82;
+const RESERVED_BOTTOM = TITLEBLOCK_H + ISO_GAP + ISO_H; // views must stay above this
+const USABLE_W = 260;
+const USABLE_H = PAGE_H - RESERVED_BOTTOM - 12;
 const GAP_MM = 15; // spacing between the three views, in page (scaled) mm
 
 // Pick a scale so the standard three-view arrangement fits the usable area.
@@ -467,20 +475,22 @@ function buildTechDrawCode(pdfPath, bbox, dimensions) {
   const x = Math.max(bbox.x || 1, 1);
   const y = Math.max(bbox.y || 1, 1);
   const z = Math.max(bbox.z || 1, 1);
+  const isoPngPath = pdfPath.replace(/\.pdf$/i, "_iso.png");
 
-  // Centre the three-view block on the page. Positions below are the CENTRES of
-  // each view in page mm; TechDraw positions views by their centre point.
+  // Anchor (Front view) position for the projection group. Centre the block
+  // horizontally, and vertically within the region above the reserved strip
+  // (title block + isometric render) so the two never overlap.
   const blockW = (x + y + GAP_MM) * scale;
   const blockH = (z + y + GAP_MM) * scale;
   const originX = (PAGE_W - blockW) / 2;
-  const originY = (PAGE_H - blockH) / 2;
-
+  const originY = RESERVED_BOTTOM + ((PAGE_H - RESERVED_BOTTOM) - blockH) / 2;
   const frontX = originX + (x * scale) / 2;
-  const frontY = originY + (z * scale) / 2;
-  const topX = frontX;
-  const topY = frontY + ((z + y) / 2 + GAP_MM) * scale;
-  const rightX = frontX + ((x + y) / 2 + GAP_MM) * scale;
-  const rightY = frontY;
+  // First-angle (ISO E) puts Top BELOW Front, so Front sits at the TOP of the
+  // block (larger Y, since Y increases upward).
+  const frontY = originY + blockH - (z * scale) / 2;
+
+  const isoX = PAGE_W - ISO_W / 2 - 8;
+  const isoY = TITLEBLOCK_H + ISO_GAP + ISO_H / 2;
 
   const dimLines = dimensions.length
     ? dimensions.map(([k, v]) => `${toAscii(k)}: ${toAscii(v)}`)
@@ -504,6 +514,7 @@ function buildTechDrawCode(pdfPath, bbox, dimensions) {
     "    pick = land or [f for f in cands if 'a4' in f.lower()] or cands",
     "    if pick:",
     "        template = os.path.join(tmpl_dir, sorted(pick)[0])",
+    'print("VIEW_DEBUG: template=" + str(template))',
     "",
     'page = doc.addObject("TechDraw::DrawPage", "RoverPage")',
     'tobj = doc.addObject("TechDraw::DrawSVGTemplate", "RoverTemplate")',
@@ -511,24 +522,64 @@ function buildTechDrawCode(pdfPath, bbox, dimensions) {
     "    tobj.Template = template",
     "page.Template = tobj",
     "",
-    "base = shape_objs[0]",
+    "# Standard first-angle (ISO E / Turkish TS) three-view projection: Front,",
+    "# Top (below Front) and Right, laid out and spaced by FreeCAD's own",
+    "# ProjectionGroup so the arrangement always matches the drafting standard",
+    "# instead of hand-picked positions/directions.",
+    'group = doc.addObject("TechDraw::DrawProjGroup", "Views")',
+    "page.addView(group)",
+    "group.Source = shape_objs",
+    'group.ProjectionType = "First angle"',
+    "group.ScaleType = 'Custom'",
+    `group.Scale = ${scale}`,
+    "doc.recompute()",
+    'group.addProjection("Front")',
+    'group.addProjection("Top")',
+    'group.addProjection("Right")',
+    "doc.recompute()",
+    "# Position must be set AFTER addProjection(), otherwise it is overwritten.",
+    `group.X = ${frontX.toFixed(2)}`,
+    `group.Y = ${frontY.toFixed(2)}`,
+    "doc.recompute()",
+    'front = group.getItemByLabel("Front")',
+    'top = group.getItemByLabel("Top")',
     "",
-    "def make_view(name, direction, xdir, sx, sy):",
-    '    v = doc.addObject("TechDraw::DrawViewPart", name)',
-    "    page.addView(v)",
-    "    v.Source = shape_objs",
-    "    v.Direction = FreeCAD.Vector(*direction)",
-    "    v.XDirection = FreeCAD.Vector(*xdir)",
-    `    v.Scale = ${scale}`,
-    "    v.ScaleType = 'Custom'",
-    "    # Position must be set AFTER addView(), otherwise it is overwritten.",
-    "    v.X = sx",
-    "    v.Y = sy",
-    "    return v",
+    "# Isometric render, shaded like the on-screen 3D preview, placed directly",
+    "# above the title block.",
+    "iso_ok = False",
+    "try:",
+    "    Gui = FreeCADGui",
+    "    if Gui.ActiveDocument is None or Gui.ActiveDocument.Document.Name != doc.Name:",
+    "        Gui.ActiveDocument = Gui.getDocument(doc.Name)",
+    "    view3d = Gui.ActiveDocument.ActiveView or Gui.ActiveDocument.activeView()",
+    "    for _o in shape_objs:",
+    "        try:",
+    '            _o.ViewObject.DisplayMode = "Shaded"',
+    "            _o.ViewObject.ShapeColor = (0.69, 0.71, 0.73)",
+    "            _o.ViewObject.Visibility = True",
+    "        except Exception:",
+    "            pass",
+    "    view3d.viewIsometric()",
+    "    view3d.fitAll()",
+    "    Gui.updateGui()",
+    `    view3d.saveImage(${JSON.stringify(isoPngPath)}, 900, 700, "White")`,
+    `    iso_ok = os.path.isfile(${JSON.stringify(isoPngPath)})`,
+    '    print("ISO_DEBUG: saved=" + str(iso_ok))',
+    "except Exception as iso_err:",
+    '    print("ISO_WARN: " + str(iso_err))',
     "",
-    `front = make_view("FrontView", (0, -1, 0), (1, 0, 0), ${frontX.toFixed(2)}, ${frontY.toFixed(2)})`,
-    `top = make_view("TopView", (0, 0, 1), (1, 0, 0), ${topX.toFixed(2)}, ${topY.toFixed(2)})`,
-    `right = make_view("RightView", (1, 0, 0), (0, 1, 0), ${rightX.toFixed(2)}, ${rightY.toFixed(2)})`,
+    "if iso_ok:",
+    "    try:",
+    '        dvi = doc.addObject("TechDraw::DrawViewImage", "IsoImage")',
+    "        page.addView(dvi)",
+    `        dvi.ImageFile = ${JSON.stringify(isoPngPath)}`,
+    `        dvi.Width = ${ISO_W}`,
+    `        dvi.Height = ${ISO_H}`,
+    `        dvi.X = ${isoX.toFixed(2)}`,
+    `        dvi.Y = ${isoY.toFixed(2)}`,
+    "        doc.recompute()",
+    "    except Exception as img_err:",
+    '        print("ISO_IMG_WARN: " + str(img_err))',
     "",
   ];
 
@@ -550,19 +601,75 @@ function buildTechDrawCode(pdfPath, bbox, dimensions) {
     "    return verts",
     "",
     "def get_circular_edges(view):",
+    "    # (index, radius, is_full_circle). Partial arcs (fillets/rounds) are",
+    "    # kept separate from full circles (holes/bores) since drafting rules",
+    "    # dimension them differently: Diameter for holes, Radius for arcs.",
     "    circles = []",
     "    for i in range(500):",
     "        try:",
     "            e = view.getEdgeByIndex(i)",
-    "            if hasattr(e, 'Curve') and hasattr(e.Curve, 'Radius'):",
-    "                circles.append((i, e.Curve.Radius))",
     "        except Exception:",
     "            break",
+    "        try:",
+    "            if not (hasattr(e, 'Curve') and hasattr(e.Curve, 'Radius')):",
+    "                continue",
+    "            try:",
+    "                is_full = bool(e.Closed)",
+    "            except Exception:",
+    "                span = abs(e.LastParameter - e.FirstParameter)",
+    "                is_full = abs(span - 6.283185307) < 0.01",
+    "            circles.append((i, e.Curve.Radius, is_full))",
+    "        except Exception:",
+    "            pass",
     "    return circles",
     "",
     "dim_ok = False",
     "try:",
     '    print("DIM_DEBUG: starting dimension creation")',
+    "    circles = get_circular_edges(front)",
+    '    print("DIM_DEBUG: circular edges = " + str(len(circles)))',
+    "    full_circles = sorted([c for c in circles if c[2]], key=lambda c: -c[1])",
+    "    partial_arcs = sorted([c for c in circles if not c[2]], key=lambda c: -c[1])",
+    "    diam_values = []",
+    "    seen = set()",
+    "    ci = 0",
+    "    for edge_idx, radius, _ in full_circles:",
+    "        rk = round(radius, 1)",
+    "        if rk in seen or ci >= 4:",
+    "            continue",
+    "        seen.add(rk)",
+    '        d = doc.addObject("TechDraw::DrawViewDimension", "DimDia" + str(ci))',
+    "        page.addView(d)",
+    '        d.Type = "Diameter"',
+    "        d.References2D = [(front, 'Edge' + str(edge_idx))]",
+    '        d.FormatSpec = "%.2f"',
+    "        doc.recompute()",
+    "        dim_ok = True",
+    "        diam_values.append(radius * 2)",
+    "        ci += 1",
+    "",
+    "    seen_r = set()",
+    "    ri = 0",
+    "    for edge_idx, radius, _ in partial_arcs:",
+    "        rk = round(radius, 1)",
+    "        if rk in seen_r or ri >= 2:",
+    "            continue",
+    "        seen_r.add(rk)",
+    '        d = doc.addObject("TechDraw::DrawViewDimension", "DimRad" + str(ri))',
+    "        page.addView(d)",
+    '        d.Type = "Radius"',
+    "        d.References2D = [(front, 'Edge' + str(edge_idx))]",
+    '        d.FormatSpec = "%.2f"',
+    "        doc.recompute()",
+    "        dim_ok = True",
+    "        ri += 1",
+    "",
+    "    def redundant(span):",
+    "        # A diameter callout already on this view covers the same span (the",
+    "        # view's outline is round) — a width/height dim would duplicate or",
+    "        # mislead, so skip it per drafting convention.",
+    "        return any(abs(dv - span) < max(0.15, 0.08 * span) for dv in diam_values)",
+    "",
     "    fverts = get_view_vertices(front)",
     '    print("DIM_DEBUG: front vertices = " + str(len(fverts)))',
     "    if len(fverts) >= 2:",
@@ -571,7 +678,7 @@ function buildTechDrawCode(pdfPath, bbox, dimensions) {
     "        x_span = by_x[-1][1] - by_x[0][1]",
     "        y_span = by_y[-1][2] - by_y[0][2]",
     '        print("DIM_DEBUG: x_span=" + str(round(x_span,2)) + " y_span=" + str(round(y_span,2)))',
-    "        if x_span > 0.1:",
+    "        if x_span > 0.1 and not redundant(x_span):",
     '            d = doc.addObject("TechDraw::DrawViewDimension", "DimW")',
     "            page.addView(d)",
     '            d.Type = "DistanceX"',
@@ -580,7 +687,7 @@ function buildTechDrawCode(pdfPath, bbox, dimensions) {
     "            doc.recompute()",
     "            dim_ok = True",
     '            print("DIM_DEBUG: width dim OK")',
-    "        if y_span > 0.1:",
+    "        if y_span > 0.1 and not redundant(y_span):",
     '            d = doc.addObject("TechDraw::DrawViewDimension", "DimH")',
     "            page.addView(d)",
     '            d.Type = "DistanceY"',
@@ -604,24 +711,6 @@ function buildTechDrawCode(pdfPath, bbox, dimensions) {
     "            doc.recompute()",
     "            dim_ok = True",
     '            print("DIM_DEBUG: depth dim OK")',
-    "",
-    "    circles = get_circular_edges(front)",
-    '    print("DIM_DEBUG: circular edges = " + str(len(circles)))',
-    "    seen = set()",
-    "    ci = 0",
-    "    for edge_idx, radius in circles:",
-    "        rk = round(radius, 1)",
-    "        if rk in seen or ci >= 3:",
-    "            continue",
-    "        seen.add(rk)",
-    '        d = doc.addObject("TechDraw::DrawViewDimension", "DimDia" + str(ci))',
-    "        page.addView(d)",
-    '        d.Type = "Diameter"',
-    "        d.References2D = [(front, 'Edge' + str(edge_idx))]",
-    '        d.FormatSpec = "%.2f"',
-    "        doc.recompute()",
-    "        dim_ok = True",
-    "        ci += 1",
     "",
     "except Exception as dim_err:",
     '    print("DIM_WARN: " + str(dim_err))',
@@ -698,7 +787,7 @@ export async function exportTechDrawPdfFromStep(stepPath, bbox, dimensions = [])
       [config.freecadMcp.toolParam]: code,
     });
     const text = extractResultText(result);
-    const dimDebug = text.split("\n").filter(l => l.startsWith("DIM_")).join(" | ");
+    const dimDebug = text.split("\n").filter(l => l.startsWith("DIM_") || l.startsWith("ISO_") || l.startsWith("VIEW_")).join(" | ");
     if (dimDebug) console.log("[TechDraw]", dimDebug);
     const match = text.match(/PDF_PATH=(.+)/);
     if (result?.isError || !match) {

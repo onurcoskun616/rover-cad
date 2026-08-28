@@ -8,6 +8,7 @@ import {
 import { runBuildPipeline } from "../services/buildPipeline.js";
 import { createJob, runJob } from "../services/jobStore.js";
 import { archiveProjectBuildFailOpen } from "../services/projectArchiveService.js";
+import { setLlmFeature } from "../services/llmRequestContext.js";
 
 function makeFileUrl(proto, host, filePath) {
   if (!filePath) return null;
@@ -33,6 +34,7 @@ router.post("/", (req, res) => {
       .status(400)
       .json({ error: "previousCode is required and must be a non-empty string" });
   }
+  setLlmFeature(prompt.replace(/\s+/g, " ").trim());
 
   const base = typeof basePrompt === "string" ? basePrompt : "";
   const proto = req.protocol;

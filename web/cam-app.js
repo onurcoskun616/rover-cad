@@ -4,13 +4,11 @@ if (!sessionToken) window.location.replace("login.html");
 const authHeaders = () => ({ Authorization: `Bearer ${sessionToken}` });
 
 const byId = (id) => document.getElementById(id);
-const viewerContainer = byId("viewer-container");
 const errorSection = byId("error-section");
 const errorText = byId("error-text");
 const camStatus = byId("cam-status");
 const camSpinner = byId("cam-spinner");
 const camStatusText = byId("cam-status-text");
-const gcodeLink = byId("gcode-link");
 const camAssistant = byId("cam-assistant");
 const camWizard = byId("cam-wizard");
 const camStepProgress = byId("cam-step-progress");
@@ -21,19 +19,20 @@ const camBackBtn = byId("cam-back-btn");
 const camNextBtn = byId("cam-next-btn");
 const camPlanBtn = byId("cam-plan-btn");
 const camPlanView = byId("cam-plan-view");
-const camPlanText = byId("cam-plan-text");
-const camPreviewBtn = byId("cam-preview-btn");
-const camPreviewView = byId("cam-preview-view");
-const camSimOp = byId("cam-sim-op");
-const camSimProgress = byId("cam-sim-progress");
-const camSimPlay = byId("cam-sim-play");
-const camSimSpeedBtns = { 1: byId("cam-sim-1x"), 2: byId("cam-sim-2x"), 5: byId("cam-sim-5x") };
-const camConfirmBtn = byId("cam-confirm-btn");
-const camRejectBtn = byId("cam-reject-btn");
+const camPlanSummary = byId("cam-plan-summary");
+const camPlanTbody = byId("cam-plan-tbody");
+const camPlanNotes = byId("cam-plan-notes");
+const camGenerateBtn = byId("cam-generate-btn");
 const camReviseBtn = byId("cam-revise-btn");
 const camReviseBox = byId("cam-revise-box");
 const camReviseInput = byId("cam-revise-input");
 const camReviseSubmit = byId("cam-revise-submit");
+const gcodeOutput = byId("gcode-output");
+const camSafetySummary = byId("cam-safety-summary");
+const camSafetyList = byId("cam-safety-list");
+const gcodePreview = byId("gcode-preview");
+const gcodeLink = byId("gcode-link");
+const cncSimBtn = byId("cnc-sim-btn");
 const camQuote = byId("cam-quote");
 const camQuoteTime = byId("cam-quote-time");
 const camQuoteBtn = byId("cam-quote-btn");
@@ -44,16 +43,7 @@ const camQuoteSubmit = byId("cam-quote-submit");
 const camQuoteResult = byId("cam-quote-result");
 const camQuoteBreakdown = byId("cam-quote-breakdown");
 const camQuotePdf = byId("cam-quote-pdf");
-const simWorkspace = byId("sim-workspace");
-const coordDisplay = byId("coord-display");
-const coordX = byId("coord-x");
-const coordY = byId("coord-y");
-const coordZ = byId("coord-z");
-const coordF = byId("coord-f");
-const gcodePanel = byId("gcode-panel");
-const gcodeLinesEl = byId("gcode-lines");
 
-let viewer = null;
 let stepPath = null;
 let prompt = "";
 let projectId = null;
@@ -66,7 +56,6 @@ let camStepIndex = 0;
 let camStepFieldNames = [];
 let camPreviewToken = null;
 let camEstimatedMinutes = null;
-let camSim = null;
 let camPlan = null;
 
 const raw = sessionStorage.getItem("rover_cam_data");
@@ -88,7 +77,14 @@ async function readJson(response) {
 }
 
 const POLL_INTERVAL_MS = 1500;
-const POLL_TIMEOUT_MS = 7 * 60 * 1000;
+// CAM code generation retries up to twice, and each attempt now allows up to
+// 8 minutes for the LLM call plus 5 minutes for FreeCAD execution
+// (CLAUDE_CLI_TIMEOUT_MS / FREECAD_MCP_CALL_TIMEOUT_MS) — worst case ~26min
+// across both attempts. A complex 3D freeform plan (toroid/surface
+// roughing+finishing), or just a slow LLM CLI round-trip, can legitimately
+// need that. A shorter window would give up on the frontend before a
+// slow-but-successful backend attempt ever finished.
+const POLL_TIMEOUT_MS = 35 * 60 * 1000;
 function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 
 async function runAsyncJob(url, options, onTick) {
@@ -129,101 +125,66 @@ function escapeHtml(s) {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-function resetSimLayout() {
-  if (simWorkspace) simWorkspace.classList.remove("sim-active");
-  if (gcodePanel) gcodePanel.hidden = true;
-  if (coordDisplay) coordDisplay.hidden = true;
+// Critical machining parameters the machinist can review/tweak before the
+// plan is turned into FreeCAD code — editing here writes straight into
+// `camPlan.steps`, which is what gets sent to /cam-simulate and /cam-confirm
+// verbatim, so an edit made here is exactly what the code generator sees.
+const CAM_PLAN_NUMERIC_FIELDS = [
+  { field: "stepDownMm", max: 10 },
+  { field: "feedMmMin", max: null },
+  { field: "startDepthMm", max: null },
+  { field: "finalDepthMm", max: null },
+];
+
+function renderCamPlanTable(plan) {
+  camPlanSummary.textContent = plan.summary || "";
+  camPlanNotes.textContent = plan.notes ? `Notlar: ${plan.notes}` : "";
+  camPlanTbody.innerHTML = (plan.steps || []).map((s, i) => {
+    const cells = CAM_PLAN_NUMERIC_FIELDS.map(({ field, max }) => {
+      const v = s[field];
+      const maxAttr = max != null ? ` max="${max}"` : "";
+      return `<td><input type="number" step="any"${maxAttr} class="cam-plan-input" data-idx="${i}" data-field="${field}" value="${v ?? ""}" /></td>`;
+    }).join("");
+    return (
+      `<tr>` +
+      `<td>${s.step}</td>` +
+      `<td><strong>${escapeHtml(s.operation || "")}</strong> — ${escapeHtml(s.tool || "")}` +
+      (s.description ? `<div class="cam-plan-desc">${escapeHtml(s.description)}</div>` : "") +
+      `</td>` +
+      cells +
+      `</tr>`
+    );
+  }).join("");
 }
 
-function setSimSpeed(mult) {
-  if (camSim) camSim.setSpeed(mult);
-  Object.entries(camSimSpeedBtns).forEach(([m, btn]) => {
-    btn.classList.toggle("active", Number(m) === mult);
-  });
-}
-
-async function loadModelPreview() {
-  if (!stlUrl && !contourUrl) return;
-  try {
-    const { initViewer } = await import("./viewer.js");
-    if (!viewer) viewer = initViewer(viewerContainer);
-    if (stlUrl) {
-      const { loadStl } = await import("./viewer.js");
-      loadStl(viewer, stlUrl);
-    } else if (contourUrl) {
-      const response = await fetch(contourUrl);
-      const data = await readJson(response);
-      const { loadToolpath } = await import("./viewer.js");
-      loadToolpath(viewer, data ?? { toolpaths: [] });
-    }
-  } catch (err) {
-    console.error("3D önizleme yüklenemedi:", err);
+// Delegated so it works for every row rendered above, including after a
+// revised plan re-renders the whole table.
+camPlanTbody.addEventListener("change", (ev) => {
+  const input = ev.target.closest(".cam-plan-input");
+  if (!input || !camPlan) return;
+  const idx = Number(input.dataset.idx);
+  const field = input.dataset.field;
+  const step = camPlan.steps?.[idx];
+  if (!step) return;
+  let value = input.value.trim() === "" ? null : Number(input.value);
+  if (value != null && !Number.isFinite(value)) value = null;
+  const spec = CAM_PLAN_NUMERIC_FIELDS.find((f) => f.field === field);
+  if (value != null && spec?.max != null && value > spec.max) {
+    value = spec.max; // silently clamp (StepDown must never exceed the safety limit)
+    input.value = String(value);
   }
-}
+  step[field] = value;
+});
 
-async function setupSimulation(simulationUrl) {
-  const response = await fetch(simulationUrl);
-  const data = await readJson(response);
-  const { initViewer, loadSimulation } = await import("./viewer.js");
-  if (!viewer) viewer = initViewer(viewerContainer);
-
-  let lastLineIdx = -1;
-  let gcodeLineEls = [];
-
-  camSim = loadSimulation(viewer, data ?? { toolpaths: [] }, {
-    onUpdate: ({ progress, op, x, y, z, f, lineIndex }) => {
-      camSimProgress.value = String(Math.round(progress * 1000));
-      camSimOp.textContent = `Operasyon: ${op || "—"}`;
-      if (camSim && !camSim.isPlaying()) camSimPlay.textContent = "▶ Oynat";
-      if (progress >= 1) camSimPlay.textContent = "▶ Tekrar Oynat";
-      if (coordX) {
-        coordX.textContent = x != null ? x.toFixed(3) : "0.000";
-        coordY.textContent = y != null ? y.toFixed(3) : "0.000";
-        coordZ.textContent = z != null ? z.toFixed(3) : "0.000";
-        coordF.textContent = f != null ? String(Math.round(f)) : "0";
-      }
-      const cncX = byId("cnc-cam-x");
-      const cncY = byId("cnc-cam-y");
-      const cncZ = byId("cnc-cam-z");
-      if (cncX) {
-        cncX.textContent = x != null ? x.toFixed(3) : "0.000";
-        cncY.textContent = y != null ? y.toFixed(3) : "0.000";
-        cncZ.textContent = z != null ? z.toFixed(3) : "0.000";
-      }
-      if (lineIndex !== lastLineIdx && gcodeLineEls.length > 0) {
-        if (lastLineIdx >= 0 && lastLineIdx < gcodeLineEls.length) gcodeLineEls[lastLineIdx].classList.remove("active");
-        if (lineIndex >= 0 && lineIndex < gcodeLineEls.length) {
-          gcodeLineEls[lineIndex].classList.add("active");
-          const el = gcodeLineEls[lineIndex];
-          const panel = gcodeLinesEl;
-          if (panel) { const elTop = el.offsetTop - panel.offsetTop; panel.scrollTop = elTop - panel.clientHeight / 2 + el.clientHeight / 2; }
-        }
-        lastLineIdx = lineIndex;
-      }
-    },
-  });
-
-  if (camSim.gcodeLines && gcodeLinesEl) {
-    gcodeLinesEl.innerHTML = "";
-    gcodeLineEls = camSim.gcodeLines.map((text, i) => {
-      const div = document.createElement("div");
-      div.className = "gcode-line";
-      div.innerHTML = `<span class="line-num">${i + 1}</span>${escapeHtml(text)}`;
-      gcodeLinesEl.appendChild(div);
-      return div;
-    });
+function renderSafetyChecks(checks) {
+  if (!Array.isArray(checks) || checks.length === 0) {
+    camSafetySummary.hidden = true;
+    return;
   }
-
-  if (simWorkspace) simWorkspace.classList.add("sim-active");
-  if (gcodePanel) gcodePanel.hidden = false;
-  if (coordDisplay) coordDisplay.hidden = false;
-  requestAnimationFrame(() => window.dispatchEvent(new Event("resize")));
-
-  camSimProgress.value = "0";
-  camSimPlay.textContent = "▶ Oynat";
-  setSimSpeed(1);
-  const cncStatus = byId("cnc-cam-status");
-  if (cncStatus) { cncStatus.textContent = "Hazır"; cncStatus.style.color = "#3ddc84"; }
+  camSafetyList.innerHTML = checks.map((c) =>
+    `<li class="${c.ok ? "cam-safety-ok" : "cam-safety-fail"}">${c.ok ? "✓" : "✕"} ${escapeHtml(c.label || "")}</li>`
+  ).join("");
+  camSafetySummary.hidden = false;
 }
 
 async function loadCamStep(targetIndex) {
@@ -309,51 +270,98 @@ async function requestCamPlan(changeRequest) {
     const plan = result.body.plan;
     camPlan = plan;
     setCamStatus("", false);
-    camPlanText.textContent = plan.planText || JSON.stringify(plan, null, 2);
+    renderCamPlanTable(plan);
     camPlanView.hidden = false;
     camReviseBox.hidden = true;
     camReviseInput.value = "";
-    if (camSim) camSim.pause();
-    camSim = null;
-    camPreviewView.hidden = true;
     camPreviewToken = null;
     camEstimatedMinutes = null;
+    gcodeOutput.hidden = true;
+    camSafetySummary.hidden = true;
     camQuote.hidden = true;
     camQuoteForm.hidden = true;
     camQuoteResult.hidden = true;
-    gcodeLink.hidden = true;
   } catch (err) { setCamStatus(`Sunucuya bağlanılamadı: ${err.message}`, false); }
   finally { camPlanBtn.disabled = false; }
 }
 
 async function handleCamPlan() { await requestCamPlan(null); }
 
-async function handleCamPreview() {
+async function handleCamGenerate() {
   if (!camPlan) return;
-  camPreviewBtn.disabled = true;
+  camGenerateBtn.disabled = true;
   camReviseBtn.disabled = true;
-  camPreviewView.hidden = true;
+  gcodeOutput.hidden = true;
   camPreviewToken = null;
-  gcodeLink.hidden = true;
-  setCamStatus("Takım yolu simülasyonu hesaplanıyor…", true);
+  setCamStatus("G-code üretiliyor…", true);
   try {
-    const result = await runAsyncJob(
+    const simResult = await runAsyncJob(
       `${API_BASE}/cam-simulate`,
       { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify({ stepPath, answers: camAnswers, plan: camPlan, prompt }) },
       (seconds) => {
-        const phase = seconds < 15 ? "Kod üretiliyor" : seconds < 60 ? "TopkapiAl hesaplıyor" : "İşlem devam ediyor";
+        const phase = seconds < 15 ? "Kod üretiliyor" : seconds < 60 ? "TopkapıAI hesaplıyor" : "İşlem devam ediyor";
         setCamStatus(`${phase}… (${seconds}s)`, true);
       },
     );
-    if (result.error || !result.ok || !result.body?.simulationUrl) {
-      setCamStatus(result.error ?? result.body?.error ?? "Simülasyon üretilemedi.", false);
+    if (simResult.error || !simResult.ok || !simResult.body?.token) {
+      setCamStatus(simResult.error ?? simResult.body?.error ?? "G-code üretilemedi.", false);
       return;
     }
-    camPreviewToken = result.body.token ?? null;
-    camEstimatedMinutes = result.body.estimatedMinutes ?? null;
-    await setupSimulation(result.body.simulationUrl);
-    setCamStatus("", false);
-    camPreviewView.hidden = false;
+    camPreviewToken = simResult.body.token;
+    camEstimatedMinutes = simResult.body.estimatedMinutes ?? null;
+
+    setCamStatus("G-code dosyası hazırlanıyor…", true);
+    const confirmResult = await runAsyncJob(
+      `${API_BASE}/cam-confirm`,
+      { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify({ stepPath, answers: camAnswers, plan: camPlan, prompt, token: camPreviewToken }) },
+      (seconds) => setCamStatus(`G-code dosyası hazırlanıyor… (${seconds}s)`, true),
+    );
+    if (confirmResult.error || !confirmResult.ok || !confirmResult.body?.gcodeUrl) {
+      setCamStatus(confirmResult.error ?? confirmResult.body?.error ?? "G-code üretilemedi.", false);
+      return;
+    }
+
+    const gcodeUrl = confirmResult.body.gcodeUrl;
+    setCamStatus("G-code hazır.", false);
+    renderSafetyChecks(confirmResult.body.safetyChecks);
+
+    gcodeLink.href = gcodeUrl;
+
+    let gcodeText = "";
+    try {
+      const resp = await fetch(gcodeUrl);
+      gcodeText = await resp.text();
+    } catch { /* download link still works */ }
+
+    if (gcodeText) {
+      const lines = gcodeText.split("\n");
+      const maxPreview = 200;
+      const shown = lines.slice(0, maxPreview);
+      gcodePreview.innerHTML = shown.map((line, i) =>
+        `<div class="cam-gcode-line"><span class="cam-gcode-linenum">${i + 1}</span>${escapeHtml(line)}</div>`
+      ).join("");
+      if (lines.length > maxPreview) {
+        gcodePreview.innerHTML += `<div class="cam-gcode-line cam-gcode-more">… toplam ${lines.length} satır (ilk ${maxPreview} gösterildi)</div>`;
+      }
+    }
+
+    cncSimBtn.onclick = () => {
+      const stockData = {
+        gcode: gcodeText,
+        machineType: camAnswers.machineType || "freze",
+        material: camAnswers.material || "",
+      };
+      if (bbox) { stockData.bbox = bbox; }
+      if (camAnswers.stockWidth) stockData.stockWidth = Number(camAnswers.stockWidth);
+      if (camAnswers.stockLength) stockData.stockLength = Number(camAnswers.stockLength);
+      if (camAnswers.stockHeight) stockData.stockHeight = Number(camAnswers.stockHeight);
+      if (camAnswers.stockDiameter) stockData.stockDiameter = Number(camAnswers.stockDiameter);
+      sessionStorage.setItem("rover_cnc_gcode", JSON.stringify(stockData));
+      window.open("cnc-sim.html", "_blank");
+    };
+
+    gcodeOutput.hidden = false;
+
     if (camEstimatedMinutes != null) {
       camQuoteTime.textContent = `Tahmini işleme süresi: ${camEstimatedMinutes} dk`;
       camQuote.hidden = false;
@@ -361,51 +369,7 @@ async function handleCamPreview() {
       camQuoteResult.hidden = true;
     }
   } catch (err) { setCamStatus(`Sunucuya bağlanılamadı: ${err.message}`, false); }
-  finally { camPreviewBtn.disabled = false; camReviseBtn.disabled = false; }
-}
-
-function handleCamReject() {
-  if (camSim) camSim.pause();
-  camPreviewView.hidden = true;
-  camPreviewToken = null;
-  resetSimLayout();
-  requestAnimationFrame(() => window.dispatchEvent(new Event("resize")));
-  setCamStatus("Takım yolu reddedildi. Planı değiştirip tekrar simüle edin.", false);
-}
-
-async function handleCamConfirm() {
-  if (!camPlan || !camPreviewToken) return;
-  camConfirmBtn.disabled = true;
-  camRejectBtn.disabled = true;
-  setCamStatus("Takım yolu onaylandı, G-code üretiliyor…", true);
-  try {
-    const result = await runAsyncJob(
-      `${API_BASE}/cam-confirm`,
-      { method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() }, body: JSON.stringify({ stepPath, answers: camAnswers, plan: camPlan, prompt, token: camPreviewToken }) },
-      (seconds) => setCamStatus(`G-code üretiliyor… (${seconds} sn)`, true),
-    );
-    if (result.error || !result.ok || !result.body?.gcodeUrl) {
-      setCamStatus(result.error ?? result.body?.error ?? "G-code üretilemedi.", false);
-      return;
-    }
-    setCamStatus("G-code hazır.", false);
-    gcodeLink.href = result.body.gcodeUrl;
-    gcodeLink.hidden = false;
-
-    const cncSimBtn = byId("cnc-sim-btn");
-    if (cncSimBtn) {
-      cncSimBtn.hidden = false;
-      cncSimBtn.onclick = async () => {
-        try {
-          const resp = await fetch(result.body.gcodeUrl);
-          const gcode = await resp.text();
-          sessionStorage.setItem("rover_cnc_gcode", JSON.stringify({ gcode, machineType: camAnswers.machineType || "freze" }));
-          window.open("cnc-sim.html", "_blank");
-        } catch { window.open("cnc-sim.html", "_blank"); }
-      };
-    }
-  } catch (err) { setCamStatus(`Sunucuya bağlanılamadı: ${err.message}`, false); }
-  finally { camConfirmBtn.disabled = false; camRejectBtn.disabled = false; }
+  finally { camGenerateBtn.disabled = false; camReviseBtn.disabled = false; }
 }
 
 function setQuoteMode(mode) {
@@ -450,7 +414,7 @@ function renderQuoteBreakdown(quote) {
 }
 
 async function handleQuoteSubmit() {
-  if (camEstimatedMinutes == null) { setCamStatus("Önce takım yolu önizlemesi oluşturun.", false); return; }
+  if (camEstimatedMinutes == null) { setCamStatus("Önce G-code üretin.", false); return; }
   const mode = currentQuoteMode();
   camQuoteSubmit.disabled = true;
   setCamStatus("Teklif hesaplanıyor…", true);
@@ -473,34 +437,7 @@ async function handleQuoteSubmit() {
 camNextBtn.addEventListener("click", handleCamNext);
 camBackBtn.addEventListener("click", handleCamBack);
 camPlanBtn.addEventListener("click", handleCamPlan);
-camPreviewBtn.addEventListener("click", handleCamPreview);
-camConfirmBtn.addEventListener("click", handleCamConfirm);
-camRejectBtn.addEventListener("click", handleCamReject);
-
-camSimPlay.addEventListener("click", () => {
-  if (!camSim) return;
-  const cncStatus = byId("cnc-cam-status");
-  if (camSim.isPlaying()) {
-    camSim.pause();
-    camSimPlay.textContent = "▶ Oynat";
-    if (cncStatus) { cncStatus.textContent = "Duraklatıldı"; cncStatus.style.color = "#f0c040"; }
-  } else {
-    camSim.play();
-    camSimPlay.textContent = "⏸ Duraklat";
-    if (cncStatus) { cncStatus.textContent = "Çalışıyor"; cncStatus.style.color = "#3ddc84"; }
-  }
-});
-
-camSimProgress.addEventListener("input", () => {
-  if (!camSim) return;
-  camSim.pause();
-  camSimPlay.textContent = "▶ Oynat";
-  camSim.seek(Number(camSimProgress.value) / 1000);
-});
-
-Object.entries(camSimSpeedBtns).forEach(([m, btn]) => {
-  btn.addEventListener("click", () => setSimSpeed(Number(m)));
-});
+camGenerateBtn.addEventListener("click", handleCamGenerate);
 
 camReviseBtn.addEventListener("click", () => { camReviseBox.hidden = !camReviseBox.hidden; });
 camReviseSubmit.addEventListener("click", () => { const change = camReviseInput.value.trim(); if (change) requestCamPlan(change); });
@@ -516,7 +453,6 @@ camQuoteForm.querySelectorAll('input[name="quote-mode"]').forEach((radio) => {
 camQuoteSubmit.addEventListener("click", handleQuoteSubmit);
 
 async function init() {
-  await loadModelPreview();
   camStepIndex = 0;
   await loadCamStep(0);
 }

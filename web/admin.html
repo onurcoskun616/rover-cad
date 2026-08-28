@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>TOPKAPIAI · Yönetim Paneli</title>
   <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="admin-token.css">
 </head>
 <body class="account-dashboard-page admin-dashboard-page">
   <div class="account-shell">
@@ -27,16 +28,16 @@
     </aside>
 
     <main class="account-main admin-main">
-      <div id="preview-banner" class="preview-banner" hidden><span>ÖNİZLEME</span> API kapalı olduğu için örnek yönetim verileri gösteriliyor.</div>
+      <div id="preview-banner" class="preview-banner" hidden><span>UYARI</span> Yönetim verileri şu anda alınamadı.</div>
 
       <header class="account-topbar" id="overview">
-        <div><p class="account-kicker">YÖNETİM MERKEZİ</p><h1>Kontrol sizde</h1><p>Kullanıcıları, token kullanımını ve sistem hareketlerini tek ekrandan yönetin.</p></div>
+        <div><p class="account-kicker">YÖNETİM MERKEZİ</p><h1>Kontrol sizde</h1><p>Gerçek kullanıcıları görün, aylık token kotalarını tanımlayın ve kullanım hareketlerini izleyin.</p></div>
         <div class="account-user"><span>Y</span><div><strong>Yönetici</strong><small>TOPKAPIAI Admin</small></div></div>
       </header>
 
       <section class="admin-actions" aria-label="Hızlı yönetim işlemleri">
-        <button class="quick-action quick-action-primary" type="button" data-admin-action="add"><span>＋</span><div><strong>Yeni kullanıcı ekle</strong><small>Hesap oluştur ve davet et</small></div></button>
-        <button class="quick-action" type="button" data-admin-action="tokens"><span>↗</span><div><strong>Token tanımla</strong><small>Kullanıcı kotasını güncelle</small></div></button>
+        <button class="quick-action quick-action-primary" type="button" data-admin-action="add"><span>＋</span><div><strong>Yeni kullanıcı</strong><small>Kayıt ekranını aç</small></div></button>
+        <button class="quick-action" type="button" data-admin-action="tokens"><span>↗</span><div><strong>Token tanımla</strong><small>Aylık kullanıcı kotası</small></div></button>
         <button class="quick-action" type="button" data-admin-action="export"><span>↓</span><div><strong>Rapor indir</strong><small>Kullanım verilerini dışa aktar</small></div></button>
       </section>
 
@@ -54,7 +55,7 @@
 
       <section class="account-panel admin-users-panel" id="users">
         <div class="admin-section-head">
-          <div><p class="account-kicker">KULLANICI YÖNETİMİ</p><h2>Tüm kullanıcılar</h2><p id="user-count"></p></div>
+          <div><p class="account-kicker">GERÇEK KULLANICILAR</p><h2>Kullanıcı ve token yönetimi</h2><p id="user-count"></p></div>
           <div class="admin-filters">
             <label class="admin-search"><span>⌕</span><input id="search" type="search" placeholder="İsim veya e-posta ara" aria-label="Kullanıcı ara"></label>
             <select id="status-filter" aria-label="Duruma göre filtrele"><option value="all">Tüm durumlar</option><option value="active">Aktif</option><option value="blocked">Engelli</option></select>
@@ -76,10 +77,20 @@
           <div id="activity-list" class="admin-activity-list"></div>
         </article>
         <article class="account-panel admin-system-card" id="system">
-          <div class="panel-heading"><div><p class="account-kicker">SİSTEM DURUMU</p><h2>Servisler</h2></div><span id="system-badge" class="soft-badge">Önizleme</span></div>
-          <div class="system-row"><span><i class="system-light is-warning"></i>API servisi</span><strong>Bağlantı bekleniyor</strong></div>
+          <div class="panel-heading"><div><p class="account-kicker">SİSTEM DURUMU</p><h2>Servisler</h2></div><span id="system-badge" class="soft-badge">Aktif</span></div>
+          <div class="system-row"><span><i id="api-status-light" class="system-light"></i>API servisi</span><strong id="api-status-text">Bağlı</strong></div>
           <div class="system-row"><span><i class="system-light"></i>GitHub Pages</span><strong>Yayında</strong></div>
-          <div class="system-row"><span><i class="system-light"></i>Veri görünümü</span><strong>Hazır</strong></div>
+          <div class="system-row"><span><i class="system-light"></i>Veri görünümü</span><strong id="data-status-text">Canlı veri</strong></div>
+          <div class="maintenance-command">
+            <div>
+              <span>YEREL BACKEND BAKIM KOMUTU</span>
+              <button id="copy-maintenance-command" type="button">Kopyala</button>
+            </div>
+            <pre><code id="maintenance-command">cd /d C:\Users\Win10\Rover
+for /f "tokens=5" %a in ('netstat -ano ^| findstr :3000') do taskkill /PID %a /F
+npm start</code></pre>
+            <p>Port 3000 takılı kalırsa CMD'de bu komutu çalıştırın.</p>
+          </div>
           <button class="account-secondary-btn" type="button" data-admin-action="settings">Sistem ayarları</button>
         </article>
       </section>

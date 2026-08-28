@@ -10,12 +10,16 @@ export function initViewer(container) {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x152238);
 
-  const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 100000);
+  // near=1 iken tekerlekle yaklaşıldığında kameraya 1 birimden yakın kalan
+  // yüzeyler kırpılıyor, model ekrandan siliniyordu ("zoom bozuk" hissi).
+  // logarithmicDepthBuffer acik oldugu icin bu kadar genis bir near/far araligi
+  // z-fighting'e yol acmiyor.
+  const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 5000);
   camera.position.set(100, 100, 100);
 
-  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  const renderer = new THREE.WebGLRenderer({ antialias: true, logarithmicDepthBuffer: true });
   renderer.setSize(width, height);
-  renderer.setPixelRatio(window.devicePixelRatio);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   container.replaceChildren(renderer.domElement);
 
   const labelRenderer = new CSS2DRenderer();
@@ -28,7 +32,31 @@ export function initViewer(container) {
   container.appendChild(labelRenderer.domElement);
 
   const controls = new OrbitControls(camera, renderer.domElement);
+  // Damping'in momentum davranisi her tekerlek tikini birkac kare boyunca
+  // sonumleyerek suruduruyor, hizli art arda scroll'da kamera hedeften gecip
+  // geri seker gibi hissettiriyordu. CNC Simulator'de ayni sebeple kapatilmisti;
+  // kapaliyken zoom her tekerlek hareketine 1:1 karsilik veriyor.
+  // Damping bir kez kapatilmisti: her tekerlek tiki birkac kare boyunca
+  // sonumlenerek suruyor, hizli art arda scroll'da kamera hedeften gecip geri
+  // seker gibi hissettiriyordu. O "gidip gelme" hissi asil olarak ADIM BOYU
+  // buyuk oldugu icin olusuyordu — buyuk bir dolly'yi kareler boyunca yaymak
+  // savrulma gibi duruyor. Adim kucuksa ayni sonumleme, sicramayi yumusatan
+  // kisa bir gecise donusuyor. Bu yuzden ikisi birlikte degistirildi: damping
+  // geri acildi ama varsayilan 0.05'ten daha toparlak bir katsayiyla (uzun
+  // suzulme yerine kisa yaslanma), zoomSpeed ise 0.9'dan 0.35'e cekildi.
+  // Tik basina mesafe degisimi: 0.95^0.35 = %1.8 (onceden %4.5).
   controls.enableDamping = true;
+  controls.dampingFactor = 0.15;
+  controls.zoomSpeed = 0.35;
+  // Tekerlek, kameranin yorunge HEDEFINE dogru yaklastiriyordu: imlec parcanin
+  // bir kosesindeyken bile zoom merkeze cekiyor, bakilan yeri buyutmek icin
+  // once pan yapmak gerekiyordu. zoomToCursor ile yakinlasma imlecin altindaki
+  // noktaya dogru oluyor. Hem CAD hem Montaj bu ayni goruntuleyiciyi kullaniyor.
+  controls.zoomToCursor = true;
+  // Serbest zoom: yakinda camera.near'in (0.1) uzerinde kalacak kadar bir taban,
+  // uzakta far duzlemin (5000) altinda kalacak bir tavan.
+  controls.minDistance = 0.5;
+  controls.maxDistance = 4000;
 
   scene.add(new THREE.AmbientLight(0xffffff, 0.7));
   const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
@@ -202,6 +230,40 @@ export function loadSimulation(viewer, data, { onUpdate } = {}) {
   if (group) group.add(tool);
   else viewer.scene.add(tool);
 
+  // --- Chip particles (shared geometry/material) ---
+  const chipGeo = new THREE.BoxGeometry(1, 0.3, 1);
+  const chipMat = new THREE.MeshStandardMaterial({ color: 0xbbaa77, metalness: 0.6, roughness: 0.4 });
+  const chipParticles = [];
+
+  function spawnChip(x, y, z) {
+    if (chipParticles.length > 40) return;
+    if (Math.random() > 0.1) return;
+    const m = new THREE.Mesh(chipGeo, chipMat);
+    const s = 0.3 + Math.random() * 0.5;
+    m.scale.set(s, 1, 0.3 + Math.random() * 0.5);
+    m.position.set(x + (Math.random() - 0.5) * 2, y + (Math.random() - 0.5) * 2, z);
+    m.userData.vel = new THREE.Vector3((Math.random() - 0.5) * 15, (Math.random() - 0.5) * 15, 4 + Math.random() * 10);
+    m.userData.life = 1.2 + Math.random();
+    if (group) group.add(m); else viewer.scene.add(m);
+    chipParticles.push(m);
+  }
+
+  function updateChips(dt) {
+    const parent = group || viewer.scene;
+    for (let i = chipParticles.length - 1; i >= 0; i--) {
+      const c = chipParticles[i];
+      c.userData.vel.z -= 50 * dt;
+      c.position.addScaledVector(c.userData.vel, dt);
+      c.rotation.x += dt * 5;
+      c.rotation.z += dt * 3;
+      c.userData.life -= dt;
+      if (c.userData.life <= 0 || c.position.z < stkBaseZ - 15) {
+        parent.remove(c);
+        chipParticles.splice(i, 1);
+      }
+    }
+  }
+
   // --- Material removal simulation (heightmap columns) ---
   let stockMesh = null;
   let stockHeights = null;
@@ -290,7 +352,10 @@ export function loadSimulation(viewer, data, { onUpdate } = {}) {
         }
       }
     }
-    if (dirty) stockMesh.instanceMatrix.needsUpdate = true;
+    if (dirty) {
+      stockMesh.instanceMatrix.needsUpdate = true;
+      spawnChip(tx, ty, tz);
+    }
   }
 
   function resetStock() {
@@ -342,6 +407,7 @@ export function loadSimulation(viewer, data, { onUpdate } = {}) {
 
   viewer.setFrameCb((dt) => {
     spindle.rotation.y += dt * 15;
+    updateChips(dt);
     if (!playing || total === 0) return;
     distance += baseMmPerSec * speed * dt;
     if (distance >= total) {
@@ -607,9 +673,9 @@ export function loadStl(viewer, url) {
       geometry.computeVertexNormals();
 
       const material = new THREE.MeshStandardMaterial({
-        color: 0x2563eb,
-        metalness: 0.15,
-        roughness: 0.55,
+        color: 0xb0b4b8,
+        metalness: 0.2,
+        roughness: 0.6,
       });
       const mesh = new THREE.Mesh(geometry, material);
       viewer.scene.add(mesh);

@@ -6,6 +6,7 @@ import { runBuildPipeline } from "../services/buildPipeline.js";
 import { createJob, runJob } from "../services/jobStore.js";
 import { preparePromptCache } from "../services/promptCacheService.js";
 import { archiveProjectBuildFailOpen } from "../services/projectArchiveService.js";
+import { setLlmFeature } from "../services/llmRequestContext.js";
 
 function makeFileUrl(proto, host, filePath) {
   if (!filePath) return null;
@@ -27,6 +28,7 @@ router.post("/", (req, res) => {
       .status(400)
       .json({ error: "prompt is required and must be a non-empty string" });
   }
+  setLlmFeature(prompt.replace(/\s+/g, " ").trim());
 
   const proto = req.protocol;
   const host = req.get("host");
