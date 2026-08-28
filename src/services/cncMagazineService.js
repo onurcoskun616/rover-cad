@@ -9,6 +9,11 @@ import { config } from "../config.js";
 // shape (dia/fluteLen/totalLen/maxRpm — matches ToolMagazine in cnc-sim.html).
 const CAPACITY = 40;
 const VALID_TYPES = ["endmill", "roughing", "drill", "ballmill", "chamfer"];
+// Takım Ömrü Takibi (tool life/wear tracking): a general, typical
+// carbide-tool "time to inspect/replace" reminder threshold (8 saat kesme) --
+// a conservative shop-floor default, not a precise per-tool engineering
+// figure. A custom tool may override it via its own `wearLimitMinutes`.
+const DEFAULT_WEAR_LIMIT_MINUTES = 480;
 
 function filePath(name) {
   return path.join(config.dataDir, `${name}.json`);
@@ -47,6 +52,7 @@ function normalizeTool(data) {
     // magazine (single shared source across simulator + real production).
     flutes: num(data.flutes, 2) || 2,
     material: str(data.material).trim() || "Karbur",
+    wearLimitMinutes: num(data.wearLimitMinutes, DEFAULT_WEAR_LIMIT_MINUTES) || DEFAULT_WEAR_LIMIT_MINUTES,
   };
 }
 
@@ -181,4 +187,65 @@ export function setMagazineLayout(slots) {
   }
   writeJson("cnc-magazine-layout", cleaned);
   return cleaned;
+}
+
+// ---------------------------------------------------------------------------
+// Takım Ömrü Takibi (tool life/wear tracking): a persisted, cumulative
+// estimated-cutting-minutes counter per tool ref-id ("builtin:N" or a custom
+// tool's own uuid — the SAME ref-id scheme cnc-sim.html's magazine editor
+// already uses for its slot layout, see magRefId() there). Recorded once per
+// confirmed stock-cam operation (stockCamAssistant.js's /stock-cam/confirm
+// route), using the real marginal FreeCAD time-estimate delta that operation
+// added to the plan — never an invented number. Deliberately NOT
+// retroactively adjusted when a plan is later edited or an operation is
+// removed: once an operation was confirmed, its share of wear is treated as
+// real and permanent, the same way a machinist wouldn't expect an
+// already-cut test part to "un-wear" a tool just because the CAM plan was
+// revised afterward. A cumulative reminder counter, not a substitute for the
+// operator's own tool inspection judgement.
+function readToolUsage() {
+  return readJson("cnc-magazine-tool-usage", {});
+}
+
+export function getToolUsageMinutes(toolRefId) {
+  if (!toolRefId) return 0;
+  return Number(readToolUsage()[toolRefId]) || 0;
+}
+
+export function addToolUsageMinutes(toolRefId, minutes) {
+  if (!toolRefId || !Number.isFinite(minutes) || minutes <= 0) return;
+  const usage = readToolUsage();
+  usage[toolRefId] = (Number(usage[toolRefId]) || 0) + minutes;
+  writeJson("cnc-magazine-tool-usage", usage);
+}
+
+export function resetToolUsage(toolRefId) {
+  const usage = readToolUsage();
+  if (!(toolRefId in usage)) return false;
+  delete usage[toolRefId];
+  writeJson("cnc-magazine-tool-usage", usage);
+  return true;
+}
+
+export function listToolUsage() {
+  return readToolUsage();
+}
+
+// Wear-limit lookup: a custom tool may set its own `wearLimitMinutes`;
+// everything else (including every built-in) falls back to the shared
+// default — built-ins have no persisted record of their own to hold one.
+export function wearLimitMinutesFor(toolRefId) {
+  if (!toolRefId) return DEFAULT_WEAR_LIMIT_MINUTES;
+  const custom = readJson("cnc-magazine-tools", []).find((t) => t.id === toolRefId);
+  const limit = Number(custom?.wearLimitMinutes);
+  return Number.isFinite(limit) && limit > 0 ? limit : DEFAULT_WEAR_LIMIT_MINUTES;
+}
+
+// Convenience rollup for the /stock-cam/confirm route and the printable
+// setup sheet — both just want "how many minutes, what's the limit, is it
+// already over" for a given tool ref-id.
+export function toolWearStatus(toolRefId) {
+  const minutes = Math.round(getToolUsageMinutes(toolRefId) * 10) / 10;
+  const limit = wearLimitMinutesFor(toolRefId);
+  return { minutes, limit, overLimit: minutes >= limit };
 }
