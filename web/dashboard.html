@@ -16,6 +16,7 @@
       <nav class="account-nav" aria-label="Hesap menüsü">
         <a class="is-active" href="#overview"><span>⌂</span> Genel bakış</a>
         <a href="#projects"><span>◇</span> Projelerim</a>
+        <a href="#quotes"><span>₺</span> Tekliflerim</a>
         <a href="#files"><span>▤</span> Dosyalarım</a>
         <a href="#account"><span>○</span> Hesap bilgileri</a>
       </nav>
@@ -76,6 +77,17 @@
       <section class="account-panel activity-panel" id="activity">
         <div class="panel-heading"><div><p class="account-kicker">SON İŞLEMLER</p><h2>Yakın kullanım geçmişi</h2></div></div>
         <div id="activity-list" class="activity-list"></div>
+      </section>
+
+      <section class="account-panel quotes-panel" id="quotes">
+        <div class="panel-heading"><div><p class="account-kicker">TEKLİFLERİM</p><h2>Teklif Geçmişi</h2></div><a href="teklif.html">Yeni teklif al →</a></div>
+        <div id="quotes-stats" class="admin-metrics quotes-stats"></div>
+        <div class="files-table-wrap">
+          <table class="files-table">
+            <thead><tr><th>Teklif No</th><th>Parça</th><th>Adet</th><th>Tutar</th><th>Durum</th><th>Tarih</th><th></th></tr></thead>
+            <tbody id="quotes-list"></tbody>
+          </table>
+        </div>
       </section>
 
       <section class="account-panel projects-panel" id="projects">

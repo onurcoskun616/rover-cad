@@ -3,6 +3,7 @@ import { ensureProfile, listUsage } from "../services/accountStore.js";
 import { apiKeyAuth } from "./apiKeyAuth.js";
 import { googleOAuthUrl, loginWithSupabase, registerWithSupabase, requestPasswordReset } from "../services/supabaseAuth.js";
 import { getUserProject, getUserProjectFilePath, listUserFiles, listUserProjects } from "../services/projectArchiveService.js";
+import { listQuotesForUser, quoteStatsForUser } from "../services/quoteHistoryService.js";
 const router = Router();
 
 function validateCredentials(body, requiresName = false) {
@@ -61,5 +62,15 @@ router.get("/projects/:projectId/files/*", apiKeyAuth, (req, res, next) => {
 });
 router.get("/files", apiKeyAuth, (req, res, next) => {
   try { res.json({ files: listUserFiles(req.user.id, req.query.limit) }); } catch (error) { next(error); }
+});
+// Teklif Geçmişi + Hesabım paneli teklif sayaçları (dashboard.html).
+router.get("/quotes", apiKeyAuth, async (req, res, next) => {
+  try {
+    const [quotes, stats] = await Promise.all([
+      listQuotesForUser(req.user.id, req.query.limit),
+      quoteStatsForUser(req.user.id),
+    ]);
+    res.json({ quotes, stats });
+  } catch (error) { next(error); }
 });
 export default router;
