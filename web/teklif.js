@@ -31,6 +31,7 @@ const tqPlanSummary = byId("tq-plan-summary");
 const tqPlanNotes = byId("tq-plan-notes");
 const tqQuoteBtn = byId("tq-quote-btn");
 const tqQuoteResult = byId("tq-quote-result");
+const tqQuoteNumber = byId("tq-quote-number");
 const tqQuoteValidity = byId("tq-quote-validity");
 const tqQuoteBreakdown = byId("tq-quote-breakdown");
 const tqQuoteTotalLabel = byId("tq-quote-total-label");
@@ -343,7 +344,7 @@ async function handleQuote() {
     tqPlanSummary.textContent = tqPlan.summary || "";
     tqPlanNotes.textContent = tqPlan.notes ? `Notlar: ${tqPlan.notes}` : "";
     tqPlanView.hidden = true;
-    renderQuoteResult(quoteData.quote, quoteData.pdfUrl, quoteData.quoteValidityDays);
+    renderQuoteResult(quoteData.quote, quoteData.pdfUrl, quoteData.quoteValidityDays, quoteData.quoteNumber);
   } catch (err) {
     setStatus("", false);
     showError(`Sunucuya bağlanılamadı: ${err.message}`);
@@ -352,7 +353,14 @@ async function handleQuote() {
   }
 }
 
-function renderQuoteResult(quote, pdfUrl, validityDays) {
+function renderQuoteResult(quote, pdfUrl, validityDays, quoteNumber) {
+  if (quoteNumber) {
+    tqQuoteNumber.textContent = `Teklif No: ${quoteNumber}`;
+    tqQuoteNumber.hidden = false;
+  } else {
+    tqQuoteNumber.hidden = true;
+  }
+
   const lines = [
     `Tahmini işleme süresi (birim): ${quote.minutes} dk`,
     `Adet: ${quote.quantity}`,

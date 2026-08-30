@@ -11,6 +11,7 @@ import { getNextCamStep } from "../services/camWizardService.js";
 import { effectiveAnswers } from "../services/inventoryService.js";
 import { computeQuote, generateQuotePdf, resolveQuoteInputs } from "../services/quoteService.js";
 import { getQuotePricingSettings } from "../services/quotePricingSettings.js";
+import { saveQuote } from "../services/quoteHistoryService.js";
 import { createJob, runJob } from "../services/jobStore.js";
 
 function makeFileUrl(proto, host, filePath) {
@@ -215,10 +216,36 @@ router.post("/cam-quote", apiKeyAuth, async (req, res, next) => {
       validityDays: pricingSettings.quoteValidityDays,
       quote,
     });
+    const pdfUrl = makeFileUrl(req.protocol, req.get("host"), pdfPath);
+
+    // Teklif Numarası + Teklif Geçmişi: her hesaplanan teklifi kullanıcının
+    // hesabına kaydeder (bkz. quoteHistoryService.js). Kasıtlı olarak best-effort:
+    // supabase/migrations/202608300001_quotes.sql henüz çalıştırılmadıysa (veya
+    // geçici bir DB hatası olursa) bu kayıt başarısız olur ama asıl teklif akışı
+    // hiçbir zaman bu yüzden kesintiye uğramaz -- kullanıcı sadece quoteNumber'sız
+    // bir teklif alır.
+    let quoteNumber = null;
+    try {
+      const saved = await saveQuote(req.user.id, {
+        partName: typeof partName === "string" ? partName : "",
+        material: typeof material === "string" ? material : answers?.material,
+        quote,
+        bbox: bbox ?? {},
+        tolerance: typeof tolerance === "string" ? tolerance : "",
+        surfaceFinish: typeof surfaceFinish === "string" ? surfaceFinish : "",
+        validityDays: pricingSettings.quoteValidityDays,
+        pdfUrl,
+      });
+      quoteNumber = saved.quoteNumber;
+    } catch (err) {
+      console.error("Teklif geçmişine kaydedilemedi:", err.message);
+    }
+
     res.json({
       quote,
-      pdfUrl: makeFileUrl(req.protocol, req.get("host"), pdfPath),
+      pdfUrl,
       quoteValidityDays: pricingSettings.quoteValidityDays,
+      quoteNumber,
     });
   } catch (err) {
     next(err);

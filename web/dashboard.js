@@ -20,6 +20,8 @@ const demoData = {
     { name: "preview.stl", projectName: "Silindir tasarımı", type: "stl", createdAt: new Date().toISOString(), url: "#" },
     { name: "model.py", projectName: "Silindir tasarımı", type: "source", createdAt: new Date().toISOString(), url: "#" },
   ],
+  quotes: [],
+  quoteStats: { totalCount: 0, totalAmount: 0 },
 };
 
 function safeText(value) {
@@ -119,8 +121,38 @@ function renderFiles(files = []) {
   }).join("") : `<tr><td colspan="5"><p class="empty-state">Başarılı tasarımların STEP, STL ve kaynak dosyaları burada saklanacak.</p></td></tr>`;
 }
 
+function renderQuoteStats(stats = { totalCount: 0, totalAmount: 0 }) {
+  const items = [
+    ["Toplam teklif", fmt.format(stats.totalCount || 0), "gerçekleşen teklif", "files"],
+    ["Toplam teklif tutarı", `${fmt.format(Math.round(stats.totalAmount || 0))} TL`, "KDV hariç, tüm zamanlar", "active"],
+  ];
+  byId("quotes-stats").innerHTML = items.map(([label, value, note, tone]) =>
+    `<article><div class="admin-metric-icon ${tone}">${tone === "active" ? "✓" : "₺"}</div><div><span>${label}</span><strong>${value}</strong><small>${note}</small></div></article>`
+  ).join("");
+}
+
+function renderQuotes(quotes = []) {
+  const list = quotes.slice(0, 30);
+  byId("quotes-list").innerHTML = list.length ? list.map((q) => {
+    const isValid = q.validUntil && new Date(q.validUntil).getTime() > Date.now();
+    const statusLabel = q.validUntil ? (isValid ? "Geçerli" : "Süresi Doldu") : "—";
+    const statusClass = q.validUntil ? (isValid ? "" : "expired") : "";
+    const pdfLink = q.pdfUrl ? `<a class="file-open" href="${safeText(q.pdfUrl)}" target="_blank" rel="noopener" aria-label="${safeText(q.quoteNumber)} teklifinin PDF'ini aç">PDF</a>` : "";
+    return `
+      <tr>
+        <td><strong>${safeText(q.quoteNumber || "-")}</strong></td>
+        <td>${safeText(shortText(q.partName || "Adsız parça", 32))}<small>${safeText(q.material || "")}</small></td>
+        <td>${safeText(q.quantity ?? 1)}</td>
+        <td>${safeText(fmt.format(Math.round(Number(q.total) || 0)))} TL</td>
+        <td>${q.validUntil ? `<span class="status-dot ${statusClass}">${safeText(statusLabel)}</span>` : safeText(statusLabel)}</td>
+        <td>${safeText(formatDate(q.createdAt))}</td>
+        <td class="file-actions">${pdfLink}</td>
+      </tr>`;
+  }).join("") : `<tr><td colspan="7"><p class="empty-state">Henüz alınmış bir teklif yok. <a href="teklif.html">Anında Teklif Al</a> sayfasından ilk teklifinizi oluşturun.</p></td></tr>`;
+}
+
 function render(data, isPreview = false) {
-  const { user, usage = [], projects = [], files = [] } = data;
+  const { user, usage = [], projects = [], files = [], quotes = [], quoteStats = { totalCount: 0, totalAmount: 0 } } = data;
   const totalLimit = Number(user.monthlyTokens) + Number(user.bonusTokens || 0);
   const rate = totalLimit ? Math.min(100, Math.round((user.usedTokens / totalLimit) * 100)) : 0;
   const initials = user.name.split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toUpperCase();
@@ -143,27 +175,33 @@ function render(data, isPreview = false) {
   renderActivity(usage);
   renderProjects(projects);
   renderFiles(files);
+  renderQuoteStats(quoteStats);
+  renderQuotes(quotes);
 }
 
 async function loadDashboard() {
   try {
     const headers = { Authorization: `Bearer ${sessionToken}` };
-    const [meResponse, usageResponse, projectsResponse, filesResponse] = await Promise.all([
+    const [meResponse, usageResponse, projectsResponse, filesResponse, quotesResponse] = await Promise.all([
       fetch(`${API_BASE}/auth/me`, { headers }),
       fetch(`${API_BASE}/auth/usage`, { headers }),
       fetch(`${API_BASE}/auth/projects`, { headers }),
       fetch(`${API_BASE}/auth/files`, { headers }),
+      fetch(`${API_BASE}/auth/quotes`, { headers }),
     ]);
     if (!meResponse.ok) throw new Error("Oturum doğrulanamadı");
     const { user } = await meResponse.json();
     const usagePayload = usageResponse.ok ? await usageResponse.json() : { usage: [] };
     const projectsPayload = projectsResponse.ok ? await projectsResponse.json() : { projects: [] };
     const filesPayload = filesResponse.ok ? await filesResponse.json() : { files: [] };
+    const quotesPayload = quotesResponse.ok ? await quotesResponse.json() : { quotes: [], stats: { totalCount: 0, totalAmount: 0 } };
     render({
       user,
       usage: usagePayload.usage ?? [],
       projects: projectsPayload.projects ?? [],
       files: filesPayload.files ?? [],
+      quotes: quotesPayload.quotes ?? [],
+      quoteStats: quotesPayload.stats ?? { totalCount: 0, totalAmount: 0 },
     });
   } catch {
     render({
@@ -171,6 +209,8 @@ async function loadDashboard() {
       usage: [],
       projects: [],
       files: [],
+      quotes: [],
+      quoteStats: { totalCount: 0, totalAmount: 0 },
     }, false);
     byId("dashboard-notice").textContent = "Veriler şu anda alınamadı. Lütfen sayfayı yenileyin.";
   }
