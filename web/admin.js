@@ -330,5 +330,63 @@ byId("qp-save-btn").addEventListener("click", async () => {
 
 loadQuotePricing();
 
+// Yönetici teklif görünümü: tüm kullanıcıların "Anında Teklif Al" (teklif.html)
+// ve cam.html'in ortak /cam-quote route'undan aldığı teklifleri kim/ne
+// zaman/ne kadar bilgisiyle listeler (GET /admin/quotes -> quoteHistoryService.js
+// listAllQuotes/allQuoteStats).
+let quotesSearchTimer = null;
+
+function renderQuotesStats(stats = { totalCount: 0, totalAmount: 0, monthCount: 0, distinctUsers: 0 }) {
+  const items = [
+    ["Toplam teklif", fmt.format(stats.totalCount || 0), "tüm zamanlar", "users"],
+    ["Toplam teklif tutarı", `${fmt.format(Math.round(stats.totalAmount || 0))} TL`, "KDV hariç", "active"],
+    ["Bu ay alınan teklif", fmt.format(stats.monthCount || 0), "son 30 gün değil, takvim ayı", "tokens"],
+    ["Teklif alan kullanıcı", fmt.format(stats.distinctUsers || 0), "benzersiz kullanıcı", "files"],
+  ];
+  byId("quotes-stats").innerHTML = items.map(([label, value, note, tone]) => `<article><div class="admin-metric-icon ${tone}">${tone === "users" ? "◎" : tone === "active" ? "✓" : tone === "tokens" ? "↗" : "▤"}</div><div><span>${label}</span><strong>${value}</strong><small>${note}</small></div></article>`).join("");
+}
+
+function renderQuotes(quotes = []) {
+  byId("quotes-count").textContent = `${fmt.format(quotes.length)} teklif gösteriliyor`;
+  byId("quotes-list").innerHTML = quotes.length ? quotes.map((q) => {
+    const isValid = q.validUntil && new Date(q.validUntil).getTime() > Date.now();
+    const statusLabel = q.validUntil ? (isValid ? "Geçerli" : "Süresi Doldu") : "—";
+    const statusClass = q.validUntil && !isValid ? "expired" : "";
+    const pdfLink = q.pdfUrl ? `<a class="file-open" href="${safeText(q.pdfUrl)}" target="_blank" rel="noopener" aria-label="${safeText(q.quoteNumber)} teklifinin PDF'ini aç">PDF</a>` : "";
+    return `<tr>
+      <td><div class="admin-user-cell"><span>${safeText((q.userName || q.userEmail || "?").split(/\s+/).map((p) => p[0]).slice(0, 2).join("").toUpperCase())}</span><div><strong>${safeText(q.userName || "Adsız kullanıcı")}</strong><small>${safeText(q.userEmail || "")}</small></div></div></td>
+      <td><strong>${safeText(q.quoteNumber || "-")}</strong></td>
+      <td>${safeText(q.partName || "Adsız parça")}<small>${safeText(q.material || "")}</small></td>
+      <td>${safeText(q.quantity ?? 1)}</td>
+      <td>${safeText(fmt.format(Math.round(Number(q.total) || 0)))} TL</td>
+      <td>${q.validUntil ? `<span class="status-dot ${statusClass}">${safeText(statusLabel)}</span>` : safeText(statusLabel)}</td>
+      <td>${safeText(new Date(q.createdAt).toLocaleString("tr-TR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }))}</td>
+      <td>${pdfLink}</td>
+    </tr>`;
+  }).join("") : `<tr><td colspan="8"><div class="admin-empty-state"><strong>Henüz alınmış bir teklif yok.</strong><span>Kullanıcılar "Anında Teklif Al" üzerinden teklif aldıkça burada listelenecek.</span></div></td></tr>`;
+}
+
+async function loadAdminQuotes(search = "") {
+  try {
+    const url = new URL(`${API_BASE}/admin/quotes`);
+    if (search) url.searchParams.set("search", search);
+    const response = await fetch(url, { headers: { Authorization: `Bearer ${sessionToken}` } });
+    if (!response.ok) throw new Error();
+    const data = await response.json();
+    renderQuotesStats(data.stats);
+    renderQuotes(data.quotes ?? []);
+  } catch {
+    renderQuotesStats();
+    renderQuotes([]);
+  }
+}
+
+byId("quotes-search").addEventListener("input", () => {
+  clearTimeout(quotesSearchTimer);
+  quotesSearchTimer = setTimeout(() => loadAdminQuotes(byId("quotes-search").value.trim()), 300);
+});
+
+loadAdminQuotes();
+
 byId("logout-btn").addEventListener("click", () => { localStorage.removeItem("rover_session"); location.replace("login.html"); });
 loadAdmin();

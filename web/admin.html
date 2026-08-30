@@ -19,6 +19,7 @@
         <a href="#llm-usage"><span>◈</span> LLM tüketimi</a>
         <a href="#activity"><span>↗</span> Hareketler</a>
         <a href="#quote-pricing"><span>₺</span> Teklif Fiyatlandırma</a>
+        <a href="#quotes"><span>▤</span> Teklifler</a>
         <a href="#system"><span>⚙</span> Sistem ayarları</a>
       </nav>
       <div class="account-sidebar-foot">
@@ -94,6 +95,22 @@
           <div id="qp-discount-tiers" class="admin-tier-list"></div>
           <button id="qp-add-tier-btn" type="button" class="secondary">+ Kademe Ekle</button>
           <button id="qp-save-btn" type="button">Kaydet</button>
+        </div>
+      </section>
+
+      <section class="account-panel admin-users-panel" id="quotes">
+        <div class="admin-section-head">
+          <div><p class="account-kicker">TÜM TEKLİFLER</p><h2>Teklif Yönetimi</h2><p id="quotes-count"></p></div>
+          <div class="admin-filters">
+            <label class="admin-search"><span>⌕</span><input id="quotes-search" type="search" placeholder="Kullanıcı, e-posta veya teklif no ara" aria-label="Teklif ara"></label>
+          </div>
+        </div>
+        <div id="quotes-stats" class="admin-metrics admin-quotes-metrics"></div>
+        <div class="admin-table-wrap">
+          <table class="admin-users-table">
+            <thead><tr><th>Kullanıcı</th><th>Teklif No</th><th>Parça</th><th>Adet</th><th>Tutar</th><th>Durum</th><th>Tarih</th><th></th></tr></thead>
+            <tbody id="quotes-list"></tbody>
+          </table>
         </div>
       </section>
 

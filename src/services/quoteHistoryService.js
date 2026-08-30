@@ -82,3 +82,50 @@ export async function quoteStatsForUser(userId) {
   const row = result.rows[0];
   return { totalCount: num(row?.total_count), totalAmount: num(row?.total_amount) };
 }
+
+// Yönetici teklif görünümü (web/admin.html "Teklifler" paneli): her teklifi
+// hangi kullanıcının aldığını görebilmek için quotes'u profiles ile
+// birleştirir. `search` -- verilirse -- kullanıcı adı, e-postası veya
+// TEKLİF NO üzerinde (ILIKE) filtreler.
+export async function listAllQuotes({ limit = 50, search } = {}) {
+  const safeLimit = Math.min(200, Math.max(1, Number(limit) || 50));
+  const term = String(search ?? "").trim();
+  const params = [safeLimit];
+  let where = "";
+  if (term) {
+    params.push(`%${term}%`);
+    where = "where p.name ilike $2 or p.email ilike $2 or q.quote_number ilike $2";
+  }
+  const result = await database().query(
+    `select q.*, p.name as user_name, p.email as user_email
+       from public.quotes q
+       join public.profiles p on p.id = q.user_id
+       ${where}
+      order by q.created_at desc
+      limit $1`,
+    params,
+  );
+  return result.rows.map((row) => ({
+    ...publicQuote(row),
+    userId: row.user_id,
+    userName: row.user_name,
+    userEmail: row.user_email,
+  }));
+}
+
+export async function allQuoteStats() {
+  const result = await database().query(
+    `select count(*)::bigint as total_count,
+            coalesce(sum(total), 0)::numeric as total_amount,
+            count(*) filter (where created_at >= date_trunc('month', now()))::bigint as month_count,
+            count(distinct user_id)::bigint as distinct_users
+       from public.quotes`,
+  );
+  const row = result.rows[0];
+  return {
+    totalCount: num(row?.total_count),
+    totalAmount: num(row?.total_amount),
+    monthCount: num(row?.month_count),
+    distinctUsers: num(row?.distinct_users),
+  };
+}
