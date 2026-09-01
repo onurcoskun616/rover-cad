@@ -3035,12 +3035,21 @@ function stockCamContextChips(){
   const chips=[{l:"🔧 İşlem Menüsü",c:"işlem menüsü"}];
   if(stockCamOps.length){
     chips.push({l:"📋 Geçmiş ("+stockCamOps.length+")",c:"geçmiş"});
-    if(stockCamOps.length>1)chips.push({l:"🔀 Takım Sırala",c:"takim sirala"});
-    chips.push({l:"🧰 Takım Listesi",c:"takim listesi"});
     chips.push({l:"⬇️ G-code Oluştur",c:"g-code oluştur"});
-    chips.push({l:"💰 Maliyet Hesapla",c:"maliyet hesapla"});
-    chips.push({l:"🖨️ İş Emri Yazdır",c:"iş emri yazdır"});
-    chips.push({l:"💾 Şablon Kaydet",c:"sablon kaydet"});
+    // Simülasyon (ve dolayısıyla ona bağlı diğer özellikler: takım sırası,
+    // takım listesi, maliyet, iş emri, şablon kaydet) ancak G-code ÜRETİLİP
+    // simülatöre YÜKLENDİKTEN sonra gerçekten çalışır (bkz. millProgramText,
+    // stockCamDoGenerateGcode -> runMillGcode). Bu adım atlanmadan tüm menüyü
+    // birden göstermek, operatörün "G-code Oluştur"u fark etmeden diğer
+    // düğmelere tıklayıp simülasyonu hiç başlatamamasına yol açıyordu -- bu
+    // yüzden o özellikler, G-code en az bir kez üretilene kadar gizli kalır.
+    if(millProgramText){
+      if(stockCamOps.length>1)chips.push({l:"🔀 Takım Sırala",c:"takim sirala"});
+      chips.push({l:"🧰 Takım Listesi",c:"takim listesi"});
+      chips.push({l:"💰 Maliyet Hesapla",c:"maliyet hesapla"});
+      chips.push({l:"🖨️ İş Emri Yazdır",c:"iş emri yazdır"});
+      chips.push({l:"💾 Şablon Kaydet",c:"sablon kaydet"});
+    }
   }
   chips.push({l:"📂 Şablon Yükle",c:"sablon yukle"});
   chips.push({l:"⬇️ Şablonları Dışa Aktar",c:"sablon disa aktar"});
