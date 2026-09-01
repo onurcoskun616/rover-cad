@@ -846,6 +846,26 @@ function initMill(){
 
   const ro=new ResizeObserver(millResize);ro.observe(wrap);
   millResize();
+
+  // İş Sıfır Noktası: 3D görünümdeki köşe/merkez işaretlerine tıklayarak
+  // seçim. Native "click" yerine kendi sürükleme-mi-tıklama-mı ayrımımızı
+  // yapıyoruz (pointerdown/up arası fare mesafesi) -- OrbitControls'un kamera
+  // döndürme sürüklemesi (bir işaretin ekran konumunun üzerinden geçen bir
+  // rotate) yanlışlıkla o işareti "seçilmiş" saymasın diye.
+  let stockCamZeroPointerDown=null;
+  renderer.domElement.addEventListener("pointerdown",(e)=>{stockCamZeroPointerDown={x:e.clientX,y:e.clientY};});
+  renderer.domElement.addEventListener("pointerup",(e)=>{
+    const down=stockCamZeroPointerDown;
+    stockCamZeroPointerDown=null;
+    if(!down||stockCamSetupStage!=="workZero"||!stockCamZeroMarkerMeshes)return;
+    if(Math.hypot(e.clientX-down.x,e.clientY-down.y)>6)return; // sürükleme/döndürme idi, tıklama değil
+    const rect=renderer.domElement.getBoundingClientRect();
+    const ndc=new THREE.Vector2(((e.clientX-rect.left)/rect.width)*2-1,-((e.clientY-rect.top)/rect.height)*2+1);
+    const raycaster=new THREE.Raycaster();
+    raycaster.setFromCamera(ndc,camera);
+    const hits=raycaster.intersectObjects(stockCamZeroMarkerMeshes,false);
+    if(hits.length)stockCamSelectZeroPoint(hits[0].object.userData.zeroKey);
+  });
 }
 
 let sideMeshes=[], stockMat=null, bottomMat=null;
@@ -955,8 +975,10 @@ function resizeMillStock(newW, newD, newTop){
     stockCamAwaitingTemplateName=false; stockCamTemplatePicking=false; stockCamTemplateList=null;
     stockCamNoteEditIdx=null;
     stockCamPendingStockSize=null;
+    stockCamWorkZero=null;
+    if(typeof hideStockCamZeroMarkers==="function") hideStockCamZeroMarkers();
     if(typeof clearOpPreview==="function") clearOpPreview();
-    if(typeof taiMsg==="function") taiMsg("ℹ️ Stok boyutu değişti — önceki CAM planı sıfırlandı, yeni işlemler bu boyuta göre planlanacak.","bot");
+    if(typeof taiMsg==="function") taiMsg("ℹ️ Stok boyutu değişti — önceki CAM planı ve iş sıfır noktası sıfırlandı, yeni işlemler bu boyuta göre planlanacak.","bot");
   }
   ({c:COLS, r:ROWS}=gridForStock(W, D));
   dx=W/(COLS-1); dz=D/(ROWS-1);
@@ -2795,6 +2817,81 @@ function stockCamNearestStandardThickness(h){
   return STOCK_STANDARD_THICKNESSES_MM.find(t=>t>=h)||null; // h katalogdaki en buyuk degerden de kalinsa oneri yok
 }
 
+// İş Sıfır Noktası: stok boyutu belirlendikten hemen sonra sorulan, stoğun
+// hangi köşesinin/merkezinin G-code'un/CNC kontrolcüsünün "X0 Y0" kabul
+// edeceği nokta olduğu seçimi -- gerçek CNC'lerdeki G54 iş koordinat sistemi
+// mantığının aynısı. BİLEREK sadece bir RAPORLAMA/BİLGİLENDİRME katmanıdır:
+// stockCamGenerateService.js'in ürettiği gerçek FreeCAD G-code'u hâlâ stok
+// MERKEZİNE göre üretiliyor (değiştirilmiyor) -- bu üç ayrı post-processor
+// (GRBL/Sinumerik/Heidenhain) formatını aynı anda, FreeCAD'e hiç dokunmadan,
+// bu ortamda canlı FreeCAD testi yapılamadan güvenle değiştirebileceğimiz
+// tek yer değil. Bunun yerine operatöre, seçtiği noktayı gerçek tezgahın G54
+// (veya eşdeğeri) offset tablosuna kaç mm olarak gireceğini söylüyoruz --
+// bu, gerçek atölyelerde zaten standart olan yöntemin ta kendisi (offset
+// programa gömülmez, kontrol panelinden bir kere girilir).
+const STOCK_CAM_ZERO_POINTS={
+  frontLeft:{label:"Sol-Ön Köşe", match:/sol.*(on\b)|(on\b).*sol|front.?left/},
+  frontRight:{label:"Sağ-Ön Köşe", match:/sag.*(on\b)|(on\b).*sag|front.?right/},
+  backLeft:{label:"Sol-Arka Köşe", match:/sol.*arka|arka.*sol|back.?left/},
+  backRight:{label:"Sağ-Arka Köşe", match:/sag.*arka|arka.*sag|back.?right/},
+  center:{label:"Merkez", match:/merkez|center/},
+};
+let stockCamWorkZero=null;          // {key,label,px,pz} -- secilen referans noktasinin stok-merkezi'ne gore konumu (mm)
+let stockCamZeroMarkerMeshes=null;  // 3D gorunumdeki secilebilir kose/merkez isaretleri (sadece "workZero" asamasinda gorunur)
+
+// Seçilen noktanın stok-merkez koordinat sistemindeki (X,Z) konumu -- W/D
+// GÜNCEL stok ölçüsünden okunuyor (önbelleklenmiş bir değer değil), çünkü
+// stok yeniden boyutlandırılınca köşeler de yer değiştirir.
+function stockCamZeroPointCoords(key){
+  const map={frontLeft:[-W/2,D/2], frontRight:[W/2,D/2], backLeft:[-W/2,-D/2], backRight:[W/2,-D/2], center:[0,0]};
+  return map[key]||[0,0];
+}
+
+// Operatörün gerçek tezgahın G54 (veya eşdeğeri) offset tablosuna gireceği
+// mm cinsinden X/Y kayması: stok-merkezli bir koordinatı (x,z) seçilen
+// noktaya göre ifade etmek için eklenmesi gereken değer. Seçilen noktanın
+// kendisi (px,pz) bu dönüşümle (0,0) olur -- bkz. testte doğrulanan özellik.
+function stockCamZeroOffset(){
+  if(!stockCamWorkZero)return{dx:0,dy:0};
+  return{dx:-stockCamWorkZero.px, dy:-stockCamWorkZero.pz};
+}
+
+function buildStockCamZeroMarkers(){
+  hideStockCamZeroMarkers();
+  stockCamZeroMarkerMeshes=Object.keys(STOCK_CAM_ZERO_POINTS).map(key=>{
+    const[px,pz]=stockCamZeroPointCoords(key);
+    const isCenter=key==="center";
+    const geo=new THREE.SphereGeometry(isCenter?5:6,16,16);
+    const mat=new THREE.MeshStandardMaterial({color:isCenter?0x2fd1a8:0xff9d2e,emissive:isCenter?0x0d4f3d:0x5a3200,emissiveIntensity:0.6});
+    const m=new THREE.Mesh(geo,mat);
+    m.position.set(px,TOP+4,pz);
+    m.userData.zeroKey=key;
+    scene.add(m);
+    return m;
+  });
+}
+function showStockCamZeroMarkers(){ buildStockCamZeroMarkers(); }
+function hideStockCamZeroMarkers(){
+  if(!stockCamZeroMarkerMeshes)return;
+  stockCamZeroMarkerMeshes.forEach(m=>{scene.remove(m);m.geometry.dispose();m.material.dispose();});
+  stockCamZeroMarkerMeshes=null;
+}
+
+// Chip butonuyla ("referans sol on" vb.) ya da 3D görünümdeki işarete
+// tıklayarak seçmek AYNI tek yoldan geçer -- iki giriş yönteminin
+// davranışının asla birbirinden sapmamasını garanti eder.
+function stockCamSelectZeroPoint(key){
+  const def=STOCK_CAM_ZERO_POINTS[key];
+  if(!def)return false;
+  const[px,pz]=stockCamZeroPointCoords(key);
+  stockCamWorkZero={key,label:def.label,px,pz};
+  stockCamSetupStage="done";
+  hideStockCamZeroMarkers();
+  const{dx,dy}=stockCamZeroOffset();
+  taiMsg(`✓ İş sıfır noktası: <b>${def.label}</b> olarak ayarlandı (G54 offset: X${dx>=0?"+":""}${dx.toFixed(1)} Y${dy>=0?"+":""}${dy.toFixed(1)} mm — tezgahınızda bu noktayı fiziksel olarak sıfırlayıp bu offseti girin). Kurulum tamamlandı — şimdi işlem menüsünden devam edebilirsiniz.`,"bot");
+  return true;
+}
+
 function stockCamContextChips(){
   if(!isMill())return null;
   if(stockCamSetupStage&&stockCamSetupStage!=="done"){
@@ -2813,6 +2910,15 @@ function stockCamContextChips(){
       return[
         {l:`✓ Standart (${stockCamPendingStockSize.suggestedH}mm)`,c:"stok kalinlik standart"},
         {l:`Tam istediğim (${stockCamPendingStockSize.h}mm)`,c:"stok kalinlik ozel"},
+      ];
+    }
+    if(stockCamSetupStage==="workZero"){
+      return[
+        {l:"↖ Sol-Ön Köşe",c:"referans sol on"},
+        {l:"↗ Sağ-Ön Köşe",c:"referans sag on"},
+        {l:"↙ Sol-Arka Köşe",c:"referans sol arka"},
+        {l:"↘ Sağ-Arka Köşe",c:"referans sag arka"},
+        {l:"⊙ Merkez",c:"referans merkez"},
       ];
     }
     // 'stockSize' — serbest metin girişi bekleniyor, chip yok. Boş dizi
@@ -2980,8 +3086,9 @@ async function stockCamHandleSetupInput(text){
       const{w,d}=stockCamPendingStockSize;
       stockCamPendingStockSize=null;
       resizeMillStock(w,d,finalH);
-      stockCamSetupStage="done";
-      taiMsg(`✓ Stok boyutu: ${w}x${d}x${finalH}mm. Kurulum tamamlandı — şimdi işlem menüsünden devam edebilirsiniz.`,"bot");
+      stockCamSetupStage="workZero";
+      showStockCamZeroMarkers();
+      taiMsg(`✓ Stok boyutu: ${w}x${d}x${finalH}mm. Şimdi iş sıfır noktasını seçin — 3D görünümdeki işaretli köşe/merkez noktalarından birine tıklayabilir ya da aşağıdan seçebilirsiniz.`,"bot");
       return true;
     }
     const dims=text.match(/(\d+\.?\d*)\s*x\s*(\d+\.?\d*)\s*(?:x\s*(\d+\.?\d*))?/i);
@@ -3004,9 +3111,20 @@ async function stockCamHandleSetupInput(text){
       return true;
     }
     resizeMillStock(w,d,h);
-    stockCamSetupStage="done";
-    taiMsg(`✓ Stok boyutu: ${w}x${d}x${h}mm. Kurulum tamamlandı — şimdi işlem menüsünden devam edebilirsiniz.`,"bot");
+    stockCamSetupStage="workZero";
+    showStockCamZeroMarkers();
+    taiMsg(`✓ Stok boyutu: ${w}x${d}x${h}mm. Şimdi iş sıfır noktasını seçin — 3D görünümdeki işaretli köşe/merkez noktalarından birine tıklayabilir ya da aşağıdan seçebilirsiniz.`,"bot");
     return true;
+  }
+  if(stockCamSetupStage==="workZero"){
+    const norm=taiNorm(text);
+    let key=null;
+    for(const[k,def]of Object.entries(STOCK_CAM_ZERO_POINTS)){ if(def.match.test(norm)){key=k;break;} }
+    if(!key){
+      taiMsg("Lütfen bir referans noktası seçin: Sol-Ön, Sağ-Ön, Sol-Arka, Sağ-Arka köşe veya Merkez (3D görünümdeki işaretlere de tıklayabilirsiniz).","bot");
+      return true;
+    }
+    return stockCamSelectZeroPoint(key);
   }
   return false;
 }
@@ -3271,6 +3389,10 @@ async function stockCamDoGenerateGcode(){
     const result=await stockCamPollJob(start.jobId);
     if(!result.exported){ taiMsg("⛔ G-code üretilemedi: "+(result.error||"bilinmeyen hata"),"bot"); return; }
     taiMsg(`<span class="tai-msg-action">✓ G-code hazır:</span> <a href="${result.gcodeUrl}" target="_blank" rel="noopener">indir</a>`,"bot");
+    if(stockCamWorkZero){
+      const{dx,dy}=stockCamZeroOffset();
+      taiMsg(`ℹ️ Bu G-code stok merkezine göre üretildi. Seçtiğiniz iş sıfır noktasını (<b>${stockCamWorkZero.label}</b>) kullanmak için tezgahınızda o noktayı fiziksel olarak sıfırlayıp G54 (veya eşdeğeri) offsetine <b>X${dx>=0?"+":""}${dx.toFixed(1)} Y${dy>=0?"+":""}${dy.toFixed(1)} mm</b> girin.`,"bot");
+    }
     if(result.warning){
       taiMsg("⚠️ "+result.warning,"bot");
     }
@@ -4403,6 +4525,7 @@ function renderSheet(){
       <div><span class="text-zinc-400">Stok:</span> ${stockLine}</div>
       <div><span class="text-zinc-400">İlerleme/Devir:</span> ${feedRpm}</div>
       <div><span class="text-zinc-400">Tahmini çevrim süresi:</span> ${minutes.toFixed(1)} dk</div>
+      ${type==="mill"&&stockCamWorkZero?`<div class="col-span-2"><span class="text-zinc-400">İş Sıfır Noktası (G54):</span> ${stockCamWorkZero.label} — X${stockCamZeroOffset().dx>=0?"+":""}${stockCamZeroOffset().dx.toFixed(1)} Y${stockCamZeroOffset().dy>=0?"+":""}${stockCamZeroOffset().dy.toFixed(1)} mm</div>`:""}
     </div>
     <div class="mt-3">
       <div class="mb-1 font-bold text-cyan-300 print:text-black">Kullanılan Takımlar</div>
