@@ -2473,6 +2473,36 @@ function stockCamMirrorParams(opType,params,axis){
   return p;
 }
 
+// İş Sıfır Noktası (bkz. buildStockCamZeroMarkers/stockCamSelectZeroPoint):
+// operatör sihirbazda X/Y'yi SEÇTİĞİ REFERANS NOKTASINA göre veriyor (ör.
+// "Sol-Arka köşeden 20mm sağda, 20mm ilerde"), ama plan/önizleme/FreeCAD
+// üretimi/G-code'un TÜMÜ değişmeden STOK MERKEZİNE göre çalışmaya devam
+// ediyor (bkz. STOCK_CAM_MIRRORABLE_TYPES'ın üstündeki not). Bu iki dünya
+// TEK bir noktada kesişiyor: sihirbaz bir işlemi bitirdiği an (done:true),
+// kullanıcının girdiği referans-göreli X/Y stok-merkezli karşılığına
+// çevriliyor -- bundan sonra (önizleme, onaylama, stockCamOps'a kayıt, ayna/
+// dizi kopyalama, G-code) HER ŞEY daha önce olduğu gibi hep stok-merkezli
+// kalıyor, hiçbir mevcut/test edilmiş kod değişmiyor. Tersi (stockCamToReferenceRelative)
+// sadece bir işlem düzenlenirken sihirbaza geri "referans-göreli" değer
+// doldurmak için kullanılıyor ki sihirbaz her zaman AYNI (referans-göreli)
+// terimlerle konuşsun -- yoksa "sadece değişeni belirtin" ile bırakılan eski
+// bir X/Y, düzenleme sırasında yanlışlıkla ikinci kez kaydırılırdı.
+function stockCamToCenterRelative(opType,params){
+  if(!stockCamWorkZero||!STOCK_CAM_MIRRORABLE_TYPES.has(opType))return params;
+  return{...params,x:Number(params.x)+stockCamWorkZero.px,y:Number(params.y)+stockCamWorkZero.pz};
+}
+function stockCamToReferenceRelative(opType,params){
+  if(!stockCamWorkZero||!STOCK_CAM_MIRRORABLE_TYPES.has(opType))return params;
+  return{...params,x:Number(params.x)-stockCamWorkZero.px,y:Number(params.y)-stockCamWorkZero.pz};
+}
+// Kullanıcıya HER ZAMAN referans noktasına göre X/Y gösterir (stockCamOps
+// içinde saklanan değer stok-merkezli olsa bile) -- geçmiş listesi, ayna/
+// dizi seçim mesajları ve onay özetleri hep tutarlı tek bir koordinat
+// dilinde konuşsun diye.
+function stockCamOpSummaryDisplay(opType,params){
+  return stockCamOpSummary(opType,stockCamToReferenceRelative(opType,params));
+}
+
 async function stockCamStartMirrorPick(indexOneBased){
   const idx=indexOneBased-1;
   const op=stockCamOps[idx];
@@ -2483,7 +2513,7 @@ async function stockCamStartMirrorPick(indexOneBased){
   }
   stockCamHistoryOpen=false;
   stockCamMirrorPickIdx=idx;
-  taiMsg(`<b>${op.label}</b> (${stockCamOpSummary(op.type,op.params)}) seçildi. Hangi eksende ayna alınsın?`,"bot");
+  taiMsg(`<b>${op.label}</b> (${stockCamOpSummaryDisplay(op.type,op.params)}) seçildi. Hangi eksende ayna alınsın?`,"bot");
 }
 
 // Faz 3'ün /stock-cam/validate rotasını (sunucudaki validateOperationParams'ı
@@ -2513,7 +2543,7 @@ async function stockCamApplyMirror(axis){
   showOpPreview(op.type,mirroredParams);
   stockCamPending={opType:op.type,opLabel:op.label,answers:mirroredParams};
   stockCamEditingId=null; // ayna kopyası her zaman YENİ bir işlem — kaynağın yerini almaz
-  taiMsg(`✓ Ayna kopyası önizlendi (${op.label}: ${stockCamOpSummary(op.type,mirroredParams)}). Stok üzerindeki turuncu alanı kontrol edin. Doğruysa "onayla", değilse "iptal" yazın.`,"bot");
+  taiMsg(`✓ Ayna kopyası önizlendi (${op.label}: ${stockCamOpSummaryDisplay(op.type,mirroredParams)}). Stok üzerindeki turuncu alanı kontrol edin. Doğruysa "onayla", değilse "iptal" yazın.`,"bot");
 }
 
 // Dizi/Izgara Kopyalama: Ayna Kopyalama ile aynı mantık -- stok merkezi
@@ -2547,7 +2577,7 @@ async function stockCamStartArrayPick(indexOneBased){
   stockCamArraySourceIdx=idx;
   stockCamArrayKind=null;
   stockCamArrayPendingList=null;
-  taiMsg(`<b>${op.label}</b> (${stockCamOpSummary(op.type,op.params)}) seçildi. Nasıl bir dizi oluşturulsun?`,"bot");
+  taiMsg(`<b>${op.label}</b> (${stockCamOpSummaryDisplay(op.type,op.params)}) seçildi. Nasıl bir dizi oluşturulsun?`,"bot");
 }
 
 function stockCamPickArrayKind(kind){
@@ -2597,14 +2627,15 @@ async function stockCamAdvanceArrayNumbers(text){
     try{ problems=await stockCamValidateParams(item.opType,item.params); }
     catch(e){ taiMsg("⛔ Hata: "+e.message,"bot"); return; }
     if(problems.length){
-      taiMsg(`⛔ X${item.params.x} Y${item.params.y} konumundaki kopya stoğa sığmıyor: `+problems.join("<br>")+"<br>Sayıları değiştirip tekrar deneyin.","bot");
+      const rp=stockCamToReferenceRelative(item.opType,item.params);
+      taiMsg(`⛔ X${rp.x} Y${rp.y} konumundaki kopya stoğa sığmıyor: `+problems.join("<br>")+"<br>Sayıları değiştirip tekrar deneyin.","bot");
       return; // stockCamArrayKind kalır -- operatör aynı türle farklı sayılar girebilir
     }
   }
 
   stockCamArrayPendingList=list;
   showOpPreview(sourceOp.type,list[list.length-1].params);
-  const positions=list.map(o=>`X${o.params.x} Y${o.params.y}`).join(", ");
+  const positions=list.map(o=>{const rp=stockCamToReferenceRelative(o.opType,o.params);return `X${rp.x} Y${rp.y}`;}).join(", ");
   taiMsg(`✓ ${list.length} yeni kopya planlandı (${sourceOp.label}): ${positions}. Son kopyanın konumu stok üzerinde turuncu ile gösteriliyor. Onaylarsanız hepsi TEK SEFERDE eklenecek.`,"bot");
 }
 
@@ -2628,7 +2659,8 @@ async function stockCamConfirmArrayList(){
         break;
       }
       if(!result.confirmed){
-        taiMsg(`⛔ X${item.params.x} Y${item.params.y} konumundaki kopya onaylanamadı: `+(result.error||"bilinmeyen hata")+" — kalan kopyalar durduruldu, zaten eklenenler planda kalır.","bot");
+        const rp=stockCamToReferenceRelative(item.opType,item.params);
+        taiMsg(`⛔ X${rp.x} Y${rp.y} konumundaki kopya onaylanamadı: `+(result.error||"bilinmeyen hata")+" — kalan kopyalar durduruldu, zaten eklenenler planda kalır.","bot");
         break;
       }
       stockCamOps.push({id:result.operation.id,type:item.opType,label:item.opLabel,params:item.params});
@@ -3236,6 +3268,25 @@ async function stockCamStartWizard(opType,opLabel,prefill){
   stockCam={opType,opLabel,answers:prefill||{}};
   const example=STOCK_CAM_EXAMPLE_BY_TYPE[opType]||STOCK_CAM_EXAMPLE_BY_TYPE.drill;
   taiMsg(`<b>${opLabel}</b> seçildi. Parametreleri anlatın (örn: "${example}").`,"bot");
+  // İş Sıfır Noktası merkez değilse: X/Y'yi artık seçilen referans noktasına
+  // göre verebilirsiniz (bkz. stockCamToCenterRelative) -- ama bu sadece
+  // AÇIK "x=.. y=.." sayılarına ve "merkeze/ortaya" ifadesine uygulanıyor.
+  // "Bir kenardan X mm içeride" gibi ifadeler hâlâ GERÇEK stok kenarına göre
+  // yorumlanıyor (bu, LLM'in kendi iç mantığı -- değiştirmek canlıda test
+  // edilemeyen bir prompt değişikliği gerektirir), bu yüzden bu durumu
+  // operatöre açıkça söylüyoruz, sessizce yanlış varsaymak yerine.
+  if(stockCamWorkZero&&stockCamWorkZero.key!=="center"&&STOCK_CAM_MIRRORABLE_TYPES.has(opType)){
+    taiMsg(`ℹ️ X/Y konumunu <b>${stockCamWorkZero.label}</b> referans noktanıza göre verin (ör. "x=20 y=20"). "Bir kenardan X mm içeride" gibi ifadeler henüz gerçek stok kenarına göre yorumlanıyor, referans noktanıza göre değil — kesin sonuç için doğrudan X/Y sayısı verin.`,"bot");
+  }
+}
+
+// data.question içindeki LLM metni hâlâ "stok merkezine göre" diyebilir --
+// LLM'in kendi iç mantığı değişmedi (bkz. stockCamAdvanceStep'in altındaki
+// açıklama), sadece OPERATÖRE gösterilen metni, seçilen referans noktasını
+// anmak üzere kozmetik olarak düzeltiyoruz.
+function stockCamRewriteZeroPhrase(text){
+  if(!text||!stockCamWorkZero||stockCamWorkZero.key==="center")return text;
+  return text.replace(/stok\s*merkezine\s*göre/gi,`${stockCamWorkZero.label}'a göre`);
 }
 
 async function stockCamAdvanceStep(text){
@@ -3253,10 +3304,25 @@ async function stockCamAdvanceStep(text){
     data=await stockCamPollJob(start.jobId);
   }catch(e){ taiMsg("⛔ Hata: "+e.message,"bot"); return; }
   stockCam.answers=data.answers;
-  if(!data.done){ taiMsg(data.question||"Devam eden parametreler için bilgi verin.","bot"); return; }
-  if(data.problems&&data.problems.length){ taiMsg("⛔ "+data.problems.join("<br>"),"bot"); return; }
-  showOpPreview(opType,data.answers);
-  stockCamPending={opType,opLabel:stockCam.opLabel,answers:data.answers};
+  if(!data.done){ taiMsg(stockCamRewriteZeroPhrase(data.question)||"Devam eden parametreler için bilgi verin.","bot"); return; }
+  // LLM'in kendi prompt'u değişmedi -- hâlâ "stok merkezine göre" X/Y
+  // topluyor (bkz. src/prompts/stock-cam-step-system-prompt.txt), bu yüzden
+  // data.answers.x/y HÂLÂ operatörün SEÇİLEN REFERANS NOKTASINA göre verdiği
+  // ham değerler (o promptun "merkez=0,0" kuralı sayesinde). Aşağıda TEK
+  // seferde stok-merkezli karşılığına çeviriyoruz -- ondan sonrası (önizleme,
+  // onay, stockCamOps'a kayıt, ayna/dizi kopyalama, G-code) hep stok-merkezli
+  // kalmaya devam ediyor, hiçbir mevcut/test edilmiş kod değişmiyor.
+  // Sunucunun getNextParamStep içindeki KENDİ doğrulaması (data.problems) bu
+  // kaydırmadan ÖNCEKİ (referans-göreli) X/Y'yi kontrol ettiği için burada
+  // güvenilir değil -- kaydırılmış değerle stockCamValidateParams üzerinden
+  // (gerçek FreeCAD'e hiç gitmeden) yeniden, doğru sınırlarla kontrol ediyoruz.
+  const centerAnswers=stockCamToCenterRelative(opType,data.answers);
+  try{
+    const problems=await stockCamValidateParams(opType,centerAnswers);
+    if(problems.length){ taiMsg("⛔ "+problems.join("<br>"),"bot"); return; }
+  }catch(e){ taiMsg("⛔ Hata: "+e.message,"bot"); return; }
+  showOpPreview(opType,centerAnswers);
+  stockCamPending={opType,opLabel:stockCam.opLabel,answers:centerAnswers};
   stockCam=null;
   const verb=stockCamEditingId?"güncellendi":"gösterildi";
   taiMsg(`✓ Önizleme ${verb} (${stockCamPending.opLabel}: ${stockCamOpSummary(opType,data.answers)}). Stok üzerindeki turuncu alanı kontrol edin. Doğruysa "onayla", değilse "iptal" yazın.`,"bot");
@@ -3354,7 +3420,7 @@ async function stockCamDoConfirm(){
     }else{
       stockCamOps.push({id:result.operation.id,type:opType,label:opLabel,params:answers});
     }
-    taiMsg(`<span class="tai-msg-action">✓ ${opLabel} onaylandı:</span> ${stockCamOpSummary(opType,answers)}`+
+    taiMsg(`<span class="tai-msg-action">✓ ${opLabel} onaylandı:</span> ${stockCamOpSummaryDisplay(opType,answers)}`+
       (result.estimatedMinutes!=null?` (tahmini süre: ${result.estimatedMinutes} dk)`:""),"bot");
     // Sadece YENİ bir Kılavuz Çekme eklenirken -- bir düzenleme her onaydan
     // sonra tekrar sorulmasın diye editingId burada kasıtlı olarak dışlanıyor.
@@ -3372,7 +3438,7 @@ function stockCamShowHistory(){
   if(!stockCamOps.length){ taiMsg("Henüz onaylanmış işlem yok.","bot"); return; }
   stockCamHistoryOpen=true;
   taiMsg("<b>Onaylanan İşlemler:</b><br>"+stockCamOps.map((o,i)=>
-    `${i+1}. ${o.label} — ${stockCamOpSummary(o.type,o.params)}${o.note?` <i>(Not: ${o.note})</i>`:""}`).join("<br>")+
+    `${i+1}. ${o.label} — ${stockCamOpSummaryDisplay(o.type,o.params)}${o.note?` <i>(Not: ${o.note})</i>`:""}`).join("<br>")+
     "<br><br>Düzenlemek veya ayna kopyası almak için aşağıdan seçin.","bot");
 }
 
@@ -3382,8 +3448,15 @@ async function stockCamEditPick(indexOneBased){
   if(!op){ taiMsg("⛔ Böyle bir işlem yok.","bot"); return; }
   stockCamHistoryOpen=false;
   stockCamEditingId=op.id;
-  await stockCamStartWizard(op.type,op.label,{...op.params});
-  taiMsg(`Mevcut değerler: ${stockCamOpSummary(op.type,op.params)}. Neyi değiştirmek istersiniz? (Değişmeyecek değerleri de tekrar söylemeniz gerekmez, sadece değişeni belirtin.)`,"bot");
+  // op.params stok-merkezli (saklanan/onaylanan hâli) -- sihirbaz HER ZAMAN
+  // referans-göreli terimlerle konuşuyor (bkz. stockCamAdvanceStep), bu
+  // yüzden düzenlemeye REFERANS-GÖRELİ karşılığıyla giriyoruz. Böylece
+  // "sadece değişeni belirtin" ile X/Y'ye hiç dokunulmadan bırakılırsa,
+  // stockCamAdvanceStep'in tek seferlik kaydırması eski değeri YANLIŞLIKLA
+  // ikinci kez kaydırmaz.
+  const refParams=stockCamToReferenceRelative(op.type,op.params);
+  await stockCamStartWizard(op.type,op.label,refParams);
+  taiMsg(`Mevcut değerler: ${stockCamOpSummary(op.type,refParams)}. Neyi değiştirmek istersiniz? (Değişmeyecek değerleri de tekrar söylemeniz gerekmez, sadece değişeni belirtin.)`,"bot");
 }
 
 async function stockCamDoGenerateGcode(){
