@@ -2791,7 +2791,12 @@ function stockCamContextChips(){
         {l:`Tam istediğim (${stockCamPendingStockSize.h}mm)`,c:"stok kalinlik ozel"},
       ];
     }
-    return null; // 'stockSize' — serbest metin girişi bekleniyor, chip yok
+    // 'stockSize' — serbest metin girişi bekleniyor, chip yok. Boş dizi
+    // döndürülür (null değil): taiGetChips() `if(stockCamChips)` ile
+    // kontrol ediyor ve null/undefined durumunda ilgisiz genel freze
+    // menüsüne ("12mm delik aç" vb.) düşüyordu -- boş dizi truthy olduğu
+    // için bu düşmeyi engelleyip gerçekten chip'siz kalınmasını sağlar.
+    return [];
   }
   if(stockCamPending){
     // stockCamConfirming true iken (FreeCAD'de gerçek üretim/güvenlik kontrolü
