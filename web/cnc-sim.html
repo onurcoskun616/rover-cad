@@ -2414,14 +2414,31 @@ function stockCamMagazineQueryFor(opType,params){
   if(opType==="chamfer") return {magOpType:"chamfer", reqDia:0, reqDepth:Number(params.depth)||0};
   if(opType==="drillGrid"||opType==="drillCircle") return {magOpType:"drill", reqDia:Number(params.dia)||0, reqDepth:Number(params.depth)||0};
   // params.dia is the hexagon's ACROSS-CORNER (circumscribed) diameter (see
-  // hexFacePy's own comment in stockCamGenerateService.js) -- but the tool
-  // must fit within the NARROWER across-flats (inscribed) width, dia*sqrt(3)/2
-  // (~86.6%), or the offset/zigzag clearing has zero room to place a single
-  // pass and FreeCAD emits an EMPTY toolpath (confirmed live: a 30mm hex
-  // pocket picked a 26mm tool because 26<30 passed this check, even though
-  // 26mm doesn't fit inside a ~25.98mm-wide hexagon at all -- the G-code came
-  // back as just a plunge/retract, no cutting moves, simulator sat idle).
-  if(opType==="hexPocket") return {magOpType:"pocket", reqDia:(Number(params.dia)||0)*(Math.sqrt(3)/2), reqDepth:Number(params.depth)||0};
+  // hexFacePy's own comment in stockCamGenerateService.js), so the tool must
+  // fit within the NARROWER across-flats (inscribed) width, dia*sqrt(3)/2
+  // (~86.6%) -- a first fix capped reqDia there, closing the literal EMPTY
+  // toolpath this originally produced (a 26mm tool picked for a 30mm hex,
+  // even though 26mm > the hexagon's true ~25.98mm inscribed width, so
+  // FreeCAD had zero room for even one pass). But confirmed live AGAIN
+  // afterward: a tool merely small enough to physically FIT still barely
+  // clears the hexagon's own apothem (inradius) -- with tool radius left
+  // just under the apothem, FreeCAD's Offset clearing can place only ONE
+  // thin ring near dead-center (confirmed from the real G-code: a perfect
+  // hexagonal toolpath, but circumradius ~3.5mm on a hex whose true apothem
+  // was ~13mm) and never reaches the rest of the pocket -- which then LOOKS
+  // like a small round dimple in the simulator (that tiny hex ring, swept by
+  // a tool far larger than the ring itself, is visually indistinguishable
+  // from a circle), not a fully-cleared hexagonal cavity.
+  //
+  // Fixed by capping reqDia at the hexagon's own APOTHEM (dia*sqrt(3)/4,
+  // exactly half the inscribed width) instead of the bare inscribed width
+  // itself -- caps the tool's RADIUS at half the apothem, leaving at least
+  // half the apothem as real clearance for the offset/zigzag pattern to
+  // place multiple passes and actually clear the pocket, not just its own
+  // dead center. Matches (and for a 30mm hex lands on the exact same target
+  // diameter as) toolDiameterFor's own already-conservative dia*0.4
+  // server-side fallback guess -- not a new, unproven fraction.
+  if(opType==="hexPocket") return {magOpType:"pocket", reqDia:(Number(params.dia)||0)*(Math.sqrt(3)/4), reqDepth:Number(params.depth)||0};
   if(opType==="face") return {magOpType:"face", reqDia:0, reqDepth:Number(params.depth)||0};
   if(opType==="countersink") return {magOpType:"drill", reqDia:Number(params.dia)||0, reqDepth:Number(params.depth)||0};
   if(opType==="counterbore") return {magOpType:"pocket", reqDia:Number(params.dia)||0, reqDepth:Number(params.depth)||0};
