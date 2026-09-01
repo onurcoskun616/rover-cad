@@ -881,7 +881,11 @@ function initMill(){
     const raycaster=new THREE.Raycaster();
     raycaster.setFromCamera(ndc,camera);
     const hits=raycaster.intersectObjects(stockCamZeroMarkerMeshes,false);
-    if(hits.length)stockCamSelectZeroPoint(hits[0].object.userData.zeroKey);
+    if(hits.length){
+      stockCamSelectZeroPoint(hits[0].object.userData.zeroKey);
+      taiRenderChips(); // chip metniyle seçimin taiUserInput üzerinden geçtiği yoldan farklı olarak,
+      // burada doğrudan çağrıldığı için chip listesini kendimiz tazelemeliyiz.
+    }
   });
 }
 
