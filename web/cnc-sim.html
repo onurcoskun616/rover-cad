@@ -2413,7 +2413,15 @@ function stockCamMagazineQueryFor(opType,params){
   if(opType==="slot") return {magOpType:"slot", reqDia:Number(params.sw)||0, reqDepth:Number(params.depth)||0};
   if(opType==="chamfer") return {magOpType:"chamfer", reqDia:0, reqDepth:Number(params.depth)||0};
   if(opType==="drillGrid"||opType==="drillCircle") return {magOpType:"drill", reqDia:Number(params.dia)||0, reqDepth:Number(params.depth)||0};
-  if(opType==="hexPocket") return {magOpType:"pocket", reqDia:Number(params.dia)||0, reqDepth:Number(params.depth)||0};
+  // params.dia is the hexagon's ACROSS-CORNER (circumscribed) diameter (see
+  // hexFacePy's own comment in stockCamGenerateService.js) -- but the tool
+  // must fit within the NARROWER across-flats (inscribed) width, dia*sqrt(3)/2
+  // (~86.6%), or the offset/zigzag clearing has zero room to place a single
+  // pass and FreeCAD emits an EMPTY toolpath (confirmed live: a 30mm hex
+  // pocket picked a 26mm tool because 26<30 passed this check, even though
+  // 26mm doesn't fit inside a ~25.98mm-wide hexagon at all -- the G-code came
+  // back as just a plunge/retract, no cutting moves, simulator sat idle).
+  if(opType==="hexPocket") return {magOpType:"pocket", reqDia:(Number(params.dia)||0)*(Math.sqrt(3)/2), reqDepth:Number(params.depth)||0};
   if(opType==="face") return {magOpType:"face", reqDia:0, reqDepth:Number(params.depth)||0};
   if(opType==="countersink") return {magOpType:"drill", reqDia:Number(params.dia)||0, reqDepth:Number(params.depth)||0};
   if(opType==="counterbore") return {magOpType:"pocket", reqDia:Number(params.dia)||0, reqDepth:Number(params.depth)||0};
