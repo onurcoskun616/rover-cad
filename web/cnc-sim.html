@@ -3053,6 +3053,7 @@ function stockCamContextChips(){
         chips.push({l:`🔁 ${i+1}. Dizi Kopyala`,c:`islem dizi ${i+1}`});
       }
       chips.push({l:`📝 ${i+1}. Not`,c:`islem not ${i+1}`});
+      chips.push({l:`🗑 ${i+1}. Sil`,c:`islem sil ${i+1}`});
     });
     chips.push({l:"⬅ Kapat",c:"gecmisi kapat"});
     return chips;
@@ -3497,6 +3498,24 @@ async function stockCamEditPick(indexOneBased){
   taiMsg(`Mevcut değerler: ${stockCamOpSummary(op.type,refParams)}. Neyi değiştirmek istersiniz? (Değişmeyecek değerleri de tekrar söylemeniz gerekmez, sadece değişeni belirtin.)`,"bot");
 }
 
+// Yanlışlıkla onaylanmış bir işlemi (ör. istenmeyen bir işlem tipi
+// onaylandıysa) plandan kalıcı olarak kaldırır -- FreeCAD ile yeniden
+// doğrulama gerektirmez (kaldırmak yeni bir güvenlik ihlali yaratamaz,
+// bkz. removeOperation'ın kendi yorumu), bu yüzden senkron ve hızlıdır.
+async function stockCamDeleteOp(indexOneBased){
+  const idx=indexOneBased-1;
+  const op=stockCamOps[idx];
+  if(!op){ taiMsg("⛔ Böyle bir işlem yok.","bot"); return; }
+  try{
+    const r=await fetch(`${MAG_API_BASE}/stock-cam/plan/${stockCamPlanKey}/op/${op.id}`,{method:"DELETE",headers:magHeaders()});
+    const data=await r.json();
+    if(!r.ok||!data.ok){ taiMsg("⛔ Silinemedi: "+(data?.problems?.join(", ")||data?.error||"bilinmeyen hata"),"bot"); return; }
+    stockCamOps.splice(idx,1);
+    taiMsg(`✓ ${op.label} (${indexOneBased}. işlem) silindi.`,"bot");
+    stockCamShowHistory();
+  }catch(e){ taiMsg("⛔ Hata: "+e.message,"bot"); }
+}
+
 async function stockCamDoGenerateGcode(){
   if(!stockCamPlanKey||!stockCamOps.length){ taiMsg("Henüz onaylanmış işlem yok.","bot"); return; }
   const postProcessor=await stockCamResolvePostProcessor();
@@ -3910,6 +3929,11 @@ async function stockCamHandleInput(text){
   const noteMatch=t.match(/^islem not\s+(\d+)/i);
   if(noteMatch){
     await stockCamStartNote(parseInt(noteMatch[1],10));
+    return true;
+  }
+  const deleteMatch=t.match(/^islem sil\s+(\d+)/i);
+  if(deleteMatch){
+    await stockCamDeleteOp(parseInt(deleteMatch[1],10));
     return true;
   }
   if(/^takim sirala/i.test(t)){
