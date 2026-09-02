@@ -718,8 +718,19 @@ class ToolMagazine{
       if(opType==="drill"){
         if(tl.type!=="endmill"&&tl.type!=="drill")continue;
         if(tl.dia>reqDia)continue;
-        score=(reqDia-tl.dia)+0.01;
-        if(tl.type==="drill")score-=0.005;
+        // Gercek matkap (type:"drill") delik delme icin dogru takimdir --
+        // parmak freze duz dalisla (plunge) delik acmak icin tasarlanmamistir
+        // (kenar kirilmasi/kirilma riski), sadece uygun capta gercek matkap
+        // YOKSA kabul edilebilir bir yedek. Eski puanlama, matkaba sadece
+        // 0.005'lik sabit bir bonus veriyordu -- cap farki bunu kolayca
+        // astigi icin (neredeyse her zaman), pratikte parmak freze cogu
+        // zaman matkabi eziyordu (canli testte dogrulandi: 10mm delik icin
+        // magazinde Ø8/Ø12 matkap varken Ø10 parmak freze secildi). Artik iki
+        // ayri bant kullaniliyor: matkaplar (reqDia-tl.dia) araliginda,
+        // parmak frezeler ona +1000 eklenmis arilikta -- cap ne kadar yakin
+        // olursa olsun, sigan bir matkap HER ZAMAN sigan bir parmak frezeyi
+        // gecer; bant icinde en yakin cap kazanir.
+        score=(reqDia-tl.dia)+(tl.type==="drill"?0:1000);
       }else if(opType==="pocket"||opType==="slot"){
         if(tl.type!=="endmill"&&tl.type!=="roughing")continue;
         if(tl.dia>=reqDia)continue;
@@ -3053,6 +3064,7 @@ function stockCamContextChips(){
         chips.push({l:`🔁 ${i+1}. Dizi Kopyala`,c:`islem dizi ${i+1}`});
       }
       chips.push({l:`📝 ${i+1}. Not`,c:`islem not ${i+1}`});
+      chips.push({l:`🗑 ${i+1}. Sil`,c:`islem sil ${i+1}`});
     });
     chips.push({l:"⬅ Kapat",c:"gecmisi kapat"});
     return chips;
@@ -3497,6 +3509,24 @@ async function stockCamEditPick(indexOneBased){
   taiMsg(`Mevcut değerler: ${stockCamOpSummary(op.type,refParams)}. Neyi değiştirmek istersiniz? (Değişmeyecek değerleri de tekrar söylemeniz gerekmez, sadece değişeni belirtin.)`,"bot");
 }
 
+// Yanlışlıkla onaylanmış bir işlemi (ör. istenmeyen bir işlem tipi
+// onaylandıysa) plandan kalıcı olarak kaldırır -- FreeCAD ile yeniden
+// doğrulama gerektirmez (kaldırmak yeni bir güvenlik ihlali yaratamaz,
+// bkz. removeOperation'ın kendi yorumu), bu yüzden senkron ve hızlıdır.
+async function stockCamDeleteOp(indexOneBased){
+  const idx=indexOneBased-1;
+  const op=stockCamOps[idx];
+  if(!op){ taiMsg("⛔ Böyle bir işlem yok.","bot"); return; }
+  try{
+    const r=await fetch(`${MAG_API_BASE}/stock-cam/plan/${stockCamPlanKey}/op/${op.id}`,{method:"DELETE",headers:magHeaders()});
+    const data=await r.json();
+    if(!r.ok||!data.ok){ taiMsg("⛔ Silinemedi: "+(data?.problems?.join(", ")||data?.error||"bilinmeyen hata"),"bot"); return; }
+    stockCamOps.splice(idx,1);
+    taiMsg(`✓ ${op.label} (${indexOneBased}. işlem) silindi.`,"bot");
+    stockCamShowHistory();
+  }catch(e){ taiMsg("⛔ Hata: "+e.message,"bot"); }
+}
+
 async function stockCamDoGenerateGcode(){
   if(!stockCamPlanKey||!stockCamOps.length){ taiMsg("Henüz onaylanmış işlem yok.","bot"); return; }
   const postProcessor=await stockCamResolvePostProcessor();
@@ -3910,6 +3940,11 @@ async function stockCamHandleInput(text){
   const noteMatch=t.match(/^islem not\s+(\d+)/i);
   if(noteMatch){
     await stockCamStartNote(parseInt(noteMatch[1],10));
+    return true;
+  }
+  const deleteMatch=t.match(/^islem sil\s+(\d+)/i);
+  if(deleteMatch){
+    await stockCamDeleteOp(parseInt(deleteMatch[1],10));
     return true;
   }
   if(/^takim sirala/i.test(t)){
