@@ -718,8 +718,19 @@ class ToolMagazine{
       if(opType==="drill"){
         if(tl.type!=="endmill"&&tl.type!=="drill")continue;
         if(tl.dia>reqDia)continue;
-        score=(reqDia-tl.dia)+0.01;
-        if(tl.type==="drill")score-=0.005;
+        // Gercek matkap (type:"drill") delik delme icin dogru takimdir --
+        // parmak freze duz dalisla (plunge) delik acmak icin tasarlanmamistir
+        // (kenar kirilmasi/kirilma riski), sadece uygun capta gercek matkap
+        // YOKSA kabul edilebilir bir yedek. Eski puanlama, matkaba sadece
+        // 0.005'lik sabit bir bonus veriyordu -- cap farki bunu kolayca
+        // astigi icin (neredeyse her zaman), pratikte parmak freze cogu
+        // zaman matkabi eziyordu (canli testte dogrulandi: 10mm delik icin
+        // magazinde Ø8/Ø12 matkap varken Ø10 parmak freze secildi). Artik iki
+        // ayri bant kullaniliyor: matkaplar (reqDia-tl.dia) araliginda,
+        // parmak frezeler ona +1000 eklenmis arilikta -- cap ne kadar yakin
+        // olursa olsun, sigan bir matkap HER ZAMAN sigan bir parmak frezeyi
+        // gecer; bant icinde en yakin cap kazanir.
+        score=(reqDia-tl.dia)+(tl.type==="drill"?0:1000);
       }else if(opType==="pocket"||opType==="slot"){
         if(tl.type!=="endmill"&&tl.type!=="roughing")continue;
         if(tl.dia>=reqDia)continue;
