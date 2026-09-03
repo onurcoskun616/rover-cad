@@ -686,10 +686,30 @@ let CUTTER_R=13, CUTTER_H=26;
 let millWheelPendingZoom=0, millWheelClientX=0, millWheelClientY=0;
 const MILL_BASE_ZOOM_SPEED=0.12;
 const MILL_MAX_WHEEL_MAG=1.2;
-// Bir kare içinde uygulanacak en büyük tekil adım (mag birimiyle) -- küçük
-// tutulunca büyük birikmiş miktarlar bile birkaç kareye (60fps'te
-// ~100-200ms) yayılıp akıcı hissettiriyor.
-const MILL_WHEEL_STEP_PER_FRAME=0.15;
+// DÖRDÜNCÜ tur: canlı testte paylaşılan VİDEO (kare kare incelendi) bir
+// önceki düzeltmenin (kare başına yumuşatma) KISMEN çalıştığını gösterdi --
+// bazı bölümlerde gerçekten akıcı bir zoom-out görülüyordu -- ama bazı
+// anlarda hâlâ tek bir video karesi (1/6 saniye) içinde uçtan uca bir
+// sıçrama vardı. Kök neden: MILL_WHEEL_STEP_PER_FRAME=0.15 ile, tek bir
+// olayın izin verilen en büyük birikimi (MILL_MAX_WHEEL_MAG=1.2) sadece
+// 1.2/0.15=8 GERÇEK render karesinde tamamen boşalıyordu -- 60fps'te bu
+// ~130ms, insan gözünün bunu "akıcı hareket" değil "ani sıçrama" olarak
+// algılamasına yetecek kadar kısa bir süre. Ayrıca art arda gelen birden
+// çok ham olay millWheelPendingZoom'u SINIRSIZ büyütebiliyordu (her biri
+// kendi 1.2 tavanıyla sınırlı olsa da, TOPLAMDA bir üst sınır yoktu) --
+// uzun bir kaydırma hareketi teorik olarak çok büyük bir toplam biriktirip,
+// yavaş da boşalsa yine aşırı büyük bir NET zoom'a yol açabiliyordu.
+//
+// Çözüm: (1) MILL_WHEEL_STEP_PER_FRAME 0.15'ten 0.035'e düşürüldü -- aynı
+// 1.2'lik tek-olay tavanı artık 1.2/0.035≈34 kareye (60fps'te ~570ms)
+// yayılıyor, göz için AÇIKÇA akıcı/kademeli bir hareket. (2)
+// millWheelPendingZoom'un TOPLAMI da MILL_MAX_PENDING_ZOOM ile
+// sınırlanıyor -- art arda kaç ham olay gelirse gelsin, bekleyen toplam
+// miktar hiçbir zaman "bir tek sağlam zoom hareketi" kabul edilebilir
+// büyüklüğün üzerine çıkamıyor, bu da nihai (tam boşaldıktan sonraki)
+// kamera konumunun da makul kalmasını garanti ediyor.
+const MILL_WHEEL_STEP_PER_FRAME=0.035;
+const MILL_MAX_PENDING_ZOOM=2.5;
 // Bir donanım/işletim sistemi bir "hareketi" TEK büyük bir DOM wheel
 // olayına sıkıştırırsa (bkz. initMill()'deki wheel dinleyicisinin başındaki
 // uzun not), OrbitControls'un kendi anlık/tek-adımlık zoom mantığına o ham
@@ -873,7 +893,11 @@ function initMill(){
     // bir tekerlek/trackpad olayının katkısı bu tavanın üzerine çıkamaz.
     const unit=e.deltaMode===1?18:e.deltaMode===2?800:1;
     const mag=Math.min(MILL_MAX_WHEEL_MAG,Math.abs(e.deltaY)*unit/100);
-    millWheelPendingZoom+=Math.sign(e.deltaY)*Math.max(0.2,mag);
+    // Toplam biriken miktar da MILL_MAX_PENDING_ZOOM ile sınırlanıyor --
+    // art arda kaç ham olay gelirse gelsin (bkz. yukarıdaki DÖRDÜNCÜ tur
+    // notu), nihai net zoom hiçbir zaman "bir tek sağlam hareket" kabul
+    // edilebilir büyüklüğün üzerine çıkamaz.
+    millWheelPendingZoom=Math.max(-MILL_MAX_PENDING_ZOOM,Math.min(MILL_MAX_PENDING_ZOOM,millWheelPendingZoom+Math.sign(e.deltaY)*Math.max(0.2,mag)));
     millWheelClientX=e.clientX;millWheelClientY=e.clientY;
   },{passive:false});
   controls=new OrbitControls(camera,renderer.domElement);
