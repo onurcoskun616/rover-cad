@@ -3,6 +3,15 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<!-- Bu tek dosya çok sık deploy ediliyor (her düzeltme sonrası) ve
+     tarayıcılar sekmeyi normal "yenile" ile bile ESKİ sürümü diskten
+     sunmaya devam edebiliyor -- canlı testte defalarca doğrulandı: bir
+     düzeltme deploy edildi ama operatör aynı sekmede kalınca eski,
+     düzeltme-öncesi JS çalışmaya devam etti. Bu meta etiketleri
+     tarayıcıya bu belgeyi hiç önbelleklememesini söylüyor. -->
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+<meta http-equiv="Pragma" content="no-cache" />
+<meta http-equiv="Expires" content="0" />
 <title>CNC Simülatör · Torna & Freze</title>
 <script>
   // Production default stays fully deterministic (no LLM G-code generation —
