@@ -922,6 +922,14 @@ function buildWorkpiece(){
   bottom.rotation.x=Math.PI/2;bottom.position.y=0;scene.add(bottom);sideMeshes.push(bottom);
 }
 
+// Takımın gerçek uç şekli: matkap sivri konik uç, top freze yarım küre
+// (yuvarlak) uç, pah frezesi kısa/geniş açılı konik kenar -- parmak
+// freze/kaba freze (endmill/roughing, ve tipi bilinmeyen/varsayılan durum)
+// düz uçlu kalıyor. Alt uç HER ZAMAN y=0'da kalıyor -- bu, kesim
+// simülasyonunun (carve/collision matematiği CUTTER_R/CUTTER_H'a göre
+// çalışıyor) varsaydığı nokta; şekil bu noktayı DEĞİŞTİRMEDEN sadece o
+// noktaya kadar olan gövdeyi biçimlendiriyor, yoksa görsel uç ile gerçek
+// kesim derinliği birbirinden kayardı.
 function buildTool(){
   if(toolGroup){
     while(toolGroup.children.length){const c=toolGroup.children[0];c.geometry.dispose();c.material.dispose();toolGroup.remove(c);}
@@ -931,9 +939,31 @@ function buildTool(){
   const steel=new THREE.MeshStandardMaterial({color:0xd7dde2,metalness:.9,roughness:.25});
   const dark=new THREE.MeshStandardMaterial({color:0x3a3f45,metalness:.7,roughness:.4});
   const gold=new THREE.MeshStandardMaterial({color:0xd8a52a,metalness:.6,roughness:.4});
-  const cutter=new THREE.Mesh(new THREE.CylinderGeometry(CUTTER_R,CUTTER_R,CUTTER_H,24),dark);cutter.position.y=CUTTER_H/2;cutter.castShadow=true;toolGroup.add(cutter);
-  const insR=Math.max(CUTTER_R,3);
-  for(let i=0;i<4;i++){const t=new THREE.Mesh(new THREE.BoxGeometry(3,3,4),gold);const a=i/4*Math.PI*2;t.position.set(Math.cos(a)*insR,2,Math.sin(a)*insR);toolGroup.add(t);}
+  const toolType=magazine.getActiveTool()?.type;
+  let bodyBottomY=0,hasInserts=true;
+  if(toolType==="drill"){
+    const tipH=Math.min(CUTTER_R*2.5,CUTTER_H*0.6);
+    const tip=new THREE.Mesh(new THREE.ConeGeometry(CUTTER_R,tipH,24),dark);
+    tip.rotation.x=Math.PI;tip.position.y=tipH/2;tip.castShadow=true;toolGroup.add(tip);
+    bodyBottomY=tipH;hasInserts=false;
+  }else if(toolType==="ballmill"){
+    // Alt yarım küre (ekvatordan güney kutbuna) -- yuvarlak burun asagi
+    // baksin diye ekvator(theta=PI/2)'dan baslayip PI/2 kadar suruyor.
+    const dome=new THREE.Mesh(new THREE.SphereGeometry(CUTTER_R,20,12,0,Math.PI*2,Math.PI/2,Math.PI/2),dark);
+    dome.position.y=CUTTER_R;dome.castShadow=true;toolGroup.add(dome);
+    bodyBottomY=CUTTER_R;hasInserts=false;
+  }else if(toolType==="chamfer"){
+    const tipH=Math.max(CUTTER_R*0.9,3);
+    const tip=new THREE.Mesh(new THREE.ConeGeometry(CUTTER_R,tipH,24),dark);
+    tip.rotation.x=Math.PI;tip.position.y=tipH/2;tip.castShadow=true;toolGroup.add(tip);
+    bodyBottomY=tipH;hasInserts=false;
+  }
+  const bodyH=Math.max(CUTTER_H-bodyBottomY,CUTTER_H*0.2);
+  const cutter=new THREE.Mesh(new THREE.CylinderGeometry(CUTTER_R,CUTTER_R,bodyH,24),dark);cutter.position.y=bodyBottomY+bodyH/2;cutter.castShadow=true;toolGroup.add(cutter);
+  if(hasInserts){
+    const insR=Math.max(CUTTER_R,3);
+    for(let i=0;i<4;i++){const t=new THREE.Mesh(new THREE.BoxGeometry(3,3,4),gold);const a=i/4*Math.PI*2;t.position.set(Math.cos(a)*insR,2,Math.sin(a)*insR);toolGroup.add(t);}
+  }
   const shaft=new THREE.Mesh(new THREE.CylinderGeometry(CUTTER_R*.7,CUTTER_R*.7,40,24),steel);shaft.position.y=CUTTER_H+20;shaft.castShadow=true;toolGroup.add(shaft);
   const holder=new THREE.Mesh(new THREE.CylinderGeometry(CUTTER_R*1.5,CUTTER_R*.9,46,24),steel);holder.position.y=CUTTER_H+40+23;holder.castShadow=true;toolGroup.add(holder);
   const taper=new THREE.Mesh(new THREE.CylinderGeometry(CUTTER_R*2.2,CUTTER_R*1.5,40,24),steel);taper.position.y=CUTTER_H+40+46+20;toolGroup.add(taper);
