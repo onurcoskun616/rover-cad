@@ -803,7 +803,22 @@ function initMill(){
   // zoomToCursor dahil) mantığını hemen ardından bu güncellenmiş hızla
   // çalıştırıyor, yani gerçek scroll miktarına ORANTILI (küçük hareket =
   // ince ayar, büyük/hızlı hareket = büyük adım) bir zoom elde ediyoruz.
-  const MILL_BASE_ZOOM_SPEED=0.35;
+  // Canli testte hafif, TEK bir tekerlek tiki bile cok buyuk bir zoom
+  // adimi yapiyordu -- momentum burada suclu degil (izole bir tik icin
+  // momentum=1 kaliyor, asagida gorulecegi gibi), asil sorun asagidaki
+  // Math.max(0.2,mag) teriminin bir UST SINIRI hic yoktu: /100
+  // normalizasyonu "sıradan" bir tekerlek adimini (~100px) mag~1'e denk
+  // getirmeyi VARSAYIYORDU, ama gercek deltaY buyuklugu isletim
+  // sistemi/tarayici/fare surucusu kombinasyonuna gore bu varsayimin cok
+  // üzerinde olabiliyor (ör. Windows'un "tekerlek basina kac satir"
+  // ayari) -- boyle bir durumda TEK bir izole tik bile mag'i buyuk
+  // yapip zoomSpeed'i (ve dolayisiyla adimi) asiri buyutuyordu. Hem
+  // temel hizi dusurup hem de mag'in kendisine bir tavan (bkz.
+  // MILL_MAX_WHEEL_MAG asagida) koyarak, HANGI fare/isletim sistemi
+  // olursa olsun tek bir tikin adimi artik guvenli bir ust sinirin
+  // uzerine cikamiyor.
+  const MILL_BASE_ZOOM_SPEED=0.18;
+  const MILL_MAX_WHEEL_MAG=1.5;
   // "Tekerlek ilerledikçe zoom yapsın" (kullanıcı geri bildirimi): yukarıdaki
   // deltaY büyüklüğü tek başına STANDART (çentikli) bir farede işe yaramıyor
   // -- böyle bir fare HER çentikte AYNI sabit deltaY'i gönderir (genelde
@@ -825,11 +840,16 @@ function initMill(){
     // tarayıcı/fare sürücüsü kombinasyonları), 2=sayfa -- hepsi yaklaşık
     // piksel birimine getiriliyor ki oran tutarlı olsun. /100 normalizasyonu
     // "sıradan" bir tekerlek adımını (~100px) mag≈1'e denk getirip bugünkü
-    // hızı (0.35) o adım için korur. Trackpad gibi değişken-deltaY veren
+    // hızı o adım için korur. Trackpad gibi değişken-deltaY veren
     // cihazlarda mag zaten büyüklüğe göre orantılı ölçekliyor; momentum
-    // bunun ÜZERİNE, sürekli/hızlı çevirme sinyalini ekliyor.
+    // bunun ÜZERİNE, sürekli/hızlı çevirme sinyalini ekliyor. mag'in kendisi
+    // MILL_MAX_WHEEL_MAG ile sınırlanıyor -- gerçek deltaY büyüklüğü hangi
+    // fare/işletim sistemi kombinasyonunda ne kadar büyük olursa olsun, TEK
+    // bir (izole, momentum=1) tekerlek olayının adımı bu tavanın üzerine
+    // çıkamaz (canlı testte görülen "hafif tek tık bile aşırı büyük zoom
+    // yapıyor" sorununun kök nedeni).
     const unit=e.deltaMode===1?18:e.deltaMode===2?800:1;
-    const mag=Math.abs(e.deltaY)*unit/100;
+    const mag=Math.min(MILL_MAX_WHEEL_MAG,Math.abs(e.deltaY)*unit/100);
     controls.zoomSpeed=MILL_BASE_ZOOM_SPEED*Math.min(8,Math.max(0.2,mag)*stockCamWheelMomentum);
   },{passive:true});
   controls=new OrbitControls(camera,renderer.domElement);
@@ -841,7 +861,9 @@ function initMill(){
   // bir adım oluyor (hassas ayar).
   // Bkz. viewer.js'teki ayni ayar: "gidip gelme" hissinin kaynagi damping degil,
   // damping'e verilen BUYUK adimdi. Adim kuculunce ayni sonumleme sicramayi
-  // yumusatan kisa bir gecise donusuyor. Tik basina: 0.95^0.35 = %1.8 (onceden %3.0).
+  // yumusatan kisa bir gecise donusuyor. Tik basina: 0.95^0.18 = %0.9 (once
+  // %3.0, sonra %1.8, canli testte "tek tik bile cok fazla" geri
+  // bildirimiyle simdi %0.9'a dusuruldu).
   controls.enableDamping=true;
   controls.dampingFactor=0.15;
   controls.zoomSpeed=MILL_BASE_ZOOM_SPEED;
