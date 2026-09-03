@@ -680,6 +680,35 @@ let removedSum=0;   // carve() icinde birikir; computeRemoved bunu okur
 
 let renderer,scene,camera,controls,plane,planeGeo,toolGroup,chipPool=[],raf3d;
 let CUTTER_R=13, CUTTER_H=26;
+// Tekerlek/trackpad zoom'unun ana döngüde (asağıdaki loop()) kare-başına
+// yumuşatılması için -- bkz. initMill()'deki wheel dinleyicisi ve
+// applyPendingWheelZoom().
+let millWheelPendingZoom=0, millWheelClientX=0, millWheelClientY=0;
+const MILL_BASE_ZOOM_SPEED=0.12;
+const MILL_MAX_WHEEL_MAG=1.2;
+// Bir kare içinde uygulanacak en büyük tekil adım (mag birimiyle) -- küçük
+// tutulunca büyük birikmiş miktarlar bile birkaç kareye (60fps'te
+// ~100-200ms) yayılıp akıcı hissettiriyor.
+const MILL_WHEEL_STEP_PER_FRAME=0.15;
+// Bir donanım/işletim sistemi bir "hareketi" TEK büyük bir DOM wheel
+// olayına sıkıştırırsa (bkz. initMill()'deki wheel dinleyicisinin başındaki
+// uzun not), OrbitControls'un kendi anlık/tek-adımlık zoom mantığına o ham
+// olayı hiç göstermiyoruz -- büyüklüğü millWheelPendingZoom'a biriktirip,
+// burada her karede KÜÇÜK, sabit boyutlu bir SENTETİK wheel olayı halinde
+// OrbitControls'a besliyoruz. OrbitControls'un kendi (test edilmiş,
+// zoomToCursor dahil) mantığı hiç değişmiyor -- sadece tek büyük adım
+// yerine birkaç küçük adıma bölünmüş halde, birkaç kareye yayılarak
+// çalışıyor, bu da donanımın olayı nasıl parçaladığından bağımsız olarak
+// her zaman akıcı/kademesiz bir görsel sonuç veriyor.
+function applyPendingWheelZoom(){
+  if(!controls||Math.abs(millWheelPendingZoom)<1e-4)return;
+  const step=Math.sign(millWheelPendingZoom)*Math.min(Math.abs(millWheelPendingZoom),MILL_WHEEL_STEP_PER_FRAME);
+  millWheelPendingZoom-=step;
+  controls.zoomSpeed=MILL_BASE_ZOOM_SPEED*Math.max(0.2,Math.abs(step));
+  const synthetic=new WheelEvent("wheel",{deltaY:step>=0?100:-100,deltaMode:0,clientX:millWheelClientX,clientY:millWheelClientY,bubbles:true,cancelable:true});
+  synthetic.__roverSynthetic=true;
+  renderer.domElement.dispatchEvent(synthetic);
+}
 
 const TOOL_LIBRARY=[
   {id:1, name:"Ø6 Parmak Freze",   type:"endmill",  dia:6,  fluteLen:20, totalLen:50, maxRpm:12000},
@@ -800,65 +829,54 @@ function initMill(){
   scene.fog=new THREE.Fog("#8b9299",500,1400);
 
   camera=new THREE.PerspectiveCamera(45,1,1,3000);
-  // OrbitControls'un kendi tekerlek işleyicisi (three/addons) her wheel
-  // olayında SABİT bir yüzde uyguluyor (getZoomScale() = 0.95^zoomSpeed) --
-  // event.deltaY'in büyüklüğüne hiç bakmıyor. Sonuç: hafif bir dokunuş da,
-  // hızlı bir fırlatma-scroll da AYNI adımı zoom'luyor -- "kademeli" hissin
-  // kaynağı bu (adım küçük de olsa, HER ZAMAN aynı adım). CDN'den yüklenen
-  // üçüncü parti kütüphaneyi değiştiremediğimiz için, kendi wheel
-  // dinleyicimizi OrbitControls'unkinden ÖNCE ekliyoruz (aynı elemanda/olayda
-  // kayıt sırasına göre çalışır) ve her olayda zoomSpeed'i o anki deltaY
-  // büyüklüğüne göre anlık ayarlıyoruz -- OrbitControls kendi (test edilmiş,
-  // zoomToCursor dahil) mantığını hemen ardından bu güncellenmiş hızla
-  // çalıştırıyor, yani gerçek scroll miktarına ORANTILI (küçük hareket =
-  // ince ayar, büyük/hızlı hareket = büyük adım) bir zoom elde ediyoruz.
-  // Canli testte iki kez bildirildi: hafif, TEK bir tekerlek/trackpad
-  // hareketi bile cok buyuk bir zoom adimi yapiyordu -- bir onceki
-  // duzeltme (temel hizi dusurup mag'e bir tavan koymak) yeterli olmadi.
-  // Gercek kok neden bu momentum sistemiydi: "ardisik olaylar arasindaki
-  // SURE < 150ms ise momentum'u yukselt" kurali, bir fareyi HIZLI cevirmek
-  // icin dogruydu (az sayida, seyrek olay), ama bir TRACKPAD uzerinde
-  // KUCUK/YAVAS bir kaydirma bile onlarca kucuk wheel olayini ÇOK KISA
-  // arayla (genelde <16ms, ekran yenileme hizinda) ureten SUREKLI bir
-  // girdi -- yani trackpad'de "yavas mi hizli mi kaydirdiniz" farketmeksizin
-  // HER kaydirma bu <150ms kuralina takilip momentum'u hizla en tavana
-  // (5x) tirmandiriyordu. Sonuc: "en ufak hareketle bile" asiri zoom.
-  // Duzeltme: momentum/sure tabanli ivmelenmeyi tamamen kaldirdik. Zoom
-  // artik SADECE o TEK olayin kendi deltaY buyuklugune (mag, asagida bir
-  // tavanla sinirli) baglı -- ardisik olaylarin SIKLIGI hicbir sekilde
-  // etkilemiyor, bu yuzden trackpad'in dogal olarak sik ürettigi kucuk
-  // olaylar birbirini ivmelendiremiyor; art arda gelen kucuk hareketlerin
-  // TOPLAM etkisi hala birikir (her biri kendi payini ekler), ama HİÇBİR
-  // TEKİL olay, ne kadar sik gelirse gelsin, kendi mag'inin izin verdiginden
-  // daha fazla zoom yapamaz.
-  const MILL_BASE_ZOOM_SPEED=0.12;
-  const MILL_MAX_WHEEL_MAG=1.2;
+  // ÜÇÜNCÜ tur: canlı testte üç kez bildirildi -- (1) hafif tek tık aşırı
+  // zoom yapıyordu (taban hız + mag tavanıyla düzeltildi), (2) trackpad'de
+  // en ufak hareket bile aşırı zoom yapıyordu (frekans tabanlı momentum
+  // kaldırılarak düzeltildi), (3) ŞİMDİ: "tekerlek iki kademeli çalışıyor
+  // sadece ve aşırı zoom in/out yapıyor" -- yani zoom artık iki UÇ arasında
+  // ayrık sıçrıyor, aradaki kademeler hiç görünmüyor.
+  //
+  // Kök neden: OrbitControls'un kendi tekerlek işleyicisi HER wheel
+  // olayında SABİT bir yüzde uyguluyor (deltaY'in büyüklüğüne değil, sadece
+  // İŞARETİNE bakıyor) ve bunu tek bir update() çağrısında ANINDA/tam
+  // olarak uyguluyor -- damping rotasyon/pan için kare kare yumuşatma
+  // yapsa da, zoom adımının kendisi damping'den etkilenmiyor. Bir
+  // fare/trackpad sürücüsü/işletim sistemi bir "hareketi" TEK büyük bir DOM
+  // wheel olayına (ya da art arda gelen ama aradaki gerçek zamanla
+  // örtüşmeyen birkaç olaya) sıkıştırıyorsa, sonuç iki ayrık duruma
+  // sıçramak gibi hissettiriyor -- ne kadar mag/momentum ayarı yapılırsa
+  // yapılsın, OrbitControls tek olayı yine TEK adımda uyguluyor.
+  //
+  // Çözüm: OrbitControls'un KENDİ tekerlek işleyicisinin bu ham olayı hiç
+  // görmesine izin vermiyoruz (stopImmediatePropagation) -- bunun yerine
+  // olayın büyüklüğünü bir biriktiriciye (millWheelPendingZoom) ekleyip,
+  // asıl kare döngüsünde (aşağıda ANA DÖNGÜ'deki applyPendingWheelZoom())
+  // bunu KÜÇÜK, sabit boyutlu SENTETİK wheel olayları halinde birkaç kareye
+  // yayarak OrbitControls'a besliyoruz -- OrbitControls'un kendi (test
+  // edilmiş, zoomToCursor dahil) mantığı hiç değişmeden, sadece TEK bir
+  // büyük adım yerine birkaç küçük adıma bölünmüş halde çalışıyor. Böylece
+  // donanım/işletim sistemi olayı nasıl parçalara ayırırsa ayırsın, GÖRSEL
+  // sonuç her zaman kademesiz/akıcı bir zoom oluyor. (MILL_BASE_ZOOM_SPEED/
+  // MILL_MAX_WHEEL_MAG/MILL_WHEEL_STEP_PER_FRAME/applyPendingWheelZoom
+  // modül düzeyinde tanımlı, bkz. dosyanın başı -- ana döngü de erişebilsin.)
   renderer.domElement.addEventListener("wheel",(e)=>{
     if(!controls)return;
+    if(e.__roverSynthetic)return; // asagidaki sentetik replay olayi -- kendi kendini biriktirmesin
+    e.preventDefault();
+    e.stopImmediatePropagation(); // OrbitControls'un kendi dinleyicisi bu HAM olayi hic islemesin
     // deltaMode: 0=piksel (çoğu masaüstü fare/trackpad), 1=satır (bazı
     // tarayıcı/fare sürücüsü kombinasyonları), 2=sayfa -- hepsi yaklaşık
     // piksel birimine getiriliyor ki oran tutarlı olsun. /100 normalizasyonu
     // "sıradan" bir tekerlek adımını (~100px) mag≈1'e denk getirir. mag,
     // MILL_MAX_WHEEL_MAG ile sınırlanıyor -- gerçek deltaY büyüklüğü hangi
     // fare/işletim sistemi kombinasyonunda ne kadar büyük olursa olsun, TEK
-    // bir tekerlek/trackpad olayının adımı bu tavanın üzerine çıkamaz.
+    // bir tekerlek/trackpad olayının katkısı bu tavanın üzerine çıkamaz.
     const unit=e.deltaMode===1?18:e.deltaMode===2?800:1;
     const mag=Math.min(MILL_MAX_WHEEL_MAG,Math.abs(e.deltaY)*unit/100);
-    controls.zoomSpeed=MILL_BASE_ZOOM_SPEED*Math.max(0.2,mag);
-  },{passive:true});
+    millWheelPendingZoom+=Math.sign(e.deltaY)*Math.max(0.2,mag);
+    millWheelClientX=e.clientX;millWheelClientY=e.clientY;
+  },{passive:false});
   controls=new OrbitControls(camera,renderer.domElement);
-  // Damping'in "momentum/glide" davranışı fare tekerleğinde her scroll'un
-  // birkaç kare boyunca sönümlenerek devam etmesine yol açıyordu — hızlı
-  // art arda scroll'da kamera hedeften geçip geri sekiyor gibi hissettiriyor
-  // ("gidip gelme"). Damping kapatılınca zoom her tekerlek hareketine 1:1,
-  // anında karşılık veriyor; zoomSpeed düşürülerek de her "tık" daha ince
-  // bir adım oluyor (hassas ayar).
-  // Bkz. viewer.js'teki ayni ayar: "gidip gelme" hissinin kaynagi damping degil,
-  // damping'e verilen BUYUK adimdi. Adim kuculunce ayni sonumleme sicramayi
-  // yumusatan kisa bir gecise donusuyor. Tik basina: 0.95^0.12 = %0.6 (once
-  // %3.0, sonra %1.8, sonra %0.9 -- ucu de "hafif hareket bile asiri zoom"
-  // geri bildirimiyle yetersiz cikti, momentum/sure tabanli ivmelenme
-  // tamamen kaldirilip taban hiz %0.6'ya dusuruldu, bkz. yukaridaki not).
   controls.enableDamping=true;
   controls.dampingFactor=0.15;
   controls.zoomSpeed=MILL_BASE_ZOOM_SPEED;
@@ -1895,7 +1913,7 @@ setTab("mill");
 let last=performance.now(),uiAcc=0;
 function loop(now){
   const dt=Math.min(.05,(now-last)/1000);last=now;
-  if(active==="mill"){updateMill(dt);controls.update();renderer.render(scene,camera);}
+  if(active==="mill"){applyPendingWheelZoom();updateMill(dt);controls.update();renderer.render(scene,camera);}
   else{lathe.update(dt);const r=latheCanvas.getBoundingClientRect();lathe.draw(lctx,r.width,r.height);}
   uiAcc+=dt;if(uiAcc>.066){uiAcc=0;if(active==="mill")syncMill(uiAcc||dt);else syncLathe();}
   requestAnimationFrame(loop);
