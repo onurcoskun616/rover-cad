@@ -680,54 +680,80 @@ let removedSum=0;   // carve() icinde birikir; computeRemoved bunu okur
 
 let renderer,scene,camera,controls,plane,planeGeo,toolGroup,chipPool=[],raf3d;
 let CUTTER_R=13, CUTTER_H=26;
-// Tekerlek/trackpad zoom'unun ana döngüde (asağıdaki loop()) kare-başına
-// yumuşatılması için -- bkz. initMill()'deki wheel dinleyicisi ve
-// applyPendingWheelZoom().
-let millWheelPendingZoom=0, millWheelClientX=0, millWheelClientY=0;
-const MILL_BASE_ZOOM_SPEED=0.12;
-const MILL_MAX_WHEEL_MAG=1.2;
-// DÖRDÜNCÜ tur: canlı testte paylaşılan VİDEO (kare kare incelendi) bir
-// önceki düzeltmenin (kare başına yumuşatma) KISMEN çalıştığını gösterdi --
-// bazı bölümlerde gerçekten akıcı bir zoom-out görülüyordu -- ama bazı
-// anlarda hâlâ tek bir video karesi (1/6 saniye) içinde uçtan uca bir
-// sıçrama vardı. Kök neden: MILL_WHEEL_STEP_PER_FRAME=0.15 ile, tek bir
-// olayın izin verilen en büyük birikimi (MILL_MAX_WHEEL_MAG=1.2) sadece
-// 1.2/0.15=8 GERÇEK render karesinde tamamen boşalıyordu -- 60fps'te bu
-// ~130ms, insan gözünün bunu "akıcı hareket" değil "ani sıçrama" olarak
-// algılamasına yetecek kadar kısa bir süre. Ayrıca art arda gelen birden
-// çok ham olay millWheelPendingZoom'u SINIRSIZ büyütebiliyordu (her biri
-// kendi 1.2 tavanıyla sınırlı olsa da, TOPLAMDA bir üst sınır yoktu) --
-// uzun bir kaydırma hareketi teorik olarak çok büyük bir toplam biriktirip,
-// yavaş da boşalsa yine aşırı büyük bir NET zoom'a yol açabiliyordu.
+// ==========================  TEKERLEK ZOOM  ==========================
+// GERÇEK KÖK NEDEN (beş başarısız denemeden sonra, three.js r160'ın kendi
+// kaynağı okunarak bulundu -- OrbitControls.js, getZoomScale):
 //
-// Çözüm: (1) MILL_WHEEL_STEP_PER_FRAME 0.15'ten 0.035'e düşürüldü -- aynı
-// 1.2'lik tek-olay tavanı artık 1.2/0.035≈34 kareye (60fps'te ~570ms)
-// yayılıyor, göz için AÇIKÇA akıcı/kademeli bir hareket. (2)
-// millWheelPendingZoom'un TOPLAMI da MILL_MAX_PENDING_ZOOM ile
-// sınırlanıyor -- art arda kaç ham olay gelirse gelsin, bekleyen toplam
-// miktar hiçbir zaman "bir tek sağlam zoom hareketi" kabul edilebilir
-// büyüklüğün üzerine çıkamıyor, bu da nihai (tam boşaldıktan sonraki)
-// kamera konumunun da makul kalmasını garanti ediyor.
-const MILL_WHEEL_STEP_PER_FRAME=0.035;
-const MILL_MAX_PENDING_ZOOM=2.5;
-// Bir donanım/işletim sistemi bir "hareketi" TEK büyük bir DOM wheel
-// olayına sıkıştırırsa (bkz. initMill()'deki wheel dinleyicisinin başındaki
-// uzun not), OrbitControls'un kendi anlık/tek-adımlık zoom mantığına o ham
-// olayı hiç göstermiyoruz -- büyüklüğü millWheelPendingZoom'a biriktirip,
-// burada her karede KÜÇÜK, sabit boyutlu bir SENTETİK wheel olayı halinde
-// OrbitControls'a besliyoruz. OrbitControls'un kendi (test edilmiş,
-// zoomToCursor dahil) mantığı hiç değişmiyor -- sadece tek büyük adım
-// yerine birkaç küçük adıma bölünmüş halde, birkaç kareye yayılarak
-// çalışıyor, bu da donanımın olayı nasıl parçaladığından bağımsız olarak
-// her zaman akıcı/kademesiz bir görsel sonuç veriyor.
+//     const normalized_delta =
+//         Math.abs( delta ) / ( 100 * ( window.devicePixelRatio | 0 ) );
+//     return Math.pow( 0.95, scope.zoomSpeed * normalized_delta );
+//
+// `window.devicePixelRatio | 0` -- yani devicePixelRatio'nun TAM SAYIYA
+// yuvarlanmış hâli. Tarayıcı UZAKLAŞTIRILDIĞINDA (Ctrl+− ile sayfa zoom'u,
+// ki büyük CNC arayüzünü ekrana sığdırmak için çok yaygın) devicePixelRatio
+// 1'in ALTINA düşer (0.9, 0.8, 0.67...) ve `| 0` bunu **0** yapar:
+//   normalized_delta = |delta| / 0 = Infinity
+//   zoom scale       = 0.95^(zoomSpeed * Infinity) = 0
+// dollyOut(0) -> `scale /= 0` -> Infinity -> yarıçap anında maxDistance'a;
+// dollyIn(0)  -> yarıçap anında minDistance'a çarpar. Sonuç tam olarak
+// canlı testte bildirilen davranış: "tekerlek iki kademeli çalışıyor sadece
+// ve aşırı zoom in ve out yapıyor" -- sadece iki uç durum, arada hiçbir
+// kademe yok.
+//
+// Bu, önceki BEŞ düzeltmenin neden hiçbirinin işe yaramadığını da açıklıyor:
+// hepsi scope.zoomSpeed'i ayarlıyordu, ama zoomSpeed * Infinity = Infinity.
+// Hangi değer verilirse verilsin matematiksel olarak etkisiz kalıyordu.
+//
+// ÇÖZÜM: OrbitControls'un tekerlek zoom'u tamamen kapatıldı
+// (controls.enableZoom=false, bkz. initMill) ve dolly matematiği burada
+// kendimiz yapıyoruz -- devicePixelRatio'ya HİÇ bağlı değil, tamamen
+// öngörülebilir: her tam tekerlek çentiği kamera mesafesini sabit bir yüzde
+// (MILL_ZOOM_PER_NOTCH) değiştiriyor, ve gerçek kamera bu hedefe her karede
+// yumuşak şekilde (MILL_ZOOM_EASE) yaklaşıyor. Döndürme/kaydırma
+// (rotate/pan) OrbitControls'ta olduğu gibi kalıyor.
+//
+// Not: OrbitControls'un "imlecin altındaki noktaya doğru zoom" (zoomToCursor)
+// özelliği bu yolla devre dışı kalıyor; zoom klasik şekilde yörünge
+// hedefine doğru yapılıyor. Öngörülebilirlik uğruna kabul edilen bir takas.
+let millZoomTargetDistance=null;   // hedef kamera-hedef mesafesi (null = bekleyen zoom yok)
+const MILL_ZOOM_PER_NOTCH=1.10;    // bir tam tekerlek çentiği = %10 mesafe değişimi
+const MILL_ZOOM_EASE=0.18;         // her karede hedefe yaklaşma oranı (~%95'i ~16 karede)
+// Tek bir ham olayın kaç "çentik" sayılacağı: sıradan bir fare çentiği
+// (deltaY ~100-150px) 1.0 kabul ediliyor; trackpad'in ürettiği çok küçük
+// olaylar tabana (0.1), aşırı büyük deltaY gönderen sürücüler ise tavana
+// (1.0) sıkıştırılıyor -- böylece TEK bir olay hiçbir zaman %10'dan fazla
+// zoom yapamıyor, işletim sistemi/sürücü ne gönderirse göndersin.
+const MILL_ZOOM_MIN_NOTCH=0.1, MILL_ZOOM_MAX_NOTCH=1.0;
+
+// Ham tekerlek olayını hedef mesafeye çevirir (initMill'deki dinleyiciden
+// çağrılır).
+function millWheelZoomInput(deltaY,deltaMode){
+  if(!controls||!camera)return;
+  const unit=deltaMode===1?18:deltaMode===2?800:1;
+  const notches=Math.min(MILL_ZOOM_MAX_NOTCH,Math.max(MILL_ZOOM_MIN_NOTCH,Math.abs(deltaY)*unit/100));
+  const factor=Math.pow(MILL_ZOOM_PER_NOTCH,deltaY>0?notches:-notches);
+  const base=millZoomTargetDistance!==null?millZoomTargetDistance:camera.position.distanceTo(controls.target);
+  millZoomTargetDistance=Math.min(controls.maxDistance,Math.max(controls.minDistance,base*factor));
+}
+
+// Ana döngüde her karede çağrılır: kamerayı hedef mesafeye doğru yumuşakça
+// yaklaştırır. Kamera-hedef YÖNÜ hiç değişmiyor (döndürme/kaydırma
+// OrbitControls'un işi), sadece uzaklık ölçekleniyor.
 function applyPendingWheelZoom(){
-  if(!controls||Math.abs(millWheelPendingZoom)<1e-4)return;
-  const step=Math.sign(millWheelPendingZoom)*Math.min(Math.abs(millWheelPendingZoom),MILL_WHEEL_STEP_PER_FRAME);
-  millWheelPendingZoom-=step;
-  controls.zoomSpeed=MILL_BASE_ZOOM_SPEED*Math.max(0.2,Math.abs(step));
-  const synthetic=new WheelEvent("wheel",{deltaY:step>=0?100:-100,deltaMode:0,clientX:millWheelClientX,clientY:millWheelClientY,bubbles:true,cancelable:true});
-  synthetic.__roverSynthetic=true;
-  renderer.domElement.dispatchEvent(synthetic);
+  if(!controls||!camera||millZoomTargetDistance===null)return;
+  const offset=camera.position.clone().sub(controls.target);
+  const cur=offset.length();
+  const diff=millZoomTargetDistance-cur;
+  // Hedefe yeterince yaklaşıldıysa bitir (aksi hâlde sonsuza kadar
+  // mikroskobik adımlarla sürer ve her karede boşuna hesap yapılır).
+  if(Math.abs(diff)<Math.max(0.01,cur*0.0005)){
+    offset.setLength(millZoomTargetDistance);
+    camera.position.copy(controls.target).add(offset);
+    millZoomTargetDistance=null;
+    return;
+  }
+  offset.setLength(cur+diff*MILL_ZOOM_EASE);
+  camera.position.copy(controls.target).add(offset);
 }
 
 const TOOL_LIBRARY=[
@@ -849,66 +875,23 @@ function initMill(){
   scene.fog=new THREE.Fog("#8b9299",500,1400);
 
   camera=new THREE.PerspectiveCamera(45,1,1,3000);
-  // ÜÇÜNCÜ tur: canlı testte üç kez bildirildi -- (1) hafif tek tık aşırı
-  // zoom yapıyordu (taban hız + mag tavanıyla düzeltildi), (2) trackpad'de
-  // en ufak hareket bile aşırı zoom yapıyordu (frekans tabanlı momentum
-  // kaldırılarak düzeltildi), (3) ŞİMDİ: "tekerlek iki kademeli çalışıyor
-  // sadece ve aşırı zoom in/out yapıyor" -- yani zoom artık iki UÇ arasında
-  // ayrık sıçrıyor, aradaki kademeler hiç görünmüyor.
-  //
-  // Kök neden: OrbitControls'un kendi tekerlek işleyicisi HER wheel
-  // olayında SABİT bir yüzde uyguluyor (deltaY'in büyüklüğüne değil, sadece
-  // İŞARETİNE bakıyor) ve bunu tek bir update() çağrısında ANINDA/tam
-  // olarak uyguluyor -- damping rotasyon/pan için kare kare yumuşatma
-  // yapsa da, zoom adımının kendisi damping'den etkilenmiyor. Bir
-  // fare/trackpad sürücüsü/işletim sistemi bir "hareketi" TEK büyük bir DOM
-  // wheel olayına (ya da art arda gelen ama aradaki gerçek zamanla
-  // örtüşmeyen birkaç olaya) sıkıştırıyorsa, sonuç iki ayrık duruma
-  // sıçramak gibi hissettiriyor -- ne kadar mag/momentum ayarı yapılırsa
-  // yapılsın, OrbitControls tek olayı yine TEK adımda uyguluyor.
-  //
-  // Çözüm: OrbitControls'un KENDİ tekerlek işleyicisinin bu ham olayı hiç
-  // görmesine izin vermiyoruz (stopImmediatePropagation) -- bunun yerine
-  // olayın büyüklüğünü bir biriktiriciye (millWheelPendingZoom) ekleyip,
-  // asıl kare döngüsünde (aşağıda ANA DÖNGÜ'deki applyPendingWheelZoom())
-  // bunu KÜÇÜK, sabit boyutlu SENTETİK wheel olayları halinde birkaç kareye
-  // yayarak OrbitControls'a besliyoruz -- OrbitControls'un kendi (test
-  // edilmiş, zoomToCursor dahil) mantığı hiç değişmeden, sadece TEK bir
-  // büyük adım yerine birkaç küçük adıma bölünmüş halde çalışıyor. Böylece
-  // donanım/işletim sistemi olayı nasıl parçalara ayırırsa ayırsın, GÖRSEL
-  // sonuç her zaman kademesiz/akıcı bir zoom oluyor. (MILL_BASE_ZOOM_SPEED/
-  // MILL_MAX_WHEEL_MAG/MILL_WHEEL_STEP_PER_FRAME/applyPendingWheelZoom
-  // modül düzeyinde tanımlı, bkz. dosyanın başı -- ana döngü de erişebilsin.)
+  // Tekerlek zoom'u OrbitControls'ta DEĞİL, kendi kodumuzda (dosyanın
+  // başındaki millWheelZoomInput/applyPendingWheelZoom) -- nedeni için
+  // oradaki uzun "GERÇEK KÖK NEDEN" notuna bakın: three.js r160'ın
+  // getZoomScale'i `window.devicePixelRatio | 0` ile bölüyor ve tarayıcı
+  // uzaklaştırıldığında (dpr < 1) bu SIFIR olup zoom'u anında uçlara
+  // çarpıyor. Bu yüzden aşağıda controls.enableZoom=false.
   renderer.domElement.addEventListener("wheel",(e)=>{
     if(!controls)return;
-    if(e.__roverSynthetic)return; // asagidaki sentetik replay olayi -- kendi kendini biriktirmesin
-    e.preventDefault();
-    e.stopImmediatePropagation(); // OrbitControls'un kendi dinleyicisi bu HAM olayi hic islemesin
-    // deltaMode: 0=piksel (çoğu masaüstü fare/trackpad), 1=satır (bazı
-    // tarayıcı/fare sürücüsü kombinasyonları), 2=sayfa -- hepsi yaklaşık
-    // piksel birimine getiriliyor ki oran tutarlı olsun. /100 normalizasyonu
-    // "sıradan" bir tekerlek adımını (~100px) mag≈1'e denk getirir. mag,
-    // MILL_MAX_WHEEL_MAG ile sınırlanıyor -- gerçek deltaY büyüklüğü hangi
-    // fare/işletim sistemi kombinasyonunda ne kadar büyük olursa olsun, TEK
-    // bir tekerlek/trackpad olayının katkısı bu tavanın üzerine çıkamaz.
-    const unit=e.deltaMode===1?18:e.deltaMode===2?800:1;
-    const mag=Math.min(MILL_MAX_WHEEL_MAG,Math.abs(e.deltaY)*unit/100);
-    // Toplam biriken miktar da MILL_MAX_PENDING_ZOOM ile sınırlanıyor --
-    // art arda kaç ham olay gelirse gelsin (bkz. yukarıdaki DÖRDÜNCÜ tur
-    // notu), nihai net zoom hiçbir zaman "bir tek sağlam hareket" kabul
-    // edilebilir büyüklüğün üzerine çıkamaz.
-    millWheelPendingZoom=Math.max(-MILL_MAX_PENDING_ZOOM,Math.min(MILL_MAX_PENDING_ZOOM,millWheelPendingZoom+Math.sign(e.deltaY)*Math.max(0.2,mag)));
-    millWheelClientX=e.clientX;millWheelClientY=e.clientY;
+    e.preventDefault(); // sayfanın arkada kaymasını engelle
+    millWheelZoomInput(e.deltaY,e.deltaMode);
   },{passive:false});
   controls=new OrbitControls(camera,renderer.domElement);
   controls.enableDamping=true;
   controls.dampingFactor=0.15;
-  controls.zoomSpeed=MILL_BASE_ZOOM_SPEED;
-  // Tekerlek, kameranin yorunge HEDEFINE dogru yaklastiriyordu: imlec parcanin
-  // kosesindeyken bile zoom merkeze cekiyor, istenen yeri buyutmek icin once
-  // pan yapmak gerekiyordu. zoomToCursor ile yakinlasma imlecin altindaki
-  // noktaya dogru oluyor — bakilan yer kadrajda kaliyor.
-  controls.zoomToCursor=true;
+  // Tekerlek zoom'unun tamamı bizde (bkz. yukarıdaki not). OrbitControls
+  // sadece döndürme (sol tuş) ve kaydırma (sağ tuş/orta tuş) yapıyor.
+  controls.enableZoom=false;
   controls.target.set(0,20,0);
   applyStockZoomLimits();
   setView("iso");
