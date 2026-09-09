@@ -137,7 +137,13 @@ export function buildSetupSheetHtml(plan, postName, costInputs) {
 <body>
   <h1>CNC Is Emri</h1>
   <div class="meta">
-    <div><b>Stok:</b> ${escapeHtml(plan.stock.w)} x ${escapeHtml(plan.stock.d)} x ${escapeHtml(plan.stock.h)} mm</div>
+    <div><b>Stok:</b> ${plan.machine === "lathe"
+      ? `&Oslash;${escapeHtml(plan.stock.dia)} x ${escapeHtml(plan.stock.len)} mm (yuvarlak &ccedil;ubuk)`
+      : `${escapeHtml(plan.stock.w)} x ${escapeHtml(plan.stock.d)} x ${escapeHtml(plan.stock.h)} mm`}</div>
+    <div><b>Tezgah:</b> ${plan.machine === "lathe" ? "TORNA" : "FREZE"}</div>
+    ${plan.machine === "lathe"
+      ? `<div><b>İş Sıfırı:</b> X0 = mil ekseni (çap modu), Z0 = ham stoğun sağ alın yüzeyi; malzeme &minus;Z yönünde uzanır</div>`
+      : ""}
     <div><b>Malzeme:</b> ${escapeHtml(matInfo?.label || plan.material || "-")}</div>
     <div><b>Sogutma:</b> ${coolantLine}</div>
     <div><b>Kontrolcu:</b> ${escapeHtml(postName || "belirtilmedi")}</div>

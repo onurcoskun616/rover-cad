@@ -559,7 +559,7 @@ class LatheEngine{
   setJog(dx,dz){this.jogX=dx;this.jogZ=dz;}
   gotoTarget(x,z){if(this.s.emergency||this.s.mode!=="MANUAL")return;this.s.targetX=clamp(x,0,STOCK_R+12);this.s.targetZ=clamp(z,-20,STOCK_LEN);this.moveActive={type:"rapid",x:this.s.targetX,z:this.s.targetZ};}
   startCycle(){if(this.s.emergency||this.s.mode!=="AUTO")return;
-    if(latheProgramText){runLatheGcode(parseGcode(latheProgramText,"lathe"));return;}
+    if(latheProgramText){runLatheProgramText(latheProgramText);return;}
     if(!this.s.spindleOn)this.s.spindleOn=true;if(this.s.coolantMode==="off")this.s.coolantMode="flood";const clearZ=-12,targetR=30,q=[];let r=STOCK_R;
     while(r>targetR){r=Math.max(targetR,r-6);q.push({type:"rapid",x:r,z:clearZ});q.push({type:"feed",x:r,z:STOCK_LEN-20});q.push({type:"rapid",x:r+6,z:STOCK_LEN-20});q.push({type:"rapid",x:r+6,z:clearZ});}
     q.push({type:"rapid",x:targetR,z:clearZ});q.push({type:"feed",x:targetR+12,z:0});q.push({type:"rapid",x:STOCK_R+8,z:-12});
@@ -594,7 +594,8 @@ class LatheEngine{
     ctx.fillStyle=md.latheChip;for(const c of this.chips){ctx.globalAlpha=Math.max(0,c.life);ctx.fillRect(zX(c.px),rB(c.py),c.size,c.size);}ctx.globalAlpha=1;
     const tx=zX(this.s.z),ty=rB(this.s.x);ctx.fillStyle="#c7ccd1";ctx.strokeStyle="#2a2e31";ctx.lineWidth=1;roundRect(ctx,tx-6,ty+8,12,h-(ty+8),2);ctx.fill();ctx.stroke();ctx.beginPath();ctx.moveTo(tx,ty);ctx.lineTo(tx+12,ty+16);ctx.lineTo(tx-12,ty+16);ctx.closePath();ctx.fillStyle="#f2c94c";ctx.fill();ctx.strokeStyle="#8a6d12";ctx.stroke();
     if(this.s.coolantMode!=="off"){const cAlpha=this.s.coolantMode==="flood"?0.4:0.2;ctx.fillStyle="rgba(80,180,255,1)";for(const c of this.coolantParticles){ctx.globalAlpha=Math.max(0,c.life)*cAlpha;ctx.beginPath();ctx.arc(tx+c.ox,ty+c.oy,c.size,0,Math.PI*2);ctx.fill();}ctx.globalAlpha=1;if(this.s.actualRpm>30){ctx.save();ctx.globalAlpha=this.s.coolantMode==="flood"?0.2:0.1;const cg=ctx.createRadialGradient(tx,ty-8,2,tx,ty-8,this.s.coolantMode==="flood"?28:16);cg.addColorStop(0,"rgba(80,180,255,.6)");cg.addColorStop(1,"rgba(80,180,255,0)");ctx.fillStyle=cg;ctx.fillRect(tx-30,ty-30,60,40);ctx.restore();}}
-    ctx.strokeStyle="rgba(120,220,160,.6)";ctx.setLineDash([4,4]);ctx.beginPath();ctx.moveTo(tx,0);ctx.lineTo(tx,h);ctx.moveTo(0,ty);ctx.lineTo(w,ty);ctx.stroke();ctx.setLineDash([]);}
+    ctx.strokeStyle="rgba(120,220,160,.6)";ctx.setLineDash([4,4]);ctx.beginPath();ctx.moveTo(tx,0);ctx.lineTo(tx,h);ctx.moveTo(0,ty);ctx.lineTo(w,ty);ctx.stroke();ctx.setLineDash([]);
+    drawLatheOpPreview(ctx,zX,rT,rB);}
 }
 const lathe=new LatheEngine();
 
@@ -1056,6 +1057,34 @@ function spawnCoolant(){
 }
 function updateCoolant(dt){for(const c of coolantPool){if(c.life>0){c.life-=dt*1.5;c.vy-=80*dt;c.mesh.position.x+=c.vx*dt;c.mesh.position.y+=c.vy*dt;c.mesh.position.z+=c.vz*dt;if(c.life<=0||c.mesh.position.y<-10)c.mesh.visible=false;}}}
 
+// Aynı sıfırlama iki farklı sebeple gerekiyor: stok ölçüsü değiştiğinde
+// (aşağıdaki iki resize fonksiyonu) ve operatör FREZE/TORNA sekmeleri arasında
+// geçtiğinde (setTab) -- bir plan her zaman TEK bir tezgahın TEK bir stoğuna
+// aittir, ikisinden biri değişince eski plan artık ekranda görünen parçayı
+// tarif etmiyordur. `resetSetup` true verilirse kurulum sihirbazı da baştan
+// başlatılabilir hale gelir (stockCamStartSetup kendi kendini bir kez
+// çalıştırmaya karşı korur).
+function stockCamResetSession(message, resetSetup){
+  if(typeof stockCamPlanKey==="undefined") return false;
+  if(!stockCamPlanKey && !resetSetup) return false;
+  stockCamPlanKey=null; stockCamOps=[]; stockCam=null; stockCamPending=null;
+  stockCamEditingId=null; stockCamMenuOpen=false; stockCamHistoryOpen=false;
+  stockCamMirrorPickIdx=null;
+  stockCamArraySourceIdx=null; stockCamArrayKind=null; stockCamArrayPendingList=null;
+  stockCamOrderPendingOrder=null; stockCamOrderPendingLabels=null;
+  stockCamTapDrillSuggestion=null;
+  stockCamAwaitingCostInputs=false;
+  stockCamAwaitingTemplateName=false; stockCamTemplatePicking=false; stockCamTemplateList=null;
+  stockCamNoteEditIdx=null;
+  stockCamPendingStockSize=null;
+  stockCamWorkZero=null;
+  if(resetSetup){ stockCamSetupStage=null; stockCamLastEstimatedMinutes=null; }
+  if(typeof hideStockCamZeroMarkers==="function") hideStockCamZeroMarkers();
+  if(typeof clearOpPreview==="function") clearOpPreview();
+  if(message && typeof taiMsg==="function") taiMsg(message,"bot");
+  return true;
+}
+
 function resizeMillStock(newW, newD, newTop){
   if(W===newW && D===newD && TOP===newTop) return;
   W=newW; D=newD; TOP=newTop;
@@ -1068,22 +1097,7 @@ function resizeMillStock(newW, newD, newTop){
   // (this function no-ops otherwise, see the guard above) must throw away
   // that stale plan so the next operation starts a fresh one against the
   // CURRENT stock.
-  if(typeof stockCamPlanKey!=="undefined" && stockCamPlanKey){
-    stockCamPlanKey=null; stockCamOps=[]; stockCam=null; stockCamPending=null;
-    stockCamEditingId=null; stockCamMenuOpen=false; stockCamHistoryOpen=false;
-    stockCamMirrorPickIdx=null;
-    stockCamArraySourceIdx=null; stockCamArrayKind=null; stockCamArrayPendingList=null;
-    stockCamOrderPendingOrder=null; stockCamOrderPendingLabels=null;
-    stockCamTapDrillSuggestion=null;
-    stockCamAwaitingCostInputs=false;
-    stockCamAwaitingTemplateName=false; stockCamTemplatePicking=false; stockCamTemplateList=null;
-    stockCamNoteEditIdx=null;
-    stockCamPendingStockSize=null;
-    stockCamWorkZero=null;
-    if(typeof hideStockCamZeroMarkers==="function") hideStockCamZeroMarkers();
-    if(typeof clearOpPreview==="function") clearOpPreview();
-    if(typeof taiMsg==="function") taiMsg("ℹ️ Stok boyutu değişti — önceki CAM planı ve iş sıfır noktası sıfırlandı, yeni işlemler bu boyuta göre planlanacak.","bot");
-  }
+  stockCamResetSession("ℹ️ Stok boyutu değişti — önceki CAM planı ve iş sıfır noktası sıfırlandı, yeni işlemler bu boyuta göre planlanacak.");
   ({c:COLS, r:ROWS}=gridForStock(W, D));
   dx=W/(COLS-1); dz=D/(ROWS-1);
   refreshMarginCells();
@@ -1128,6 +1142,10 @@ function setViseEnabled(v){
 function resizeLatheStock(newLen, newR){
   if(STOCK_LEN===newLen && STOCK_R===newR) return;
   STOCK_LEN=newLen; STOCK_R=newR;
+  // Aynı gerekçe resizeMillStock'takiyle birebir aynı: plan sayfa oturumu
+  // boyunca yaşıyor, stok değişince eski plan artık ekrandaki çubuğu tarif
+  // etmiyor.
+  stockCamResetSession("ℹ️ Stok ölçüsü değişti — önceki CAM planı sıfırlandı, yeni işlemler bu ölçüye göre planlanacak.");
   lathe.radii=new Float32Array(N).fill(STOCK_R);
   lathe.initialVolume=lathe.volume();
   lathe.chips=[];
@@ -1384,7 +1402,20 @@ function parseRoverStockHeader(text){
   return {w:Number(m[1]), d:Number(m[2]), h:Number(m[3])};
 }
 
-function parseGcode(text, type){
+// Torna karşılığı: Stok-CAM'in ürettiği torna programı silindirik stoğu
+// (çap + boy) aynı zararsız parantez-yorum yöntemiyle taşır. Bu satırın
+// VARLIĞI ayrıca programın ISO torna Z yönünü kullandığını da söyler
+// (Z0 = alın yüzeyi, malzemeye doğru NEGATİF) — simülatörün kendi iç torna
+// ekseni ise ters yönde artar (0 = serbest uç, + = aynaya doğru), bu yüzden
+// bu başlığı taşıyan dosyalar parseGcode'a latheZSign=-1 ile verilir. Elle
+// yüklenen, başlıksız eski dosyaların davranışı hiç değişmiyor.
+function parseRoverLatheStockHeader(text){
+  const m=/^\(ROVER_LATHE_STOCK D([\d.]+) L([\d.]+)\)/m.exec(text);
+  if(!m) return null;
+  return {dia:Number(m[1]), len:Number(m[2])};
+}
+
+function parseGcode(text, type, opts){
   const lines=text.split(/\r?\n/);
   const q=[];
   // A mill program's very first move often omits Z entirely — normal,
@@ -1413,6 +1444,16 @@ function parseGcode(text, type){
   let hdRetractZ=null, hdDepthZ=null;
   // Heidenhain CC sets the next arc's center for a following C endpoint line.
   let hdCCx=null, hdCCy=null;
+  // Torna Z yönü: bkz. parseRoverLatheStockHeader. -1 verildiğinde G-code'un
+  // ISO Z değerleri (alından NEGATİF) simülatörün kendi ekseni (alından
+  // POZİTİF) haline çevrilir. Varsayılan 1 = eski davranış, değişmedi.
+  const latheZSign=(opts&&opts.latheZSign===-1)?-1:1;
+  const zIn=v=>v*latheZSign;
+  // Gerçek Fanuc G76 iki bloklu yazılır: ilk blok çevrim parametreleri
+  // (P<perdah paso><pah><açı> Q<min paso, mikron> R<perdah payı, mm>),
+  // ikinci blok dişin kendi geometrisi. İlk blok X/Z taşımaz — bu yüzden
+  // burada saklanır ve asıl diş bloğu geldiğinde kullanılır.
+  let g76Pre=null;
   const bounds={xMin:Infinity,xMax:-Infinity,yMin:Infinity,yMax:-Infinity,zMin:Infinity,zMax:-Infinity};
   function pushMillPoint(isRapid,nx,ny,nz){
     if(!isRapid&&prevWasRapid) approachZ=Math.min(approachZ,cur.z);
@@ -1559,7 +1600,7 @@ function parseGcode(text, type){
           pushMillPoint(lastG===0,nx,ny,nz);
         }
       } else {
-        const nx="X" in p?p.X/2:cur.x, nz="Z" in p?p.Z:cur.z;
+        const nx="X" in p?p.X/2:cur.x, nz="Z" in p?zIn(p.Z):cur.z;
         if(lastG!==0){bounds.xMin=Math.min(bounds.xMin,nx);bounds.xMax=Math.max(bounds.xMax,nx);bounds.zMin=Math.min(bounds.zMin,nz);bounds.zMax=Math.max(bounds.zMax,nz);}
         q.push(lastG===0?{type:"rapid",x:nx,z:nz}:{type:"feed",x:nx,z:nz,gcodeFeed:feed});
         cur={x:nx,z:nz};
@@ -1591,31 +1632,55 @@ function parseGcode(text, type){
       // correctly, but the stock is a per-Z radius profile (no per-angle
       // data), so this cannot carve a true helical groove — it cuts like a
       // normal turning pass at the commanded depth.
-      const nx="X" in p?p.X/2:cur.x, nz="Z" in p?p.Z:cur.z;
+      const nx="X" in p?p.X/2:cur.x, nz="Z" in p?zIn(p.Z):cur.z;
       const pitch=p.K||p.F||1.5;
       const threadFeed=Math.max(20,pitch*(lathe.s.spindleRpm||500));
       bounds.xMin=Math.min(bounds.xMin,nx);bounds.xMax=Math.max(bounds.xMax,nx);bounds.zMin=Math.min(bounds.zMin,nz);bounds.zMax=Math.max(bounds.zMax,nz);
       q.push({type:"feed",x:nx,z:nz,threadFeed});
       cur={x:nx,z:nz};
     } else if(type==="lathe"&&lastG===76){
-      // Simplified single-line threading canned cycle — NOT the real 2-line
-      // Fanuc G76 syntax (this simulator's own convenience form, consistent
-      // with the plain-mm convention used everywhere else here instead of
-      // Fanuc's micron P/Q values). X=final diameter (the sole authority on
-      // depth — no separate P total-depth input, so it can never disagree
-      // with X), Z=thread end, Q=first-pass depth mm, F/K=pitch mm/rev.
-      // Expands into degressive-depth passes with safe (X-then-Z) rapid
-      // retracts so the SafetyInterceptor doesn't flag the auto-generated
-      // moves, and the final pass always lands exactly on the commanded X.
-      const finalX="X" in p?p.X/2:cur.x, endZ="Z" in p?p.Z:cur.z;
+      // Threading canned cycle. TWO forms are understood here:
+      //   1) The REAL two-block Fanuc G76 that Stok-CAM's torna generator
+      //      (latheGcodeService.js) and any real lathe post emit — a settings
+      //      block with no X/Z, then the thread's own block carrying X (root
+      //      diameter), Z (thread end), P (thread height in MICRONS), Q
+      //      (first infeed in microns) and F (pitch).
+      //   2) This simulator's older single-line convenience form, kept
+      //      working exactly as before: X=final diameter (the sole authority
+      //      on depth), Z=thread end, Q=first-pass depth in MM, F/K=pitch.
+      // Either way it expands into degressive-depth passes with safe
+      // (X-then-Z) rapid retracts, and the final pass always lands exactly
+      // on the commanded X.
+      // The settings block carries no X/Z, so it must be stored rather than
+      // turned into motion.
+      if(!("X" in p)&&!("Z" in p)){ g76Pre={firstCutMm:("Q" in p)?p.Q/1000:null}; continue; }
+      const finalX="X" in p?p.X/2:cur.x, endZ="Z" in p?zIn(p.Z):cur.z;
       const startX=cur.x, startZ=cur.z;
-      const totalDepth=Math.max(0.02,startX-finalX), firstCut=Math.max(0.02,p.Q||0.2);
+      // İkinci blokta P varsa (ve öncesinde bir ayar bloğu geldiyse) bu
+      // gerçek Fanuc biçimidir: P = diş yüksekliği (MİKRON, yarıçapta),
+      // Q = ilk paso derinliği (MİKRON). Aksi halde dosya bu simülatörün
+      // kendi tek satırlık kısayolunu kullanıyordur (Q milimetre, derinlik
+      // X'ten çıkarılır) — o davranış hiç değişmiyor.
+      const fanucForm=("P" in p)&&g76Pre!==null;
+      const firstCut=Math.max(0.02, fanucForm?((p.Q||200)/1000):(p.Q||0.2));
+      const totalDepth=fanucForm?Math.max(0.02,(p.P||0)/1000):Math.max(0.02,startX-finalX);
+      // Dişin TEPE yarıçapı: gerçek çevrimde pasolar takımın o anki
+      // konumundan değil, dişin dış çapından itibaren dalar.
+      const crestX=fanucForm?(finalX+totalDepth):startX;
       const pitch=p.K||p.F||1.5;
       const threadFeed=Math.max(20,pitch*(lathe.s.spindleRpm||500));
-      const clearX=startX+2;
-      const nPasses=Math.max(1,Math.ceil(totalDepth/firstCut));
+      const clearX=Math.max(startX,crestX)+2;
+      // Gerçek biçimde paso derinlikleri eşit-talaş-alanı kuralına uyar
+      // (d_i = h*sqrt(i/n)); kısayol biçiminde eski doğrusal dağılım aynen
+      // korunuyor.
+      const nPasses=fanucForm
+        ? Math.max(2,Math.ceil((totalDepth/firstCut)**2)+1)
+        : Math.max(1,Math.ceil(totalDepth/firstCut));
+      g76Pre=null;
       for(let i=1;i<=nPasses;i++){
-        const passX=i===nPasses?finalX:(startX-totalDepth*(i/nPasses));
+        const passX=i===nPasses?finalX:(fanucForm
+          ? (crestX-totalDepth*Math.sqrt(i/(nPasses-1)))
+          : (startX-totalDepth*(i/nPasses)));
         q.push({type:"rapid",x:clearX,z:startZ});
         q.push({type:"feed",x:passX,z:startZ});
         q.push({type:"feed",x:passX,z:endZ,threadFeed});
@@ -1727,7 +1792,17 @@ class SafetyInterceptor {
     }
     return errs;
   }
-  validateLathe(queue, sLen, sR, spindleOn, cx, cz){
+  // `trustRapids`: bu iki "rapid stok içine giriyor" kuralı stoğu HER ZAMAN
+  // dolu silindir kabul eder — talaş kaldırıldıkça küçülen gerçek profili
+  // bilmez. Çok pasolu bir programda (ör. Stok-CAM'in torna üreteci) ikinci
+  // paso, birinci pasonun boşalttığı yerden yaklaşır ve bu kaba kural onu
+  // yanlışlıkla çarpışma sayar. Stok-CAM programı sunucuda, malzemenin
+  // gerçekten eksildiği bir iş parçası modeline karşı satır satır çalıştırılıp
+  // doğrulanıyor (latheGcodeService.js'teki checkLatheMoves), bu yüzden
+  // SADECE o yol bu iki kuralı devre dışı bırakır; eksen limitleri, merkez
+  // altı X ve "spindle kapalıyken malzemeye dalma" kontrolleri her durumda
+  // aynen çalışmaya devam eder.
+  validateLathe(queue, sLen, sR, spindleOn, cx, cz, trustRapids){
     const xMax=sR*2+20, zMin=-25, zMax=sLen+20, errs=[];
     let px=cx, pz=cz;
     for(let i=0;i<queue.length;i++){
@@ -1740,7 +1815,7 @@ class SafetyInterceptor {
         errs.push(`Satır ${i+1}: Z limit aşımı (${m.z.toFixed(1)}mm, limit ${zMin}mm) — aynaya çarpma riski`);
       if(m.z>zMax)
         errs.push(`Satır ${i+1}: Z limit aşımı (${m.z.toFixed(1)}mm, limit ${zMax.toFixed(0)}mm)`);
-      if(m.type==="rapid"){
+      if(m.type==="rapid"&&!trustRapids){
         const inStock=m.z>=-0.5&&m.z<=sLen+0.5;
         if(m.x<sR-0.5&&px>=sR-0.5&&inStock)
           errs.push(`Satır ${i+1}: G00 rapid stok içine dalıyor (X=${m.x.toFixed(1)}mm, stok R: ${sR}mm) — çarpışma riski`);
@@ -1822,7 +1897,15 @@ function runMillGcode(parsed, stockDims){
   mill.queue=q; mill.moveActive=mill.queue.shift(); mill.running=true;
 }
 
-function runLatheGcode(parsed, stockDims){
+// `opts.verified` yalnızca Stok-CAM'in kendi torna üretecinden gelen,
+// sunucuda profil-farkındalıklı çarpışma kontrolünden geçmiş programlar için
+// kullanılır (bkz. validateLathe'in trustRapids açıklaması): aşağıdaki kaba
+// "rapid'i güvenli yarıçapa çek" düzeltmesi böyle bir programda doğru
+// yaklaşma hareketlerini bozar — ikinci tornalama pasosunun birinci pasonun
+// boşalttığı çapa yaklaşmasını "stok içine dalma" sanıp X'i stok yarıçapına
+// fırlatır ve toolpath'i kullanılamaz hale getirir.
+function runLatheGcode(parsed, stockDims, opts){
+  const verified=!!(opts&&opts.verified);
   const {q, bounds}=parsed;
   if(!q.length) return;
   if(bounds.xMax>bounds.xMin||bounds.zMax>bounds.zMin){
@@ -1837,7 +1920,7 @@ function runLatheGcode(parsed, stockDims){
       m.z=clamp(m.z+zOff, -20, STOCK_LEN);
     }
   } else if(stockDims){resizeLatheStock(stockDims.len,stockDims.r);}
-  {const safeX=STOCK_R+5;let nFix=0,px=lathe.s.x,pz=lathe.s.z;
+  if(!verified){const safeX=STOCK_R+5;let nFix=0,px=lathe.s.x,pz=lathe.s.z;
   for(let i=0;i<q.length;i++){const m=q[i];if(m.type!=="rapid"){px=m.x;pz=m.z;continue;}
   const inS=m.z>=-0.5&&m.z<=STOCK_LEN+0.5;
   if(inS&&m.x<STOCK_R-0.5){m.x=safeX;nFix++;}
@@ -1845,11 +1928,23 @@ function runLatheGcode(parsed, stockDims){
   if(px<STOCK_R-0.5&&pInS&&Math.abs(m.z-pz)>0.5){q.splice(i,0,{type:"rapid",x:safeX,z:pz});nFix++;i++;}
   px=m.x;pz=m.z;}
   if(nFix)taiMsg(`⚠️ ${nFix} rapid hareket güvenli yarıçapa (X=${safeX}mm) otomatik düzeltildi.`,"bot");}
-  const sfErrsL=safetyInterceptor.validateLathe(q,STOCK_LEN,STOCK_R,true,lathe.s.x,lathe.s.z);
+  const sfErrsL=safetyInterceptor.validateLathe(q,STOCK_LEN,STOCK_R,true,lathe.s.x,lathe.s.z,verified);
   if(sfErrsL.length){safetyInterceptor._eStop(lathe,taiMsg,sfErrsL);return;}
   captureProgramSummary("lathe",q);
   lathe.setMode("AUTO"); lathe.s.spindleOn=true; if(lathe.s.coolantMode==="off")lathe.s.coolantMode="flood";
   lathe.queue=q; lathe.moveActive=lathe.queue.shift()||null; lathe.s.running=true;
+}
+
+// Bir torna G-code METNİNİ çalıştırmanın tek doğru yolu: dosyanın kendi
+// (ROVER_LATHE_STOCK ...) başlığı varsa hem stok ölçüsü hem de ISO Z yönü
+// oradan okunur ve program "doğrulanmış" olarak çalıştırılır; başlığı olmayan
+// (elle yazılmış/eski) dosyalar için davranış eskisiyle bire bir aynı kalır.
+function runLatheProgramText(txt, fallbackStock){
+  const hdr=parseRoverLatheStockHeader(txt);
+  const parsed=parseGcode(txt,"lathe",hdr?{latheZSign:-1}:undefined);
+  const dims=hdr?{len:hdr.len,r:hdr.dia/2}:fallbackStock;
+  runLatheGcode(parsed,dims,hdr?{verified:true}:undefined);
+  return parsed;
 }
 
 $("m-file").onchange=e=>{
@@ -1861,7 +1956,7 @@ $("m-file").onchange=e=>{
 $("l-file").onchange=e=>{
   const f=e.target.files[0]; if(!f) return;
   $("l-file-info").textContent=f.name; $("l-file-info").classList.remove("hidden");
-  f.text().then(txt=>{latheProgramText=txt;runLatheGcode(parseGcode(txt,"lathe"));});
+  f.text().then(txt=>{latheProgramText=txt;runLatheProgramText(txt);});
   e.target.value="";
 };
 
@@ -1887,7 +1982,7 @@ if(raw){try{const d=JSON.parse(raw);if(d.gcode){
   }
   setTimeout(()=>{
     if(isMill){setTab("mill");$("m-file-info").textContent="CAM çıktısı";$("m-file-info").classList.remove("hidden");millProgramText=d.gcode;runMillGcode(parseGcode(d.gcode,"mill"),camStock);}
-    else{setTab("lathe");$("l-file-info").textContent="CAM çıktısı";$("l-file-info").classList.remove("hidden");latheProgramText=d.gcode;runLatheGcode(parseGcode(d.gcode,"lathe"),camStock);}
+    else{setTab("lathe");$("l-file-info").textContent="CAM çıktısı";$("l-file-info").classList.remove("hidden");latheProgramText=d.gcode;runLatheProgramText(d.gcode,camStock);}
   },300);
   sessionStorage.removeItem("rover_cnc_gcode");
 }}catch(e){console.error("CAM gcode yüklenemedi:",e);}}}
@@ -1896,6 +1991,7 @@ if(raw){try{const d=JSON.parse(raw);if(d.gcode){
 /* ==========================  TAB DEĞİŞTİRME  ======================== */
 /* ==================================================================== */
 function setTab(t){
+  const prevMachine=active;
   active=t;
   $("view-mill").classList.toggle("hidden",t!=="mill");
   $("view-mill").classList.toggle("flex",t==="mill");
@@ -1908,6 +2004,22 @@ function setTab(t){
   const modeLabel=t==="mill"?"FREZE":"TORNA";
   const mb=$("tai-mode-badge");if(mb)mb.textContent=modeLabel;
   positionTaiTab();
+  // Bir Stok-CAM planı HER ZAMAN tek bir tezgaha aittir (silindirik çubuk mu,
+  // prizmatik blok mu — sunucu bile karışık bir plana izin vermiyor), bu yüzden
+  // tezgah değişince plan sıfırlanır ve kurulum sihirbazı yeni tezgah için
+  // baştan başlar. İlk açılıştaki setTab("mill") çağrısı tezgahı DEĞİŞTİRMEDİĞİ
+  // için buraya hiç girmez -- Stok-CAM değişkenleri o an henüz tanımlanmamış olur.
+  if(prevMachine!==t) stockCamOnMachineChanged();
+}
+
+function stockCamOnMachineChanged(){
+  const label=active==="lathe"?"TORNA":"FREZE";
+  const had=stockCamResetSession(null,true);
+  if(had){
+    taiMsg(`ℹ️ <b>${label}</b> tezgahına geçildi — Stok-CAM planı bu tezgah için sıfırlandı.`,"bot");
+  }
+  stockCamStartSetup().then(taiRenderChips);
+  taiRenderChips();
 }
 $("tab-mill").onclick=()=>setTab("mill");
 $("tab-lathe").onclick=()=>setTab("lathe");
@@ -2139,16 +2251,110 @@ function tpMillChamfer(depth,cw){
  * (tıpkı tpMillDrill/tpMillCircPocket'in kendi cx/cz parametrelerinde
  * olduğu gibi). */
 let _opPreviewGroup = null;
+// TORNA önizlemesi Three.js sahnesinde DEĞİL, torna görünümünün kendi 2B
+// tuvalinde çizilir (torna simülatörü 3B sahne kullanmıyor). Bekleyen işlemin
+// KALDIRACAĞI malzeme, gerçek profilin üzerine eksene göre simetrik olarak
+// turuncu çizilir -- freze tarafındaki turuncu "sticker" ile aynı fikir.
+let latheOpPreview = null;
 
 function clearOpPreview(){
+  latheOpPreview=null;
   if(!_opPreviewGroup) return;
   scene.remove(_opPreviewGroup);
   _opPreviewGroup.traverse(o=>{o.geometry?.dispose?.();o.material?.dispose?.();});
   _opPreviewGroup=null;
 }
 
+// Onaylanmış her alın tornalama işlemi alın yüzeyini içeri kaydırır ve
+// SONRAKİ işlemlerin "alından X mm" ölçüsü artık o yeni yüzeyden sayılır --
+// sunucudaki üreteç de tam olarak bunu yapıyor (latheGcodeService.js'te
+// prog.faceZ), önizleme onunla aynı yüzeyi kullanmak zorunda.
+function latheFaceOffsetSim(){
+  if(typeof stockCamOps==="undefined"||!stockCamOps)return 0;
+  return stockCamOps.reduce((a,o)=>a+(o.type==="latheFace"?(Number(o.params?.depth)||0):0),0);
+}
+
+// Simülasyonun O ANKİ gerçek profilinden okunan yarıçap (ham çap değil):
+// önceki işlemler zaten çalıştıysa kanal/diş derinliği doğru yüzeyden
+// gösterilir.
+function latheSurfaceRadiusAtSim(z){
+  const t=clamp(z/Math.max(1,STOCK_LEN),0,1);
+  return lathe.radii[Math.round(t*(N-1))];
+}
+
+// Bekleyen torna işleminin kaldıracağı malzemeyi (z, iç yarıçap, dış yarıçap)
+// örnek noktaları olarak verir. Hepsi SİMÜLATÖR ekseninde: z = ham alından
+// aynaya doğru pozitif mesafe.
+function latheOpPreviewBand(opType,p){
+  const f=latheFaceOffsetSim();
+  const num=v=>Number(v)||0;
+  if(opType==="latheFace"){
+    const z0=f,z1=f+num(p.depth);
+    return {samples:[{z:z0,rIn:0,rOut:latheSurfaceRadiusAtSim(z0)},{z:z1,rIn:0,rOut:latheSurfaceRadiusAtSim(z1)}]};
+  }
+  if(opType==="latheDrill"){
+    const z0=f,z1=f+num(p.depth),r=num(p.dia)/2;
+    return {bore:true,samples:[{z:z0,rIn:0,rOut:r},{z:z1,rIn:0,rOut:r}]};
+  }
+  if(opType==="latheTurn"){
+    const z0=f+num(p.startZ),z1=z0+num(p.length),r=num(p.targetDia)/2;
+    return {samples:[{z:z0,rIn:r,rOut:latheSurfaceRadiusAtSim(z0)},{z:z1,rIn:r,rOut:latheSurfaceRadiusAtSim(z1)}]};
+  }
+  if(opType==="latheTaper"){
+    const z0=f+num(p.startZ),z1=z0+num(p.length);
+    const steps=12,samples=[];
+    for(let i=0;i<=steps;i++){
+      const t=i/steps,z=z0+(z1-z0)*t;
+      const r=(num(p.startDia)+(num(p.endDia)-num(p.startDia))*t)/2;
+      samples.push({z,rIn:r,rOut:Math.max(r,latheSurfaceRadiusAtSim(z))});
+    }
+    return {samples};
+  }
+  if(opType==="latheGroove"){
+    const z0=f+num(p.posZ),z1=z0+num(p.width);
+    const surf=Math.max(latheSurfaceRadiusAtSim(z0),latheSurfaceRadiusAtSim(z1));
+    const rIn=Math.max(0,surf-num(p.depth));
+    return {samples:[{z:z0,rIn,rOut:surf},{z:z1,rIn,rOut:surf}]};
+  }
+  if(opType==="latheThread"){
+    const z0=f+num(p.startZ),z1=z0+num(p.length);
+    // ISO metrik diş dibi: d - 1.2268*P (bkz. stockCamPlanService.js'teki
+    // latheThreadMinorDia -- aynı gerçek DIN 13 formülü).
+    const rIn=Math.max(0,(num(p.majorDia)-1.2268*num(p.pitch))/2),rOut=num(p.majorDia)/2;
+    return {samples:[{z:z0,rIn,rOut},{z:z1,rIn,rOut}]};
+  }
+  return null;
+}
+
+function drawLatheOpPreview(ctx,zX,rT,rB){
+  if(!latheOpPreview)return;
+  const band=latheOpPreviewBand(latheOpPreview.opType,latheOpPreview.params||{});
+  if(!band||band.samples.length<2)return;
+  const S=band.samples;
+  ctx.save();
+  ctx.fillStyle="rgba(255,170,0,.32)";
+  ctx.strokeStyle="rgba(255,170,0,.95)";
+  ctx.lineWidth=1.5;
+  // Delik (bore) eksenin iki yanına da uzanan TEK bir bölge; diğerleri
+  // yüzeyden içeri doğru, üstte ve altta simetrik iki bant.
+  const halves=band.bore?[null]:[rT,rB];
+  for(const half of halves){
+    ctx.beginPath();
+    if(band.bore){
+      S.forEach((s,i)=>{const x=zX(s.z),y=rT(s.rOut);i?ctx.lineTo(x,y):ctx.moveTo(x,y);});
+      for(let i=S.length-1;i>=0;i--)ctx.lineTo(zX(S[i].z),rB(S[i].rOut));
+    }else{
+      S.forEach((s,i)=>{const x=zX(s.z),y=half(s.rOut);i?ctx.lineTo(x,y):ctx.moveTo(x,y);});
+      for(let i=S.length-1;i>=0;i--)ctx.lineTo(zX(S[i].z),half(S[i].rIn));
+    }
+    ctx.closePath();ctx.fill();ctx.stroke();
+  }
+  ctx.restore();
+}
+
 function showOpPreview(opType, params){
   clearOpPreview();
+  if(String(opType).startsWith("lathe")){ latheOpPreview={opType,params}; return; }
   const g=new THREE.Group();
   const renderY=(TOP||0)+0.3; // just above the real top surface, never touching it
   const lineMat=new THREE.LineBasicMaterial({color:0xffaa00});
@@ -2465,7 +2671,33 @@ const STOCK_CAM_MENU=[
 // görüldü: "Kanal" için "çapında" denince LLM haklı olarak "çap değil,
 // genişlik/uzunluk gerekli" diye düzeltme sormak zorunda kaldı). Her işlem
 // türü kendi gerçek parametre şemasına uygun bir örnekle gösteriliyor.
+// TORNA menüsü. Ayrı bir liste, freze menüsünün alt kümesi değil: torna
+// işlemleri kendi parametre şemalarıyla (X = ÇAP, Z = alından mesafe)
+// stockCamPlanService.js'in LATHE_OPERATION_TYPES kaydında tanımlı ve bir
+// freze işlemi silindirik stoğa hiç uygulanamıyor (sunucu da bunu açıkça
+// reddediyor).
+const STOCK_CAM_LATHE_MENU=[
+  {type:"latheFace",label:"Alın Tornalama"},
+  {type:"latheTurn",label:"Çap Düşürme (Boyuna Tornalama)"},
+  {type:"latheTaper",label:"Konik Tornalama"},
+  {type:"latheGroove",label:"Kanal Açma"},
+  {type:"latheDrill",label:"Eksenden Delme"},
+  {type:"latheThread",label:"Diş Açma (Dış Vida)"},
+];
+
+// Hangi tezgahtaysak Stok-CAM o tezgahın işlemlerini gösterir. Aktif sekme
+// tek doğruluk kaynağı: operatör TORNA sekmesindeyken freze cebi eklemesi
+// (ya da tersi) hem anlamsız hem de sunucu tarafından reddedilir.
+function stockCamIsLathe(){ return active==="lathe"; }
+function stockCamMenu(){ return stockCamIsLathe()?STOCK_CAM_LATHE_MENU:STOCK_CAM_MENU; }
+
 const STOCK_CAM_EXAMPLE_BY_TYPE={
+  latheFace:"alından 2mm al",
+  latheTurn:"alından 50mm boyunca 40 çapa düşür",
+  latheTaper:"alından 60mm sonra 20mm boyunca 40 çaptan 30 çapa konik",
+  latheGroove:"alından 30mm sonra 4mm genişliğinde 3mm derinliğinde kanal",
+  latheDrill:"12mm matkapla 40mm derinlikte eksenden del",
+  latheThread:"ucuna 25mm boyunda M20x2.5 diş aç",
   drill:"10mm çapında 10mm derinlikte merkeze",
   rectPocket:"60x40mm 10mm derinlikte merkeze",
   circPocket:"30mm çapında 10mm derinlikte merkeze",
@@ -3054,7 +3286,8 @@ function stockCamSelectZeroPoint(key){
 }
 
 function stockCamContextChips(){
-  if(!isMill())return null;
+  // Stok-CAM artık her iki tezgahta da çalışıyor; hangi işlemlerin
+  // gösterileceğini stockCamMenu() aktif sekmeye göre belirliyor.
   if(stockCamSetupStage&&stockCamSetupStage!=="done"){
     if(stockCamSetupStage==="controller"){
       const chips=(stockCamMachines||[]).map(m=>({l:`${m.name} (${m.postProcessor||"GRBL"})`,c:`kontrolcu ${m.name}`}));
@@ -3126,7 +3359,7 @@ function stockCamContextChips(){
     return chips;
   }
   if(stockCamNoteEditIdx!==null)return[{l:"❌ İptal",c:"iptal"}]; // not serbest metinle giriliyor
-  if(stockCamMenuOpen)return STOCK_CAM_MENU.map(m=>({l:m.label,c:m.label}));
+  if(stockCamMenuOpen)return stockCamMenu().map(m=>({l:m.label,c:m.label}));
   if(stockCamHistoryOpen){
     const chips=[];
     stockCamOps.forEach((o,i)=>{
@@ -3152,7 +3385,7 @@ function stockCamContextChips(){
     // birden göstermek, operatörün "G-code Oluştur"u fark etmeden diğer
     // düğmelere tıklayıp simülasyonu hiç başlatamamasına yol açıyordu -- bu
     // yüzden o özellikler, G-code en az bir kez üretilene kadar gizli kalır.
-    if(millProgramText){
+    if(stockCamIsLathe()?latheProgramText:millProgramText){
       if(stockCamOps.length>1)chips.push({l:"🔀 Takım Sırala",c:"takim sirala"});
       chips.push({l:"🧰 Takım Listesi",c:"takim listesi"});
       chips.push({l:"💰 Maliyet Hesapla",c:"maliyet hesapla"});
@@ -3238,10 +3471,31 @@ async function stockCamHandleSetupInput(text){
     stockCamSetupStage="stockSize";
     const coolant=STOCK_CAM_COOLANT[key];
     const coolantLine=coolant?` 🧊 Soğutma önerisi: <b>${coolant.type}</b> — ${coolant.note}`:"";
-    taiMsg(`✓ Malzeme: <b>${MAT_DB[key].label}</b> seçildi.${coolantLine} Şimdi stok boyutunu belirtin (mm, örn: <b>200x140x60</b>).`,"bot");
+    taiMsg(`✓ Malzeme: <b>${MAT_DB[key].label}</b> seçildi.${coolantLine} `+(stockCamIsLathe()
+      ? `Şimdi ham çubuğun ölçüsünü belirtin (mm, <b>çap x boy</b> — örn: <b>60x200</b>).`
+      : `Şimdi stok boyutunu belirtin (mm, örn: <b>200x140x60</b>).`),"bot");
     return true;
   }
   if(stockCamSetupStage==="stockSize"){
+    // TORNA: ham stok bir ÇUBUK -- çap x boy. Freze tarafındaki standart
+    // plaka kalınlığı önerisi burada geçerli değil (çubuk çapı zaten
+    // katalogdan gelir ve operatör onu elindeki malzemeden okur), ve iş
+    // sıfırı torna için seçime açık bir şey değil: tornada X0 her zaman mil
+    // ekseni, Z0 ise operatörün alın yüzeyine yaptığı sıfırlamadır. Bu
+    // yüzden torna kurulumu stok ölçüsünde biter.
+    if(stockCamIsLathe()){
+      const ld=text.match(/(\d+\.?\d*)\s*(?:x|\*)\s*(\d+\.?\d*)/i);
+      if(!ld){
+        taiMsg("Lütfen ham çubuğun ölçüsünü \"çap x boy\" formatında yazın, örn: 60x200.","bot");
+        return true;
+      }
+      const dia=Math.max(5,Math.round(parseFloat(ld[1]))), len=Math.max(20,Math.round(parseFloat(ld[2])));
+      resizeLatheStock(len,dia/2);
+      stockCamSetupStage="done";
+      taiMsg(`✓ Stok: <b>Ø${dia} x ${len}mm</b>. İş sıfırı tornanın kendi kuralı: <b>X0 = mil ekseni</b> (X değerleri ÇAP olarak verilir), `+
+        `<b>Z0 = ham çubuğun sağ alın yüzeyi</b> — tezgahta takımı alına değdirip Z'yi sıfırlayın. Kurulum tamamlandı, işlem menüsünden devam edebilirsiniz.`,"bot");
+      return true;
+    }
     // Stok Boyutu Önerisi: bir önceki turda kalınlık standart değildi ve
     // operatörden seçim bekleniyor -- yeni bir WxDxH metni değil, "standart"
     // ya da "özel" seçimi.
@@ -3302,7 +3556,10 @@ async function stockCamHandleSetupInput(text){
 
 async function stockCamEnsurePlan(){
   if(stockCamPlanKey)return stockCamPlanKey;
-  const r=await fetch(`${MAG_API_BASE}/stock-cam/plan`,{method:"POST",headers:magHeaders(),body:JSON.stringify({stock:{w:W,d:D,h:TOP},material:stockCamMaterial})});
+  // Torna planının stoğu silindirik ({dia,len}); sunucu bu tek alandan
+  // planın hangi tezgaha ait olduğunu anlıyor (stockCamPlanService.createPlan).
+  const stock=stockCamIsLathe()?{dia:STOCK_R*2,len:STOCK_LEN}:{w:W,d:D,h:TOP};
+  const r=await fetch(`${MAG_API_BASE}/stock-cam/plan`,{method:"POST",headers:magHeaders(),body:JSON.stringify({stock,material:stockCamMaterial})});
   const data=await r.json();
   if(!r.ok)throw new Error(data?.error||"Plan olusturulamadi.");
   stockCamPlanKey=data.plan.planKey;
@@ -3373,6 +3630,13 @@ function stockCamOpSummary(opType,params){
   if(opType==="threadMilling")return `M${params.dia} diş (adım ${params.pitch}mm, ${params.passes||3} paso), ${params.depth}mm derin, X${params.x} Y${params.y}`;
   if(opType==="countersink")return `Ø${params.dia}mm havşa (${params.angle||90}°), ${params.depth}mm derin, X${params.x} Y${params.y}`;
   if(opType==="counterbore")return `Ø${params.dia}mm düz-dip havşa, ${params.depth}mm derin, X${params.x} Y${params.y}`;
+  // TORNA: her ölçü alından (Z0) itibaren POZİTİF mesafe, her çap ÇAP.
+  if(opType==="latheFace")return `Alından ${params.depth}mm al`;
+  if(opType==="latheTurn")return `Ø${params.targetDia}mm, alından ${params.startZ||0}mm sonra ${params.length}mm boyunca`;
+  if(opType==="latheTaper")return `Ø${params.startDia} → Ø${params.endDia} konik, alından ${params.startZ||0}mm sonra ${params.length}mm boyunca`;
+  if(opType==="latheGroove")return `${params.width}mm genişlik, ${params.depth}mm derin (yarıçapta), alından ${params.posZ}mm`;
+  if(opType==="latheDrill")return `Ø${params.dia}mm matkap, ${params.depth}mm derin (eksende)`;
+  if(opType==="latheThread")return `M${params.majorDia} x ${params.pitch}mm diş, alından ${params.startZ||0}mm sonra ${params.length}mm boyunca`;
   return JSON.stringify(params);
 }
 
@@ -3380,7 +3644,7 @@ async function stockCamShowMenu(){
   try{ await stockCamEnsurePlan(); }
   catch(e){ taiMsg("⛔ "+e.message,"bot"); return; }
   stockCamMenuOpen=true;
-  taiMsg("<b>Hangi işlemi eklemek istersiniz?</b><br>"+STOCK_CAM_MENU.map(m=>"• "+m.label).join("<br>")+"<br><br>Aşağıdaki düğmelerden birini seçin.","bot");
+  taiMsg("<b>Hangi işlemi eklemek istersiniz?</b><br>"+stockCamMenu().map(m=>"• "+m.label).join("<br>")+"<br><br>Aşağıdaki düğmelerden birini seçin.","bot");
 }
 
 async function stockCamStartWizard(opType,opLabel,prefill){
@@ -3459,6 +3723,13 @@ let stockCamConfirming=false;
 // changes. Mutates `params` in place (toolDia/toolNum). Shared by the normal
 // add/edit confirm flow and the Dizi Kopyalama batch-confirm flow below.
 function stockCamApplyMagazineTool(opType,params){
+  // Magazin (ToolMagazine) freze takımlarını ÇAPLARINA göre tutuyor; torna
+  // tareti ise çapı olmayan, biçimlerine göre seçilen kesici uçlar taşır
+  // (dış tornalama kalemi, kanal kalemi, diş kalemi...). Torna işlemine
+  // freze magazininden bir çap dayatmak yanlış takım seçmek olurdu -- torna
+  // takım listesi sunucuda, işlemin kendi türünden üretiliyor
+  // (latheGcodeService.js'teki latheToolFor/buildLatheToolChecklist).
+  if(String(opType).startsWith("lathe"))return;
   const magQuery=stockCamMagazineQueryFor(opType,params);
   if(magQuery){
     const slot=magazine.findSlotForOp(magQuery.magOpType,magQuery.reqDia,magQuery.reqDepth);
@@ -3607,7 +3878,7 @@ async function stockCamDoGenerateGcode(){
   // Birden fazla işlem varsa muhtemelen farklı boyutlarda takım gerekiyor —
   // bu durumda program takımı OTOMATİK değiştirmeyecek, operatör kontrol
   // etmeli.
-  if(stockCamOps.length>1 && /^(|grbl)$/i.test((postProcessor||"").trim())){
+  if(!stockCamIsLathe() && stockCamOps.length>1 && /^(|grbl)$/i.test((postProcessor||"").trim())){
     taiMsg("⚠ Bu kontrolcü (GRBL) otomatik takım değiştirmeyi desteklemiyor — plan birden fazla işlem içeriyor, gerekirse takımı elle kontrol edip değiştirmeniz gerekebilir.","bot");
   }
   taiMsg("⏳ Tüm plan için G-code üretiliyor…","bot");
@@ -3619,7 +3890,7 @@ async function stockCamDoGenerateGcode(){
     const result=await stockCamPollJob(start.jobId);
     if(!result.exported){ taiMsg("⛔ G-code üretilemedi: "+(result.error||"bilinmeyen hata"),"bot"); return; }
     taiMsg(`<span class="tai-msg-action">✓ G-code hazır:</span> <a href="${result.gcodeUrl}" target="_blank" rel="noopener">indir</a>`,"bot");
-    if(stockCamWorkZero){
+    if(stockCamWorkZero&&!stockCamIsLathe()){
       const{dx,dy}=stockCamZeroOffset();
       taiMsg(`ℹ️ Bu G-code stok merkezine göre üretildi. Seçtiğiniz iş sıfır noktasını (<b>${stockCamWorkZero.label}</b>) kullanmak için tezgahınızda o noktayı fiziksel olarak sıfırlayıp G54 (veya eşdeğeri) offsetine <b>X${dx>=0?"+":""}${dx.toFixed(1)} Y${dy>=0?"+":""}${dy.toFixed(1)} mm</b> girin.`,"bot");
     }
@@ -3634,13 +3905,26 @@ async function stockCamDoGenerateGcode(){
     // otomatik çalıştırılabilir.
     try{
       const gtext=await (await fetch(result.gcodeUrl)).text();
-      const stockDims={w:W,d:D,h:TOP};
-      const parsed=parseGcode(gtext,"mill");
-      if(parsed.q.length>0){
-        millProgramText=gtext;
-        runMillGcode(parsed,stockDims);
-        taiMsg("▶ G-code simülatörde çalıştırıldı, sonucu kontrol edin.","bot");
-        stockCamCompareEstimatedVsActual();
+      if(stockCamIsLathe()){
+        // Torna programı ISO Z yönünde ve kendi (ROVER_LATHE_STOCK ...)
+        // başlığıyla geliyor; runLatheProgramText hem yönü hem stok ölçüsünü
+        // o başlıktan okuyup programı "doğrulanmış" olarak çalıştırıyor
+        // (sunucuda zaten profil-farkındalıklı çarpışma kontrolünden geçti).
+        const parsed=runLatheProgramText(gtext);
+        if(parsed.q.length>0){
+          latheProgramText=gtext;
+          taiMsg("▶ G-code simülatörde çalıştırıldı, sonucu kontrol edin.","bot");
+          stockCamCompareEstimatedVsActual();
+        }
+      }else{
+        const stockDims={w:W,d:D,h:TOP};
+        const parsed=parseGcode(gtext,"mill");
+        if(parsed.q.length>0){
+          millProgramText=gtext;
+          runMillGcode(parsed,stockDims);
+          taiMsg("▶ G-code simülatörde çalıştırıldı, sonucu kontrol edin.","bot");
+          stockCamCompareEstimatedVsActual();
+        }
       }
     }catch(e){
       taiMsg("⚠ G-code indi ama simülatörde otomatik çalıştırılamadı: "+e.message+" — dosyayı elle yükleyebilirsiniz.","bot");
@@ -3662,12 +3946,15 @@ function stockCamCompareEstimatedVsActual(){
   const actual=estimateCycleMinutes(lastProgramSummary);
   if(!actual)return;
   const est=stockCamLastEstimatedMinutes;
+  // Torna planında tahmin FreeCAD'den değil, kendi torna üretecimizden
+  // geliyor (FreeCAD'in resmi torna desteği yok) -- kaynağı doğru söyle.
+  const estSrc=stockCamIsLathe()?"Torna üreteci":"FreeCAD";
   const actualR=Math.round(actual*10)/10;
   const diffPct=Math.round(Math.abs(actual-est)/Math.max(est,0.01)*100);
   if(diffPct>25){
-    taiMsg(`⚠️ <b>Tahmini/Gerçek Süre Karşılaştırması:</b> FreeCAD tahmini ${est} dk idi, simülasyon ${actualR} dk gösteriyor (%${diffPct} fark). Tahminin güvenilirliğini kontrol edin.`,"bot");
+    taiMsg(`⚠️ <b>Tahmini/Gerçek Süre Karşılaştırması:</b> ${estSrc} tahmini ${est} dk idi, simülasyon ${actualR} dk gösteriyor (%${diffPct} fark). Tahminin güvenilirliğini kontrol edin.`,"bot");
   }else{
-    taiMsg(`✓ <b>Tahmini/Gerçek Süre Karşılaştırması:</b> FreeCAD tahmini ${est} dk, simülasyon ${actualR} dk gösteriyor (%${diffPct} fark) — tutarlı.`,"bot");
+    taiMsg(`✓ <b>Tahmini/Gerçek Süre Karşılaştırması:</b> ${estSrc} tahmini ${est} dk, simülasyon ${actualR} dk gösteriyor (%${diffPct} fark) — tutarlı.`,"bot");
   }
 }
 
@@ -3753,11 +4040,24 @@ async function stockCamShowTemplateList(){
     const r=await fetch(`${MAG_API_BASE}/stock-cam/templates`,{headers:magHeaders()});
     const data=await r.json();
     if(!r.ok)throw new Error(data?.error||"Sunucu hatası.");
-    const templates=Array.isArray(data.templates)?data.templates:[];
-    if(!templates.length){ taiMsg("Henüz kaydedilmiş şablon yok.","bot"); return; }
+    const all=Array.isArray(data.templates)?data.templates:[];
+    // Bir freze şablonu torna stoğuna (ya da tersi) hiç uygulanamaz -- sunucu
+    // da her işlemi reddederdi. Listeyi baştan aktif tezgaha göre süzmek,
+    // operatörü yükleyemeyeceği bir şablonu seçmekten kurtarıyor.
+    const wantLathe=stockCamIsLathe();
+    const templates=all.filter(t=>((t.machine||"mill")==="lathe")===wantLathe);
+    if(!templates.length){
+      taiMsg(all.length
+        ? `Bu tezgah (${wantLathe?"TORNA":"FREZE"}) için kaydedilmiş şablon yok.`
+        : "Henüz kaydedilmiş şablon yok.","bot");
+      return;
+    }
     stockCamTemplateList=templates;
     stockCamTemplatePicking=true;
-    const list=templates.map((t,i)=>`${i+1}. ${t.name} (${t.operationCount} işlem, ${t.stock.w}x${t.stock.d}x${t.stock.h}mm)`).join("<br>");
+    const list=templates.map((t,i)=>{
+      const dim=t.stock&&t.stock.dia!==undefined?`Ø${t.stock.dia}x${t.stock.len}mm`:`${t.stock.w}x${t.stock.d}x${t.stock.h}mm`;
+      return `${i+1}. ${t.name} (${t.operationCount} işlem, ${dim})`;
+    }).join("<br>");
     taiMsg(`<b>Kayıtlı Şablonlar:</b><br>${list}<br><br>Yüklemek için aşağıdan seçin.`,"bot");
   }catch(e){ taiMsg("⛔ Hata: "+e.message,"bot"); }
 }
@@ -3779,13 +4079,19 @@ async function stockCamLoadTemplate(indexOneBased){
     clearOpPreview();
     stockCamPlanKey=null; stockCamOps=[]; stockCam=null; stockCamPending=null;
     stockCamEditingId=null; stockCamMenuOpen=false; stockCamHistoryOpen=false;
-    resizeMillStock(tpl.stock.w,tpl.stock.d,tpl.stock.h);
+    if(tpl.stock&&tpl.stock.dia!==undefined){
+      if(!stockCamIsLathe()){ taiMsg("⛔ Bu bir TORNA şablonu — yüklemek için TORNA sekmesine geçin.","bot"); return; }
+      resizeLatheStock(tpl.stock.len,tpl.stock.dia/2);
+    }else{
+      if(stockCamIsLathe()){ taiMsg("⛔ Bu bir FREZE şablonu — yüklemek için FREZE sekmesine geçin.","bot"); return; }
+      resizeMillStock(tpl.stock.w,tpl.stock.d,tpl.stock.h);
+    }
     stockCamMaterial=tpl.material;
     setMaterial(tpl.material);
     await stockCamEnsurePlan();
     let okCount=0;
     for(const op of tpl.operations){
-      const opLabel=STOCK_CAM_MENU.find(m=>m.type===op.type)?.label||op.type;
+      const opLabel=[...STOCK_CAM_MENU,...STOCK_CAM_LATHE_MENU].find(m=>m.type===op.type)?.label||op.type;
       const params={...op.params};
       let result;
       try{ result=await stockCamConfirmNewOp(op.type,params); }
@@ -3903,6 +4209,11 @@ async function stockCamShowToolChecklist(){
     const lines=data.checklist.map((tl,i)=>{
       const pitchStr=tl.pitch?` (adım ${tl.pitch}mm)`:"";
       const tnum=tl.toolNum!=null?`T${String(tl.toolNum).padStart(2,"0")}`:"⚠ magazin eşleşmesi yok — elle hazırlayın";
+      // Torna taretindeki kesiciler çapla değil BİÇİMLERİYLE tanımlanır
+      // (dış tornalama kalemi, kanal kalemi, diş kalemi...), bu yüzden torna
+      // listesi hazır bir `label` taşır ve tarete elle takıldığı için
+      // "magazin eşleşmesi" uyarısı da anlamsız olur.
+      if(tl.label) return `${i+1}. ${tl.label} (${tl.opCount} işlemde kullanılıyor)`;
       return `${i+1}. ${tl.kind} Ø${tl.dia}mm${pitchStr} — ${tnum} (${tl.opCount} işlemde kullanılıyor)`;
     }).join("<br>");
     taiMsg(`<b>🧰 Takım Ön-Kontrol Listesi</b> (${data.checklist.length} farklı takım):<br>${lines}`,"bot");
@@ -3914,7 +4225,7 @@ async function stockCamShowToolChecklist(){
 async function stockCamHandleInput(text){
   const t=taiNorm(text);
 
-  if(isMill()&&stockCamSetupStage&&stockCamSetupStage!=="done"){
+  if(stockCamSetupStage&&stockCamSetupStage!=="done"){
     return await stockCamHandleSetupInput(text);
   }
 
@@ -4032,32 +4343,27 @@ async function stockCamHandleInput(text){
     return true;
   }
   if(/^sablon kaydet/i.test(t)){
-    if(!isMill()){ taiMsg("Bu özellik şu an sadece Freze modunda kullanılabilir.","bot"); return true; }
     await stockCamStartSaveTemplate();
     return true;
   }
   if(/^sablon yukle/i.test(t)){
-    if(!isMill()){ taiMsg("Bu özellik şu an sadece Freze modunda kullanılabilir.","bot"); return true; }
     await stockCamShowTemplateList();
     return true;
   }
   if(/^sablon disa aktar/i.test(t)){
-    if(!isMill()){ taiMsg("Bu özellik şu an sadece Freze modunda kullanılabilir.","bot"); return true; }
     await stockCamExportTemplates();
     return true;
   }
   if(/^sablon ice aktar/i.test(t)){
-    if(!isMill()){ taiMsg("Bu özellik şu an sadece Freze modunda kullanılabilir.","bot"); return true; }
     await stockCamImportTemplates();
     return true;
   }
   if(/(islem\s*menu(su)?)$/i.test(t)){
-    if(!isMill()){ taiMsg("Bu özellik şu an sadece Freze modunda kullanılabilir.","bot"); return true; }
     await stockCamShowMenu();
     return true;
   }
   if(stockCamMenuOpen){
-    const picked=STOCK_CAM_MENU.find(m=>t===taiNorm(m.label));
+    const picked=stockCamMenu().find(m=>t===taiNorm(m.label));
     if(picked){ await stockCamStartWizard(picked.type,picked.label); return true; }
   }
   if(/^(gecmis|islem\s*listesi|onaylanan\s*islemler)$/i.test(t)){
@@ -4444,7 +4750,7 @@ function taiExec(raw){
   /* --- G-code --- */
   if(/^(g\d+|m\d+|[gm]\s*\d)/i.test(t)||/^[gnomxyzfs\d\s.;]+$/i.test(t.trim())){
     const parsed=parseGcode(raw,im?"mill":"lathe");
-    if(parsed.q.length>0){if(im)runMillGcode(parsed,parseRoverStockHeader(raw)||undefined);else runLatheGcode(parsed);return A("✓ G-code çalıştırıldı:")+" "+parsed.q.length+" hareket komutu.";}
+    if(parsed.q.length>0){if(im)runMillGcode(parsed,parseRoverStockHeader(raw)||undefined);else runLatheProgramText(raw);return A("✓ G-code çalıştırıldı:")+" "+parsed.q.length+" hareket komutu.";}
   }
 
   return null;
@@ -4454,7 +4760,7 @@ taiMsg("Merhaba! Ben <b>Topkapı AI</b>, CNC asistanın.<br>Doğal dilde komut v
 taiRenderChips();
 // Stok-tabanlı CAM sihirbazı her sayfa oturumunda kontrolcü + stok boyutu
 // bilinmeden başlamaz — bkz. stockCamStartSetup tanımı.
-if(isMill()){ stockCamStartSetup().then(taiRenderChips); }
+stockCamStartSetup().then(taiRenderChips);
 
 /* ==================================================================== */
 /* ================  TAKIM MAGAZİNİ DÜZENLEYİCİ (kalıcı)  ============= */
@@ -4809,7 +5115,7 @@ refreshViseButton();
 
 window._rover = {
   taiUserInput, taiExec, taiGetChips, taiNorm, taiMsg, taiRenderChips,
-  taiMessages, parseGcode, runMillGcode, runLatheGcode, safetyInterceptor,
+  taiMessages, parseGcode, runMillGcode, runLatheGcode, runLatheProgramText, safetyInterceptor,
   magazine, TOOL_LIBRARY, buildTool, buildMagazineDisk, takeLastRunQueue,
   showOpPreview, clearOpPreview,
   get CUTTER_R(){ return CUTTER_R; }, get CUTTER_H(){ return CUTTER_H; },
@@ -5041,7 +5347,7 @@ function handleGcodeBlocks(blocks, opIndices) {
         R.runMillGcode(parsed, stockDims);
       } else {
         latheProgramText=block;
-        R.runLatheGcode(parsed, stockDims);
+        R.runLatheProgramText(block, stockDims);
       }
       R.taiMsg('<span class="tai-msg-action">▶ G-code çalıştırıldı:</span> ' +
              parsed.q.length + " hareket komutu.", "bot");

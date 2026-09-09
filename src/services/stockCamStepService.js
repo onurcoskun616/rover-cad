@@ -5,6 +5,13 @@ import { OPERATION_TYPES, validateOperationParams } from "./stockCamPlanService.
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const STEP_PROMPT = path.join(__dirname, "..", "prompts", "stock-cam-step-system-prompt.txt");
+// Turning needs its own prompt, not a paragraph bolted onto the milling one:
+// the axis rules are genuinely different (X is a DIAMETER, Z runs from the
+// end face toward the chuck) and the milling prompt's whole vocabulary --
+// "Sol (X-)/Sağ (X+)/Ön (Y-)/Arka (Y+)", "bir kenardan X mm içeride",
+// centre-relative X/Y -- is meaningless on a round bar and would actively
+// mislead the model into asking the operator the wrong questions.
+const LATHE_STEP_PROMPT = path.join(__dirname, "..", "prompts", "stock-cam-lathe-step-system-prompt.txt");
 
 // The menu-driven wizard's parameter-collection step. The LLM's ONLY job
 // here is extracting/asking for numbers within the fixed schema from Faz 1
@@ -58,7 +65,7 @@ export async function getNextParamStep(opType, userMessage, knownAnswers, stock,
 
   const { answers: newAnswers, question, done } = await askLlm(
     input,
-    STEP_PROMPT,
+    def.machine === "lathe" ? LATHE_STEP_PROMPT : STEP_PROMPT,
     shapeStepResponse,
   );
 
