@@ -63,7 +63,7 @@ function circlePatternBounds(x, y, radius, dia) {
   return centeredBounds(x, y, radius + dia / 2, radius + dia / 2);
 }
 
-export const OPERATION_TYPES = Object.freeze({
+export const MILL_OPERATION_TYPES = Object.freeze({
   drill: {
     label: "Delik Delme",
     params: [
@@ -242,12 +242,220 @@ export const OPERATION_TYPES = Object.freeze({
   },
 });
 
-export function listOperationTypes() {
-  return Object.entries(OPERATION_TYPES).map(([type, def]) => ({
-    type,
-    label: def.label,
-    params: def.params,
-  }));
+
+// ---------------------------------------------------------------------------
+// TORNA (lathe) operations. Everything above this point is milling: a
+// prismatic W x D x H block, X/Y a flat footprint, Z the cutting depth.
+// Turning is a genuinely different geometry AND a different axis
+// convention, so lathe operations get their own entries rather than being
+// bent onto the milling ones:
+//
+//   * Stock is a CYLINDER -- { dia, len } instead of { w, d, h }.
+//   * X is RADIAL and, by universal turning convention, is programmed as a
+//     DIAMETER (X20 means "20mm diameter", i.e. 10mm from the spindle
+//     axis) -- so every X-ish parameter here is named `...Dia`, never a
+//     radius, and the G-code generator is the only place a radius ever
+//     appears (see latheGcodeService.js).
+//   * Z is AXIAL. Z0 is the RAW stock's right-hand (free) end face, the
+//     face the operator physically touches off on; material extends in the
+//     -Z direction toward the chuck, which is at Z = -len.
+//
+// Operator-facing parameters deliberately avoid negative numbers: the
+// wizard asks for POSITIVE DISTANCES from that end face (`startZ`,
+// `length`, `posZ`, `depth`) and latheGcodeService.js negates them once,
+// in one place, when it emits real ISO G-code. A shop owner describing a
+// job says "40mm boyunca 30 çapa düşür", never "Z-40'a kadar".
+// ---------------------------------------------------------------------------
+
+// ISO 68-1 metric thread: the external thread's own height h3 = 0.6134 * P
+// (DIN 13), so the minor (root) diameter of a d x P thread is
+// d - 2*h3 = d - 1.2268*P. Real published geometry, not a guess -- used
+// both by validation here (a thread whose root would fall below zero is
+// physically impossible) and by the G76 cycle's own depth words.
+export const THREAD_HEIGHT_FACTOR = 0.6134;
+
+export function latheThreadMinorDia(majorDia, pitch) {
+  return Number(majorDia) - 2 * THREAD_HEIGHT_FACTOR * Number(pitch);
+}
+
+export const LATHE_OPERATION_TYPES = Object.freeze({
+  latheFace: {
+    machine: "lathe",
+    label: "Alın Tornalama",
+    params: [
+      { name: "depth", label: "Alından Alınacak Boy", unit: "mm", type: "number", min: 0.05, max: 200 },
+    ],
+  },
+  latheTurn: {
+    machine: "lathe",
+    label: "Çap Düşürme (Boyuna Tornalama)",
+    params: [
+      { name: "targetDia", label: "Hedef Çap", unit: "mm", type: "number", min: 0.5, max: 1000 },
+      { name: "startZ", label: "Alından Başlangıç Mesafesi", unit: "mm", type: "number", default: 0, min: 0, max: 3000 },
+      { name: "length", label: "İşlenecek Boy", unit: "mm", type: "number", min: 0.5, max: 3000 },
+    ],
+  },
+  latheTaper: {
+    machine: "lathe",
+    label: "Konik Tornalama",
+    params: [
+      { name: "startDia", label: "Başlangıç Çapı", unit: "mm", type: "number", min: 0.5, max: 1000 },
+      { name: "endDia", label: "Bitiş Çapı", unit: "mm", type: "number", min: 0.5, max: 1000 },
+      { name: "startZ", label: "Alından Başlangıç Mesafesi", unit: "mm", type: "number", default: 0, min: 0, max: 3000 },
+      { name: "length", label: "Konik Boyu", unit: "mm", type: "number", min: 0.5, max: 3000 },
+    ],
+  },
+  latheGroove: {
+    machine: "lathe",
+    label: "Kanal Açma",
+    params: [
+      { name: "width", label: "Kanal Genişliği", unit: "mm", type: "number", min: 0.5, max: 200 },
+      { name: "depth", label: "Kanal Derinliği (yarıçapta)", unit: "mm", type: "number", min: 0.1, max: 500 },
+      { name: "posZ", label: "Alından Kanal Başlangıcı", unit: "mm", type: "number", min: 0, max: 3000 },
+    ],
+  },
+  latheDrill: {
+    machine: "lathe",
+    label: "Eksenden Delme",
+    params: [
+      { name: "dia", label: "Matkap Çapı", unit: "mm", type: "number", min: 0.5, max: 200 },
+      { name: "depth", label: "Delik Derinliği", unit: "mm", type: "number", min: 0.5, max: 2000 },
+    ],
+  },
+  latheThread: {
+    machine: "lathe",
+    label: "Diş Açma (Dış Vida)",
+    params: [
+      { name: "majorDia", label: "Diş Dış Çapı (ör. M20 için 20)", unit: "mm", type: "number", min: 1, max: 500 },
+      { name: "pitch", label: "Diş Adımı (Pitch)", unit: "mm", type: "number", min: 0.2, max: 12 },
+      { name: "startZ", label: "Alından Diş Başlangıcı", unit: "mm", type: "number", default: 0, min: 0, max: 3000 },
+      { name: "length", label: "Diş Boyu", unit: "mm", type: "number", min: 1, max: 1000 },
+    ],
+  },
+});
+
+export function isLatheOperation(type) {
+  return Object.prototype.hasOwnProperty.call(LATHE_OPERATION_TYPES, type);
+}
+
+// A plan's stock is a cylinder ({dia,len}) for turning and a block
+// ({w,d,h}) for milling -- one field decides which, everywhere, so no
+// caller ever has to guess from context.
+export function isLatheStock(stock) {
+  return Number.isFinite(Number(stock?.dia)) && Number.isFinite(Number(stock?.len));
+}
+
+// How close to the chuck a cut may get before it stops being shop-safe
+// (jaws, and the unsupported overhang beyond them). Not a hard geometric
+// limit -- validation rejects only what is physically impossible (past the
+// bar's own end); latheGcodeService.js raises this one as a WARNING, since
+// a short part held in a collet legitimately gets machined much closer to
+// the jaws than a long bar sticking out of a 3-jaw chuck.
+export const LATHE_CHUCK_CLEARANCE_MM = 20;
+
+// Axial extent (distance from the Z0 end face) each lathe operation
+// reaches, so the "does it still fit on the bar" check is written once.
+export function latheAxialExtent(type, p) {
+  if (type === "latheFace") return Number(p.depth) || 0;
+  if (type === "latheDrill") return Number(p.depth) || 0;
+  if (type === "latheGroove") return (Number(p.posZ) || 0) + (Number(p.width) || 0);
+  return (Number(p.startZ) || 0) + (Number(p.length) || 0);
+}
+
+// Turning-specific bounds: everything the shared numeric-range loop above
+// can't express, checked against the CYLINDRICAL stock. Returns Turkish,
+// operator-facing problem strings (same contract as the milling branch).
+function validateLatheBounds(type, p, stock) {
+  const problems = [];
+  const dia = Number(stock?.dia), len = Number(stock?.len);
+  if (!Number.isFinite(dia) || !Number.isFinite(len) || dia <= 0 || len <= 0) {
+    return ["Stok boyutları geçersiz — önce stok çapını ve boyunu ayarlayın."];
+  }
+  const radius = dia / 2;
+
+  const extent = latheAxialExtent(type, p);
+  if (extent > len + 1e-6) {
+    problems.push(`İşlem stok boyunu aşıyor: Z yönünde ${extent.toFixed(1)}mm gerekiyor, stok boyu ${len}mm.`);
+  }
+
+  if (type === "latheFace") {
+    // Facing away the whole bar would leave nothing to hold or machine.
+    if (Number(p.depth) >= len) {
+      problems.push(`Alından alınacak boy (${p.depth}mm) stok boyundan (${len}mm) küçük olmalı.`);
+    }
+  }
+
+  if (type === "latheTurn") {
+    if (Number(p.targetDia) >= dia - 1e-6) {
+      problems.push(`Hedef çap (${p.targetDia}mm) stok çapından (${dia}mm) küçük olmalı — bu işlem talaş kaldırmaz.`);
+    }
+  }
+
+  if (type === "latheTaper") {
+    for (const [field, label] of [["startDia", "Başlangıç çapı"], ["endDia", "Bitiş çapı"]]) {
+      if (Number(p[field]) > dia + 1e-6) {
+        problems.push(`${label} (${p[field]}mm) stok çapından (${dia}mm) büyük olamaz.`);
+      }
+    }
+    if (Math.abs(Number(p.startDia) - Number(p.endDia)) < 1e-6) {
+      problems.push("Başlangıç ve bitiş çapı aynı — bu bir konik değil, düz tornalama (Çap Düşürme) işlemidir.");
+    }
+  }
+
+  if (type === "latheGroove") {
+    // Leave a real core behind: a groove cut to (or past) the centreline is
+    // a PARTING cut, a different operation with its own tool and its own
+    // safety rules -- never something this op should silently become.
+    if (Number(p.depth) > radius - 0.5) {
+      problems.push(
+        `Kanal derinliği (${p.depth}mm) çok fazla — stok yarıçapı ${radius}mm, en az 0.5mm göbek kalmalı ` +
+        `(parça kesme/parçalama işlemi bu işlemle yapılmaz).`,
+      );
+    }
+  }
+
+  if (type === "latheDrill") {
+    if (Number(p.dia) >= dia - 1e-6) {
+      problems.push(`Matkap çapı (${p.dia}mm) stok çapından (${dia}mm) küçük olmalı.`);
+    }
+  }
+
+  if (type === "latheThread") {
+    const major = Number(p.majorDia), pitch = Number(p.pitch);
+    if (major > dia + 1e-6) {
+      problems.push(`Diş dış çapı (${major}mm) stok çapından (${dia}mm) büyük olamaz.`);
+    }
+    const minor = latheThreadMinorDia(major, pitch);
+    if (minor <= 0.5) {
+      problems.push(
+        `M${major} x ${pitch} dişin diş dibi çapı ${minor.toFixed(2)}mm çıkıyor — bu adım bu çap için çok kaba, ` +
+        `daha küçük bir diş adımı seçin.`,
+      );
+    }
+  }
+
+  return problems;
+}
+
+// The single registry every caller looks an operation type up in --
+// milling and turning entries share one namespace (the type names
+// themselves are already unambiguous: `drill` is a milling hole, `latheDrill`
+// is drilling on the lathe's centreline), so nothing outside this file has
+// to know which machine a type belongs to just to validate or label it.
+export const OPERATION_TYPES = Object.freeze({ ...MILL_OPERATION_TYPES, ...LATHE_OPERATION_TYPES });
+
+// `machine` ("mill" | "lathe") narrows the menu to the operations that
+// physically make sense on that machine; omitting it lists everything
+// (unchanged behaviour for callers that predate turning support).
+export function listOperationTypes(machine) {
+  return Object.entries(OPERATION_TYPES)
+    .filter(([, def]) => !machine || (def.machine || "mill") === machine)
+    .map(([type, def]) => ({
+      type,
+      label: def.label,
+      params: def.params,
+      machine: def.machine || "mill",
+    }));
 }
 
 // ---------------------------------------------------------------------------
@@ -290,6 +498,22 @@ export function validateOperationParams(type, params, stock) {
   }
   if (problems.length) return problems; // don't attempt bounds checks on bad numbers
 
+  // Turning and milling can't be mixed inside one plan: the stock isn't even
+  // the same SHAPE (cylinder vs block), so an operation aimed at the wrong
+  // one is rejected outright rather than bounds-checked against dimensions
+  // that don't exist.
+  if (isLatheOperation(type)) {
+    if (!isLatheStock(stock)) {
+      return ["Bu işlem bir TORNA işlemi — freze (prizmatik) stoğa uygulanamaz. Torna sekmesinden yeni bir plan başlatın."];
+    }
+    const latheNorm = {};
+    for (const field of def.params) latheNorm[field.name] = Number(params[field.name] ?? field.default ?? 0);
+    return validateLatheBounds(type, latheNorm, stock);
+  }
+  if (isLatheStock(stock)) {
+    return ["Bu işlem bir FREZE işlemi — torna (silindirik) stoğa uygulanamaz. Freze sekmesinden yeni bir plan başlatın."];
+  }
+
   const w = Number(stock?.w), d = Number(stock?.d), h = Number(stock?.h);
   if (!Number.isFinite(w) || !Number.isFinite(d) || !Number.isFinite(h)) {
     return ["Stok boyutları geçersiz — önce stok boyutunu ayarlayın."];
@@ -327,9 +551,18 @@ export function validateOperationParams(type, params, stock) {
 // "steel" (a moderate, safe default) rather than rejecting the plan.
 export function createPlan(stock, material) {
   const planKey = randomUUID();
+  // The stock's own SHAPE decides which machine this plan is for -- a
+  // cylinder ({dia,len}) is a turning job, a block ({w,d,h}) a milling one.
+  // Stored explicitly as `machine` so every downstream consumer (generator,
+  // cost, setup sheet, tool checklist) can branch on one plain field instead
+  // of re-sniffing the stock's keys.
+  const lathe = isLatheStock(stock);
   plans.set(planKey, {
     planKey,
-    stock: { w: Number(stock?.w) || 100, d: Number(stock?.d) || 100, h: Number(stock?.h) || 20 },
+    machine: lathe ? "lathe" : "mill",
+    stock: lathe
+      ? { dia: Number(stock.dia) || 60, len: Number(stock.len) || 200 }
+      : { w: Number(stock?.w) || 100, d: Number(stock?.d) || 100, h: Number(stock?.h) || 20 },
     material: typeof material === "string" && material ? material : "steel",
     operations: [], // confirmed only — see module doc comment
     createdAt: Date.now(),

@@ -57,8 +57,11 @@ function requirePlanKey(req, res) {
   return planKey;
 }
 
+// `?machine=lathe` (or `mill`) narrows the menu to what that machine can
+// actually do; omitting it returns everything, unchanged for older clients.
 router.get("/stock-cam/operation-types", apiKeyAuth, (req, res) => {
-  res.json({ types: listOperationTypes() });
+  const machine = req.query.machine === "lathe" || req.query.machine === "mill" ? req.query.machine : null;
+  res.json({ types: listOperationTypes(machine) });
 });
 
 router.post("/stock-cam/plan", apiKeyAuth, (req, res) => {

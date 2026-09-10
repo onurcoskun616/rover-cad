@@ -28,6 +28,13 @@ const num = (v) => {
 // the finished part's net volume: a shop pays for the whole stock, not
 // just what stays in the part after machining.
 export function stockVolumeCm3(stock) {
+  // A turning plan's stock is a round BAR ({dia,len}), not a block -- the
+  // shop buys and pays for the whole cylinder, so its volume is the one that
+  // belongs in the material cost.
+  if (Number.isFinite(Number(stock?.dia)) && Number.isFinite(Number(stock?.len))) {
+    const r = num(stock.dia) / 2;
+    return (Math.PI * r * r * num(stock.len)) / 1000;
+  }
   return (num(stock?.w) * num(stock?.d) * num(stock?.h)) / 1000;
 }
 
