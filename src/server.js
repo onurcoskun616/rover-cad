@@ -7,6 +7,7 @@ import { config } from "./config.js";
 import healthRouter from "./routes/health.js";
 import generateRouter from "./routes/generate.js";
 import generateFromImageRouter from "./routes/generateFromImage.js";
+import archFacadeRouter from "./routes/archFacade.js";
 import uploadStepRouter from "./routes/uploadStep.js";
 import uploadDxfRouter from "./routes/uploadDxf.js";
 import reviseRouter from "./routes/revise.js";
@@ -46,6 +47,9 @@ app.use("/auth", authRouter);
 app.use("/admin", adminRouter);
 app.use("/generate", generateRouter);
 app.use("/generate-from-image", generateFromImageRouter);
+// Mimari cephe stüdyosu (web/mimari.html): kat planı/cephe çizimlerinden
+// parametrik bina kütlesi. CAD/CAM akışlarından ayrı bir yüzey.
+app.use("/arch-facade", archFacadeRouter);
 app.use("/upload-step", uploadStepRouter);
 app.use("/upload-dxf", uploadDxfRouter);
 app.use("/revise", reviseRouter);

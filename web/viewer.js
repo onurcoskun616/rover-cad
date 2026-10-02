@@ -3,18 +3,32 @@ import { STLLoader } from "three/addons/loaders/STLLoader.js";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { CSS2DRenderer, CSS2DObject } from "three/addons/renderers/CSS2DRenderer.js";
 
-export function initViewer(container) {
+// Varsayilanlar makine parcasi olcegi icindir (mm cinsinden onlarca-yuzlerce mm).
+// Mimari sayfasi (mimari.html) bir binayi gosteriyor: 12 m'lik bir cephe 12000 mm
+// demek, yani sinir kurenin yaricapi ~10000 ve loadStl kamerayi radius*2.2 =
+// ~22000 mm'ye koyuyor. Bu, buradaki far duzleminin (5000) ve maxDistance'in
+// (4000) ilerisine dustugu icin model tamamen kirpilip ekran bos kaliyordu.
+// Bu yuzden far/maxDistance/background cagiran sayfaya birakildi; parametre
+// verilmezse degerler bugune kadar kullanilanlarla birebir ayni kaliyor, yani
+// CAD ve Montaj sayfalarinin davranisi degismiyor.
+export function initViewer(container, options = {}) {
+  const {
+    far = 5000,
+    maxDistance = 4000,
+    minDistance = 0.5,
+    background = 0x152238,
+  } = options;
   const width = container.clientWidth;
   const height = container.clientHeight || 400;
 
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x152238);
+  scene.background = new THREE.Color(background);
 
   // near=1 iken tekerlekle yaklaşıldığında kameraya 1 birimden yakın kalan
   // yüzeyler kırpılıyor, model ekrandan siliniyordu ("zoom bozuk" hissi).
   // logarithmicDepthBuffer acik oldugu icin bu kadar genis bir near/far araligi
   // z-fighting'e yol acmiyor.
-  const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 5000);
+  const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, far);
   camera.position.set(100, 100, 100);
 
   const renderer = new THREE.WebGLRenderer({ antialias: true, logarithmicDepthBuffer: true });
@@ -54,9 +68,9 @@ export function initViewer(container) {
   // noktaya dogru oluyor. Hem CAD hem Montaj bu ayni goruntuleyiciyi kullaniyor.
   controls.zoomToCursor = true;
   // Serbest zoom: yakinda camera.near'in (0.1) uzerinde kalacak kadar bir taban,
-  // uzakta far duzlemin (5000) altinda kalacak bir tavan.
-  controls.minDistance = 0.5;
-  controls.maxDistance = 4000;
+  // uzakta far duzlemin altinda kalacak bir tavan (varsayilan 4000 < far 5000).
+  controls.minDistance = minDistance;
+  controls.maxDistance = maxDistance;
 
   scene.add(new THREE.AmbientLight(0xffffff, 0.7));
   const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);

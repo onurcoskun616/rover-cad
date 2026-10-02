@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="tr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mimari Cephe Stüdyosu · Topkapı Okulları</title>
+    <link rel="stylesheet" href="style.css" />
+    <link rel="stylesheet" href="mimari.css" />
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+          "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+        }
+      }
+    </script>
+  </head>
+  <body class="arch-page">
+    <header class="site-header">
+      <div class="account-strip">
+        <a href="index.html" class="cam-back-link">← Ana Sayfa</a>
+        <a href="dashboard.html">Hesabım</a>
+        <a id="admin-link" href="admin.html" hidden>Yönetim</a>
+        <button id="logout-btn" class="link-button" type="button">Çıkış</button>
+      </div>
+      <img src="logo.png" alt="Topkapı Okulları logosu" class="logo" />
+      <h1 class="brand-title">Mimari Cephe Stüdyosu</h1>
+      <p class="brand-subtitle">Topkapı Okulları · Yapay Zeka Destekli Mimari Tasarım</p>
+      <p class="subtitle">
+        Kat planı ve cephe görünüşünü yükleyin; bina kütlesi parametrik bir 3B model
+        olarak kurulur. Sonra pencere adedini, kasa ölçüsünü veya kat yüksekliğini
+        değiştirin — cephenin geri kalanı olduğu gibi kalır.
+      </p>
+    </header>
+
+    <main>
+      <section class="arch-upload-card">
+        <h2 class="arch-section-title">1. Çizimleri verin</h2>
+        <p class="arch-hint">
+          PNG, JPG veya AutoCAD'den PDF olarak aktardığınız sayfalar. En iyi sonuç için
+          <strong>normal kat planı</strong> ve <strong>ön cephe görünüşü</strong> birlikte verilir.
+        </p>
+
+        <div class="arch-upload-grid">
+          <label class="arch-drop">
+            <span class="arch-drop-role">Kat planı</span>
+            <input id="plan-input" type="file" accept="image/*,application/pdf,.dxf,.dwg" multiple />
+            <span class="arch-drop-name" id="plan-name">Dosya seçilmedi</span>
+            <small>Derinlik ve duvar kalınlığı buradan okunur</small>
+          </label>
+
+          <label class="arch-drop">
+            <span class="arch-drop-role">Ön cephe</span>
+            <input id="cephe-input" type="file" accept="image/*,application/pdf,.dxf,.dwg" multiple />
+            <span class="arch-drop-name" id="cephe-name">Dosya seçilmedi</span>
+            <small>Kat yüksekliği ve pencere dizilimi buradan okunur</small>
+          </label>
+
+          <label class="arch-drop">
+            <span class="arch-drop-role">Referans görsel</span>
+            <input id="gorsel-input" type="file" accept="image/*,application/pdf" multiple />
+            <span class="arch-drop-name" id="gorsel-name">Dosya seçilmedi</span>
+            <small>Render veya fotoğraf (isteğe bağlı)</small>
+          </label>
+        </div>
+
+        <label class="arch-field">
+          <span>Ek talimat (isteğe bağlı)</span>
+          <textarea
+            id="arch-prompt"
+            rows="3"
+            placeholder="Örn: sadece ön cepheyi modelle, kat sayısı 5, zemin katta giriş kapısı var"
+          ></textarea>
+        </label>
+
+        <div class="arch-actions">
+          <button id="arch-generate-btn" type="button">Parametrik Modeli Oluştur</button>
+        </div>
+      </section>
+
+      <section id="arch-status" class="status-section" hidden>
+        <div class="spinner"></div>
+        <p id="arch-status-text"></p>
+      </section>
+
+      <section id="arch-error" class="error-section" hidden>
+        <p id="arch-error-text"></p>
+      </section>
+
+      <section id="arch-result" class="arch-result" hidden>
+        <div class="arch-result-grid">
+          <div class="arch-viewer-col">
+            <h2 class="arch-section-title">2. Model</h2>
+            <div id="arch-viewer" class="arch-viewer"></div>
+            <div class="arch-downloads">
+              <a id="arch-step-link" href="#" download>STEP indir</a>
+              <a id="arch-stl-link" href="#" download>STL indir</a>
+            </div>
+            <p id="arch-warning" class="arch-warning" hidden></p>
+          </div>
+
+          <aside class="arch-param-col">
+            <h2 class="arch-section-title">3. Parametreleri değiştirin</h2>
+            <p class="arch-hint">
+              Bir değeri değiştirip <strong>Uygula</strong>'ya basın. Yapay zekaya tekrar
+              sorulmaz: değer kodda doğrudan değiştirilip model yeniden kurulur, bu yüzden
+              tasarımın geri kalanı birebir aynı kalır.
+            </p>
+            <div id="arch-params" class="arch-params"></div>
+          </aside>
+        </div>
+
+        <details class="arch-code">
+          <summary>Üretilen parametrik kod</summary>
+          <pre id="arch-code"></pre>
+        </details>
+      </section>
+    </main>
+
+    <script type="module" src="session-nav.js"></script>
+    <script type="module" src="mimari.js"></script>
+  </body>
+</html>
