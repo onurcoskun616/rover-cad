@@ -33,21 +33,32 @@ from collections import Counter
 try:
     import ezdxf
     from ezdxf.document import Drawing
-except ImportError:
+except ImportError as _import_hatasi:
     # Windows'ta siksik gorulen tuzak: makinede birden fazla Python kurulu
     # oldugunda "pip install" bir yorumlayiciya kurar, "python script.py"
     # bir digerini calistirir; paket kurulu gorunur ama import edilemez.
     # Cozum pip'i calisan yorumlayicinin KENDISI uzerinden cagirmak.
     # Hangi Python'un calistigini basarak teshisi okuyucuya biraktirmiyoruz.
+    # ONEMLI: asil istisnayi YUTMUYORUZ. "ezdxf bulunamadi" demek cogu zaman
+    # yaniltici oluyor; gercek sebep bir alt bagimlilik (numpy, fonttools) veya
+    # surum uyumsuzlugu olabiliyor ve genel bir mesaj bunu gizliyor.
     sys.stderr.write(
-        "ezdxf bulunamadi.\n\n"
+        "ezdxf import edilemedi.\n\n"
+        "GERCEK HATA    : %s: %s\n\n"
         "Calisan Python : %s\n"
         "Surum          : %s\n\n"
+        "Paketin kurulu oldugu yer ile calisan Python ayni mi diye bakin.\n"
         "Kurmak icin ayni yorumlayiciyi kullanin:\n"
         '  "%s" -m pip install ezdxf\n\n'
         "(Yalnizca 'pip install ezdxf' yazmak, makinede birden fazla Python "
         "varsa paketi BASKA bir yorumlayiciya kurabilir.)\n"
-        % (sys.executable, sys.version.split()[0], sys.executable)
+        % (
+            type(_import_hatasi).__name__,
+            _import_hatasi,
+            sys.executable,
+            sys.version.split()[0],
+            sys.executable,
+        )
     )
     raise SystemExit(2)
 
