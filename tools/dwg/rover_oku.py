@@ -34,8 +34,20 @@ try:
     import ezdxf
     from ezdxf.document import Drawing
 except ImportError:
+    # Windows'ta siksik gorulen tuzak: makinede birden fazla Python kurulu
+    # oldugunda "pip install" bir yorumlayiciya kurar, "python script.py"
+    # bir digerini calistirir; paket kurulu gorunur ama import edilemez.
+    # Cozum pip'i calisan yorumlayicinin KENDISI uzerinden cagirmak.
+    # Hangi Python'un calistigini basarak teshisi okuyucuya biraktirmiyoruz.
     sys.stderr.write(
-        "ezdxf bulunamadi. Kurmak icin:  pip install ezdxf\n"
+        "ezdxf bulunamadi.\n\n"
+        "Calisan Python : %s\n"
+        "Surum          : %s\n\n"
+        "Kurmak icin ayni yorumlayiciyi kullanin:\n"
+        '  "%s" -m pip install ezdxf\n\n'
+        "(Yalnizca 'pip install ezdxf' yazmak, makinede birden fazla Python "
+        "varsa paketi BASKA bir yorumlayiciya kurabilir.)\n"
+        % (sys.executable, sys.version.split()[0], sys.executable)
     )
     raise SystemExit(2)
 
