@@ -34,11 +34,20 @@ BILEREK KACINILAN SEYLER (canli ortamda cokme kaydi olanlar)
       ADLARINI sayar, ozniteliklerine DOKUNMAZ.
 """
 
-from pygcad.core import *
+# Resmi orneklerde iki farkli import yolu geciyor (bazilarinda pygcad.core,
+# bazilarinda pygcad.core.runtime). Hangisinin gecerli oldugu surume gore
+# degisebildigi icin ikisini de deniyoruz: sondanin ilk temasta import
+# yuzunden olmesi, ogrenecegimiz hicbir sey birakmaz.
+try:
+    from pygcad.core import *
+except Exception:  # pragma: no cover
+    from pygcad.core.runtime import *
+
 from pygcad.pygrx import *
 
 import json
 import os
+import sys
 import traceback
 
 # Rapora en fazla kac ornek yazi/blok/katman detayi girsin.
@@ -259,6 +268,44 @@ def _cikti_yolu():
     except Exception:
         taban = "C:\\"
     return os.path.join(taban, "rover_dwg_oku.json")
+
+
+@command()
+def ROVERTEST():
+    """
+    ADIM 1 — boruhatti testi. Hicbir sey taramaz, hicbir dosya yazmaz.
+    Sadece sunu kanitlar: Python yuklendi, komut kaydi calisti, pygcad
+    erisilebilir ve acik bir cizim var. ROVEROKU'yu calistirmadan once bu.
+    """
+    try:
+        gcutPrintf("\n=== ROVER BORUHATTI TESTI ===")
+        gcutPrintf("\n[OK] Python calisiyor : %s" % sys.version.split()[0])
+        gcutPrintf("\n[OK] Komut kaydi      : @command() calisti")
+
+        try:
+            db = gcdbWorkingDatabase()
+            gcutPrintf("\n[OK] Cizim veritabani : erisildi")
+        except Exception as err:
+            gcutPrintf("\n[HATA] Cizim veritabani: %s" % err)
+            return
+
+        # Yalnizca okunabilirligi dogrula, taramaya girme.
+        try:
+            status, bt = db.getBlockTable(GcDb.kForRead)
+            if status == Gcad.eOk:
+                gcutPrintf("\n[OK] Blok tablosu     : salt-okunur acildi")
+                bt.close()
+            else:
+                gcutPrintf("\n[HATA] Blok tablosu acilamadi (status=%s)" % status)
+                return
+        except Exception as err:
+            gcutPrintf("\n[HATA] Blok tablosu   : %s" % err)
+            return
+
+        gcutPrintf("\n\nHer sey yolunda. Simdi ROVEROKU komutunu calistirin.\n")
+
+    except Exception:
+        gcutPrintf("\n[ROVER TEST HATA]\n%s" % traceback.format_exc())
 
 
 @command()

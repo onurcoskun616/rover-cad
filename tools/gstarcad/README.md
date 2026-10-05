@@ -35,13 +35,21 @@ Açık çizimi **hiç değiştirmeden** tarar ve iki şeyi birden çıkarır:
 İkincisi uzun vadede daha değerli: Faz B'de LLM'e vereceğimiz sistem promptunu
 bu çıktıya göre yazacağız, böylece üretilen kod ilk seferde çalışır.
 
-## Kullanım
+## Kullanım — iki adım
 
-1. GstarCAD'i açın, incelemek istediğiniz projeyi yükleyin
-2. `APPLOAD` komutu → `rover_oku_probe.py` dosyasını seçin
-3. Komut satırına: `ROVEROKU`
-4. Özet komut satırında görünür; ayrıntılı JSON kullanıcı klasörünüze
-   `rover_dwg_oku.json` olarak yazılır
+Betik iki komut kaydeder. Sırayla çalıştırın; ikincisine ancak birincisi
+geçtiyse geçin.
+
+**Adım 1 — `ROVERTEST`** (boruhattı testi)
+Hiçbir şey taramaz, hiçbir dosya yazmaz. Sadece şunu kanıtlar: Python yüklendi,
+`@command()` kaydı çalıştı, pygcad erişilebilir ve açık bir çizim var. Burada
+takılırsa sorun API'de değil kurulumdadır ve taramaya geçmenin anlamı yoktur.
+
+**Adım 2 — `ROVEROKU`** (asıl tarama)
+Açık çizimi salt-okunur tarar, özeti komut satırına yazar, ayrıntılı JSON'u
+kullanıcı klasörünüze `rover_dwg_oku.json` olarak kaydeder.
+
+Her iki adımda da önce `APPLOAD` ile `rover_oku_probe.py` dosyasını yükleyin.
 
 Çıkan JSON'u paylaşın — Faz B'nin tasarımı ona göre yapılacak.
 
